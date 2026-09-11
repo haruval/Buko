@@ -10,6 +10,11 @@ final class CircleIntentState {
     var droplet: CircleDropletDynamics?
     var tailAnchor: CGPoint?
     var paintedPath = CGMutablePath() as CGPath
+    var release: CircleJellyGeometry.Release?
+    private var tracedPoints: [CGPoint] = []
+    var projection = CGAffineTransform.identity
+    private var captureScale: CGFloat = 1
+    private var captureOffset = CGPoint.zero
     var closedBoundary: CircleJellyGeometry.Boundary?
     var fittedRectangle: CircleJellyGeometry.Boundary?
     var closedAt: TimeInterval?
@@ -33,18 +38,35 @@ final class CircleIntentState {
 
     var processing: Bool { phase == .recognizing || phase == .inferring }
 
+    /// Routine input/camera changes can cancel work, but only X dismisses a result.
+    func cancelPending() {
+        guard phase != .finished else { return }
+        cancel()
+    }
+
+    func updateProjection(scale: CGFloat, offset: CGPoint) {
+        guard closedAt != nil else { return }
+        let ratio = scale / captureScale
+        let next = CGAffineTransform(a: ratio, b: 0, c: 0, d: ratio,
+            tx: captureOffset.x * ratio - offset.x, ty: captureOffset.y * ratio - offset.y)
+        if next != projection { projection = next }
+    }
+
     func cancel() {
         requestID = UUID()
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
         phase = .idle; textBounds = []; popupBounds = .zero
         droplet = nil; tailAnchor = nil; paintedPath = CGMutablePath(); closedBoundary = nil; fittedRectangle = nil
+        release = nil; tracedPoints = []; projection = .identity
         closedAt = nil; morphBegan = nil; motionActive = false
         motionTask?.cancel(); motionTask = nil
     }
 
     func trace(_ points: [CGPoint]) {
+        guard phase != .finished else { return }
         if phase != .tracing { cancel(); phase = .tracing; issue = nil; recognizedText = "" }
+        tracedPoints = points
         let now = Date.timeIntervalSinceReferenceDate
         guard let touch = points.last else { return }
         if droplet == nil { droplet = CircleDropletDynamics(at: touch, time: now) }
@@ -56,8 +78,14 @@ final class CircleIntentState {
     }
 
     func analyze(drawing: PKDrawing, polygon: [CGPoint], screenPolygon: [CGPoint], scale: CGFloat, offset: CGPoint) {
+        guard phase != .finished else { return }
+        captureScale = scale; captureOffset = offset; projection = .identity
         selectionBounds = CircleGeometry.path(screenPolygon).boundingBoxOfPath
         closedAt = Date.timeIntervalSinceReferenceDate
+        if let droplet, let closedAt {
+            release = CircleJellyGeometry.Release(traced: tracedPoints, completed: screenPolygon,
+                droplet: droplet, time: closedAt)
+        }
         closedBoundary = CircleJellyGeometry.boundary(screenPolygon)
         // An unusually concave circle can put its centroid outside the region.
         // Keep the user's completed selection visible even in that case.

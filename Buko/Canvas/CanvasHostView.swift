@@ -308,6 +308,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         updateScrollInsets()
         let scale = canvas.zoomScale
         let offset = canvas.contentOffset
+        circleIntent.updateProjection(scale: scale, offset: offset)
         backdrop.update(scale: scale, offset: offset, document: documentSize)
         let pull: CGFloat
         if isPullActive && !isPinching {
@@ -462,7 +463,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     func beginPagePull() {
-        circleIntent.cancel()
+        circleIntent.cancelPending()
         guard !isSnapping, !pageTurnPending, !isPullActive else { return }
         wheelEnd?.cancel()
         isPullActive = true
@@ -663,14 +664,14 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             }
             circleIntent.analyze(drawing: canvas.drawing, polygon: polygon, screenPolygon: recognizer.points,
                                  scale: canvas.zoomScale, offset: canvas.contentOffset)
-        case .cancelled, .failed: circleIntent.cancel()
+        case .cancelled, .failed: circleIntent.cancelPending()
         default: break
         }
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         if gestureRecognizer === circleGesture {
-            return !isOverview && !isPinching && !isSnapping && !pageTurnPending
+            return circleIntent.phase != .finished && !isOverview && !isPinching && !isSnapping && !pageTurnPending
                 && touch.type == .direct && !circleContainer.point(inside: touch.location(in: circleContainer), with: nil)
         }
         return isOverview && !isPinching && !isSnapping
@@ -745,7 +746,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             circleGesture.isEnabled = false
             circleGesture.isEnabled = true
         }
-        circleIntent.cancel()
+        circleIntent.cancelPending()
     }
 
     func stopAnimations() {

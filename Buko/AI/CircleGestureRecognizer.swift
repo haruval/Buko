@@ -10,9 +10,12 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
     private var fingers: [UITouch] = []
     private var initialSeparation: CGFloat = 0
     private var travel: CGFloat = 0
+    private var lifting = false
+    private var releasedFingers: Set<UITouch> = []
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         guard touches.allSatisfy({ $0.type == .direct }) else { state = .failed; return }
+        guard !lifting else { state = .cancelled; return }
         fingers.append(contentsOf: touches)
         let required = singleFinger ? 1 : 2
         guard fingers.count <= required else { state = .failed; return }
@@ -24,6 +27,7 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
         guard state == .possible || state == .began || state == .changed else { return }
+        guard !lifting else { return }
         guard fingers.count == (singleFinger ? 1 : 2) else {
             // Allow slightly staggered finger placement without delaying an
             // ordinary pan beyond its normal touch slop.
@@ -52,20 +56,20 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
         } else { state = .changed }
         if state == .began || state == .changed {
             preview?(points)
-            completeIfReady()
         }
-    }
-
-    /// Reserve a single completion as soon as the loop threshold is crossed.
-    /// The gesture wins arbitration, so remaining touches cannot paint or scroll.
-    private func completeIfReady() {
-        guard let completed = CircleGeometry.completedLoop(points) else { return }
-        points = completed
-        state = .ended
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         guard state == .possible || state == .began || state == .changed else { return }
+        // Freeze the two-finger midpoint at the first lift. A trailing finger
+        // cannot move the selection; completion waits until both are released.
+        if !lifting, let last = points.last, CircleGeometry.distance(last, center) >= 2 {
+            points.append(center)
+            if state == .began || state == .changed { preview?(points) }
+        }
+        lifting = true
+        releasedFingers.formUnion(touches)
+        guard fingers.allSatisfy({ releasedFingers.contains($0) }) else { return }
         if state == .began || state == .changed {
             if let completed = CircleGeometry.completedLoop(points) {
                 points = completed
@@ -75,7 +79,7 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .cancelled }
-    override func reset() { fingers = []; points = []; travel = 0; initialSeparation = 0 }
+    override func reset() { fingers = []; points = []; travel = 0; initialSeparation = 0; lifting = false; releasedFingers = [] }
     private var center: CGPoint {
         let positions = fingers.map { $0.location(in: view) }
         return CGPoint(x: positions.map(\.x).reduce(0, +) / CGFloat(positions.count),

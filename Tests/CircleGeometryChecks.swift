@@ -32,12 +32,48 @@ import Foundation
         precondition(justClosed.contains(loop[0]))
         let nearEdge = CGPoint(x: boundary.center.x + 120, y: boundary.center.y)
         precondition(!justClosed.contains(nearEdge))
-        let filling = CircleJellyGeometry.inwardFill(boundary, age: 0.4, reduceMotion: false)
+        let filling = CircleJellyGeometry.inwardFill(boundary, age: 0.65, reduceMotion: false)
         precondition(filling.contains(nearEdge))
         precondition(!filling.contains(boundary.center))
-        let filled = CircleJellyGeometry.inwardFill(boundary, age: 0.8, reduceMotion: false)
+        let filled = CircleJellyGeometry.inwardFill(boundary, age: 1, reduceMotion: false)
         precondition(filled.contains(boundary.center))
         precondition(CircleJellyGeometry.inwardFill(boundary, age: 0, reduceMotion: true).contains(boundary.center))
+
+        // Release preserves the live silhouette, reveals the missing arc over
+        // time, and flows continuously from a closed stroke into an inward fill.
+        for direction in [-1.0, 1.0] {
+            let partial = ellipse(CGPoint(x: 200, y: 300), rx: 160, ry: 40, end: direction * .pi * 1.6)
+            let completed = CircleGeometry.completedLoop(partial)!
+            var droplet = CircleDropletDynamics(at: partial[partial.count - 2], time: 0)
+            droplet.follow(partial.last!, at: 0.02)
+            let release = CircleJellyGeometry.Release(traced: partial, completed: completed, droplet: droplet, time: 0.03)
+            let liveHead = droplet.sample(at: 0.03).position
+            let live = CircleJellyGeometry.paint(Array(partial.dropLast()))
+                .union(CircleJellyGeometry.paint([partial[partial.count - 2], liveHead]))
+                .union(CircleJellyGeometry.smoothPath(droplet.contour(at: 0.03, reduceMotion: false)))
+            let start = release.path(age: 0, reduceMotion: false)
+            let before = release.path(age: CircleJellyGeometry.closeDuration - 0.0001, reduceMotion: false)
+            let after = release.path(age: CircleJellyGeometry.closeDuration + 0.0001, reduceMotion: false)
+            var startDifference = 0, seamDifference = 0
+            for x in stride(from: 30, through: 370, by: 2) {
+                for y in stride(from: 250, through: 350, by: 2) {
+                    let point = CGPoint(x: x, y: y)
+                    if live.contains(point) != start.contains(point) { startDifference += 1 }
+                    if before.contains(point) != after.contains(point) { seamDifference += 1 }
+                }
+            }
+            precondition(startDifference == 0, "Release must begin with the existing droplet and paint")
+            precondition(seamDifference < 5, "Closing and filling must share the same silhouette")
+            let gap = completed[partial.count + (completed.count - partial.count) / 2]
+            precondition(!start.contains(gap), "The gap must not close instantly")
+            precondition(after.contains(gap))
+            precondition(!after.contains(release.center))
+            let mid = release.path(age: CircleJellyGeometry.closeDuration + CircleJellyGeometry.fillDuration / 2, reduceMotion: false)
+            precondition(mid.contains(nearEdge) && !mid.contains(release.center))
+            let done = release.path(age: 2, reduceMotion: false)
+            precondition(done.contains(release.center))
+            precondition(release.path(age: 0, reduceMotion: true).contains(release.center))
+        }
 
         // Dragging retains momentum, is tethered to the finger, and settles at rest.
         var drop = CircleDropletDynamics(at: .zero, time: 0)

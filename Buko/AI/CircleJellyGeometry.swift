@@ -45,9 +45,88 @@ nonisolated enum CircleJellyGeometry {
     }
 
     static let brushRadius: CGFloat = 6
-    static let closeDuration: TimeInterval = 0.12
-    static let fillDuration: TimeInterval = 0.56
+    static let closeDuration: TimeInterval = 0.30
+    static let fillDuration: TimeInterval = 0.64
     static let morphDuration: TimeInterval = 0.9
+
+    /// Release continues the exact live brush, sweeps only the missing arc,
+    /// then contracts a hole inside that same outline. Cached geometry avoids
+    /// rebuilding/raycasting the whole selection on every animation frame.
+    struct Release {
+        let basePaint: CGPath
+        let finalPaint: CGPath
+        let completed: [CGPoint]
+        let center: CGPoint
+        let arc: [CGPoint]
+        let distances: [CGFloat]
+        let initialBlob: [CGPoint]
+        let initialHead: CGPoint
+        let tail: CGPoint?
+
+        init(traced: [CGPoint], completed: [CGPoint], droplet: CircleDropletDynamics, time: TimeInterval) {
+            self.completed = completed
+            center = centroid(completed) ?? CircleGeometry.path(completed).boundingBoxOfPath.origin
+            basePaint = paint(Array(traced.dropLast()))
+            finalPaint = paint(completed)
+            initialHead = droplet.sample(at: time).position
+            initialBlob = droplet.contour(at: time, reduceMotion: false)
+            tail = traced.dropLast().last
+            // completedLoop preserves the raw samples before appending the gap.
+            arc = [initialHead] + Array(completed.dropFirst(max(0, traced.count - 1)))
+            var lengths: [CGFloat] = [0]
+            for i in 1..<arc.count {
+                lengths.append(lengths[i - 1] + CircleGeometry.distance(arc[i - 1], arc[i]))
+            }
+            distances = lengths
+        }
+
+        func closingPoints(progress: CGFloat) -> [CGPoint] {
+            let distance = (distances.last ?? 0) * min(1, max(0, progress))
+            var result = [initialHead]
+            for i in 1..<arc.count {
+                if distances[i] <= distance { result.append(arc[i]); continue }
+                let fraction = (distance - distances[i - 1]) / max(0.0001, distances[i] - distances[i - 1])
+                result.append(CGPoint(x: arc[i - 1].x + (arc[i].x - arc[i - 1].x) * fraction,
+                                      y: arc[i - 1].y + (arc[i].y - arc[i - 1].y) * fraction))
+                break
+            }
+            return result
+        }
+
+        func path(age: TimeInterval, reduceMotion: Bool) -> CGPath {
+            if !reduceMotion, age < closeDuration {
+                let progress = smoothstep(CGFloat(max(0, age) / closeDuration))
+                var swept = closingPoints(progress: progress)
+                if let releasedPoint = arc.dropFirst().first {
+                    swept[0] = CGPoint(x: initialHead.x + (releasedPoint.x - initialHead.x) * progress,
+                                       y: initialHead.y + (releasedPoint.y - initialHead.y) * progress)
+                }
+                let head = swept.last ?? initialHead
+                let blob = initialBlob.enumerated().map { i, p in
+                    let angle = CGFloat(i) * 2 * .pi / CGFloat(initialBlob.count)
+                    let target = point(center: .zero, angle: angle, radius: brushRadius)
+                    return CGPoint(x: head.x + (p.x - initialHead.x) * (1 - progress) + target.x * progress,
+                                   y: head.y + (p.y - initialHead.y) * (1 - progress) + target.y * progress)
+                }
+                return basePaint.union(paint((tail.map { [$0] } ?? []) + swept)).union(smoothPath(blob))
+            }
+            let progress = reduceMotion ? 1 : smoothstep(CGFloat((age - closeDuration) / fillDuration))
+            guard progress > 0 else { return finalPaint }
+            let fill = CGMutablePath()
+            fill.addPath(CircleGeometry.path(completed))
+            if progress < 1 {
+                let hole = pow(1 - progress, 1.25)
+                let inner = completed.reversed().map { p in
+                    let theta = atan2(p.y - center.y, p.x - center.x)
+                    let ripple = 1 + 0.035 * sin(theta * 3 + CGFloat(age) * 9) * sin(.pi * progress)
+                    return CGPoint(x: center.x + (p.x - center.x) * hole * ripple,
+                                   y: center.y + (p.y - center.y) * hole * ripple)
+                }
+                fill.addPath(CircleGeometry.path(inner))
+            }
+            return finalPaint.union(fill)
+        }
+    }
 
     static func roundedRectangle(_ rect: CGRect) -> Boundary {
         let half = CGSize(width: rect.width / 2, height: rect.height / 2)

@@ -56,7 +56,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { session.host?.circleIntent.cancel(); saveNow() }
+            if phase != .active { session.host?.circleIntent.cancelPending(); saveNow() }
         }
         .onChange(of: sidebarVisible) { _, _ in titleFocused = false }
         .onChange(of: settingsVisible) { _, _ in titleFocused = false }

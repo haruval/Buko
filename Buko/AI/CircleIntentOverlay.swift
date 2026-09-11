@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Shared native-glass tint for the circle AI interaction and its toolbar affordance.
 enum CircleAIStyle {
-    static let green = Color(red: 0.58, green: 0.85, blue: 0.63)
-    static let glassTint = green.opacity(0.35)
+    static let green = Color(red: 0.18, green: 0.88, blue: 0.38)
+    static let glassTint = green.opacity(0.52)
 }
 
 struct CircleIntentOverlay: View {
@@ -25,6 +25,9 @@ struct CircleIntentOverlay: View {
                                 GeometryReader { card in
                                     Color.clear.onAppear { positionPopup(card.size, viewport: geometry.size) }
                                         .onChange(of: card.size) { _, size in positionPopup(size, viewport: geometry.size) }
+                                        .onChange(of: state.projection) { _, _ in positionPopup(card.size, viewport: geometry.size) }
+                                        .onChange(of: state.textBounds) { _, _ in positionPopup(card.size, viewport: geometry.size) }
+                                        .onChange(of: geometry.size) { _, _ in positionPopup(card.size, viewport: geometry.size) }
                                         .onChange(of: state.selectionBounds) { _, _ in positionPopup(card.size, viewport: geometry.size) }
                                 }
                             }
@@ -46,9 +49,9 @@ struct CircleIntentOverlay: View {
             // Keep a single native-glass surface through tracing, inward fill,
             // and molding. No view replacement or implicit crossfade at recognition.
             let shape = GestureJellyShape(paint: state.paintedPath, tailAnchor: state.tailAnchor, droplet: state.droplet,
-                boundary: state.closedBoundary, rectangle: state.fittedRectangle,
+                release: state.release, projection: state.projection, boundary: state.closedBoundary, rectangle: state.fittedRectangle,
                 closeAge: state.closedAt.map { now - $0 }, morphAge: state.morphBegan.map { now - $0 },
-                now: now, reduceMotion: reduceMotion)
+                now: now, reduceMotion: reduceMotion).path(in: CGRect(origin: .zero, size: viewport))
             glassSurface(shape, wave: wave)
                 .frame(width: viewport.width, height: viewport.height)
                 .transaction { $0.animation = nil; $0.disablesAnimations = true }
@@ -94,14 +97,15 @@ struct CircleIntentOverlay: View {
         }
         .padding(16)
         // Regular native glass keeps diagnostic text readable over dense handwriting.
-        .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.2)), in: .rect(cornerRadius: 26))
+        .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.28)), in: .rect(cornerRadius: 26))
         .accessibilityIdentifier("intentPopup")
     }
 
     private func positionPopup(_ size: CGSize, viewport: CGSize) {
-        let region = state.textBounds.reduce(state.selectionBounds) { $0.union($1) }
+        let region = state.textBounds.reduce(state.selectionBounds) { $0.union($1) }.applying(state.projection)
         let rightFits = region.maxX + 16 + size.width < viewport.width - 16
-        let x = rightFits ? region.maxX + 16 : max(16, min(viewport.width - size.width - 16, region.minX))
+        let preferredX = rightFits ? region.maxX + 16 : region.minX
+        let x = max(16, min(viewport.width - size.width - 16, preferredX))
         let preferredY = rightFits ? region.minY : region.maxY + 18
         let y = min(max(100, preferredY), max(100, viewport.height - size.height - 96))
         state.popupBounds = CGRect(origin: CGPoint(x: x, y: y), size: size)
@@ -113,6 +117,8 @@ private struct GestureJellyShape: Shape {
     let paint: CGPath
     let tailAnchor: CGPoint?
     let droplet: CircleDropletDynamics?
+    let release: CircleJellyGeometry.Release?
+    let projection: CGAffineTransform
     let boundary: CircleJellyGeometry.Boundary?
     let rectangle: CircleJellyGeometry.Boundary?
     let closeAge: TimeInterval?
@@ -121,11 +127,16 @@ private struct GestureJellyShape: Shape {
     let reduceMotion: Bool
 
     func path(in rect: CGRect) -> Path {
+        materialPath().applying(projection)
+    }
+
+    private func materialPath() -> Path {
         if let boundary, let closeAge {
             if let rectangle, let morphAge {
                 return Path(CircleJellyGeometry.smoothPath(CircleJellyGeometry.moldedContour(
                     from: boundary, to: rectangle, age: morphAge, reduceMotion: reduceMotion)))
             }
+            if let release { return Path(release.path(age: closeAge, reduceMotion: reduceMotion)) }
             return Path(CircleJellyGeometry.inwardFill(boundary, age: closeAge, reduceMotion: reduceMotion))
         }
         guard let droplet else { return Path() }
