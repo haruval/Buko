@@ -4,15 +4,15 @@ struct SettingsPanel: View {
     let trashedNotes: [Note]
     let trashedPages: [TrashedPage]
     @Binding var showsTrash: Bool
+    @Binding var showsDevelopment: Bool
     @Binding var showsGrid: Bool
     let recreateTestNote: () -> Void
-    @State private var showsDevelopment = false
     let restore: (Note) -> Void
     let restorePage: (TrashedPage) -> Void
     let emptyTrash: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 12) {
             if showsTrash || showsDevelopment {
                 HStack(spacing: 4) {
                     ShelfButton(title: "Back to settings", symbol: "chevron.left") {
@@ -87,13 +87,13 @@ struct SettingsPanel: View {
                 }
             } else if showsDevelopment {
                 Button(action: recreateTestNote) {
-                    Label("Recreate PPL TEST note", systemImage: "arrow.counterclockwise")
+                    Label("Recreate Test Lecture", systemImage: "arrow.counterclockwise")
                         .font(.subheadline.weight(.medium))
                         .frame(maxWidth: .infinity, minHeight: 48)
                 }
                 .buttonStyle(.glass)
                 .accessibilityIdentifier("recreateTestNote")
-                Text("Two pages of editable handwriting with complete and unfinished lecture notes. The previous generated TEST note moves to Trash.")
+                Text("Two pages of editable handwriting with complete and unfinished lecture notes. The previous Test Lecture moves to Trash.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             } else {
@@ -102,6 +102,7 @@ struct SettingsPanel: View {
                         .font(.subheadline)
                 }
                 .padding(.horizontal, 14)
+                .frame(minHeight: 44)
                 .accessibilityIdentifier("gridLines")
                 Button { showsTrash = true } label: {
                     HStack(spacing: 12) {
@@ -131,5 +132,7 @@ struct SettingsPanel: View {
             }
         }
         .padding(18)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settingsPanel")
     }
 }

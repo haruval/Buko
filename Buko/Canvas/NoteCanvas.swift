@@ -2,6 +2,7 @@ import PencilKit
 import SwiftUI
 
 struct NoteCanvas: UIViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
     let note: Note
     let session: CanvasSession
     let showsGrid: Bool
@@ -33,14 +34,16 @@ struct NoteCanvas: UIViewRepresentable {
             session.canvas = host.canvas
             session.host = host
         }
-        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid)
+        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid,
+                       colorScheme: colorScheme)
         return host
     }
 
     func updateUIView(_ host: CanvasHostView, context: Context) {
         context.coordinator.onDrawingChange = onDrawingChange
         host.onPageChange = context.coordinator.hasLoadedDrawing ? onPageChange : nil
-        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid)
+        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid,
+                       colorScheme: colorScheme)
     }
 
     static func dismantleUIView(_ host: CanvasHostView, coordinator: Coordinator) {

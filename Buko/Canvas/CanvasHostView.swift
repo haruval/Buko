@@ -64,7 +64,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                       height: documentSize.height)
     }
     private var isOverview: Bool { PageGeometry.isOverview(scale: canvas.zoomScale, fitScale: pageFitScale) }
-    private var inkColor: UIColor { traitCollection.userInterfaceStyle == .dark ? .white : .black }
+    private var presentationStyle: UIUserInterfaceStyle = .unspecified
+    private var inkColor: UIColor { presentationStyle == .dark ? .white : .black }
 
     init(pagePull: PagePullState) {
         self.pagePull = pagePull
@@ -122,8 +123,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             UIAccessibilityCustomAction(name: "Previous page", target: self, selector: #selector(accessiblePreviousPage))
         ]
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: CanvasHostView, _: UITraitCollection) in
-            view.invalidateEdgeSnapshot()
-            view.applyAppearance()
+            view.setAppearance(view.traitCollection.userInterfaceStyle)
         }
     }
 
@@ -140,7 +140,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    func configure(tool: CanvasSession.Tool, allowsFingerDrawing: Bool, showsGrid: Bool) {
+    func configure(tool: CanvasSession.Tool, allowsFingerDrawing: Bool, showsGrid: Bool, colorScheme: ColorScheme) {
+        setAppearance(colorScheme == .dark ? .dark : .light)
         if self.tool != tool { cancelCircleInteraction() }
         self.tool = tool
         circleGesture.singleFinger = tool == .circle
@@ -164,6 +165,15 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
+    private func setAppearance(_ style: UIUserInterfaceStyle) {
+        guard style != .unspecified, style != presentationStyle else { return }
+        presentationStyle = style
+        backdrop.overrideUserInterfaceStyle = style
+        circleHosting?.overrideUserInterfaceStyle = style
+        invalidateEdgeSnapshot()
+        applyAppearance()
+    }
+
     private func applyAppearance() {
         normalizeDisplayedInk()
         applyTool()
@@ -176,7 +186,12 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let manager = canvas.undoManager
         let wasRegistering = manager?.isUndoRegistrationEnabled == true
         if wasRegistering { manager?.disableUndoRegistration() }
-        canvas.drawing = MonochromeInk.recolor(canvas.drawing, to: inkColor)
+        let recolored = MonochromeInk.recolor(canvas.drawing, to: inkColor)
+        // PencilKit 27 retains rendered tiles for unchanged stroke identities.
+        // Clear that presentation cache synchronously, without registering undo.
+        // The original stroke IDs and geometry survive in the replacement drawing.
+        canvas.drawing = PKDrawing()
+        canvas.drawing = recolored
         if wasRegistering { manager?.enableUndoRegistration() }
         isUpdatingInk = false
     }

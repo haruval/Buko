@@ -14,11 +14,15 @@ final class CircleIntentTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.8)
         XCTAssertFalse(app.buttons["Close settings"].exists)
         XCTAssertTrue(app.buttons["openDevelopment"].exists)
+        let menu = app.descendants(matching: .any)["settingsPanel"].firstMatch
+        XCTAssertLessThanOrEqual(menu.frame.width, 250)
+        XCTAssertLessThanOrEqual(menu.frame.height, 240)
         app.buttons["openDevelopment"].tap()
+        Thread.sleep(forTimeInterval: 0.7)
         app.buttons["recreateTestNote"].tap()
         expectation(for: NSPredicate(format: "value == 'Page 1 of 2'"), evaluatedWith: canvas)
         waitForExpectations(timeout: 10)
-        XCTAssertTrue((app.textFields["currentNoteTitle"].value as? String)?.contains("TEST") == true)
+        XCTAssertTrue((app.textFields["currentNoteTitle"].value as? String)?.contains("Test Lecture") == true)
         app.buttons["circleIntentTool"].tap()
         XCTAssertTrue(app.buttons["circleIntentTool"].isSelected)
         // A straight one-finger drag in the circle tool cancels, leaves no ink,

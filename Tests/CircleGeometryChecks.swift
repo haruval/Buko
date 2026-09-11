@@ -11,6 +11,24 @@ import Foundation
         let loop = ellipse(CGPoint(x: 200, y: 300), rx: 160, ry: 40)
         precondition(CircleGeometry.isLoop(loop))
         precondition(CircleGeometry.isLoop(loop.reversed()))
+        for direction in [-1.0, 1.0] {
+            for start in [0.0, Double.pi / 2, Double.pi, 4.4] {
+                let partial = ellipse(CGPoint(x: 200, y: 300), rx: 160, ry: 40,
+                                      start: start, end: start + direction * .pi * 1.6)
+                let completed = CircleGeometry.completedLoop(partial)!
+                precondition(completed.count > partial.count)
+                precondition(completed.last == partial.first)
+                precondition(CircleGeometry.path(completed).contains(CGPoint(x: 200, y: 300)))
+                precondition(CircleGeometry.isLoop(completed))
+            }
+        }
+        let early = ellipse(CGPoint(x: 200, y: 300), rx: 160, ry: 40, end: .pi * 0.65)
+        let origin = CircleGeometry.flowOrigin(early)!
+        precondition(CircleGeometry.distance(origin, CGPoint(x: 200, y: 300)) < 1)
+        precondition(CircleGeometry.flowOrigin((0...40).map { CGPoint(x: $0 * 5, y: $0 * 3) }) == nil)
+        precondition(CircleGeometry.springGrowth(age: 0) == 0)
+        precondition(CircleGeometry.springGrowth(age: 0.1) > 0)
+        precondition(abs(CircleGeometry.springGrowth(age: 1) - 1) < 0.002)
         precondition(!CircleGeometry.isLoop(ellipse(.zero, rx: 100, ry: 80, end: .pi)))
         precondition(!CircleGeometry.isLoop(ellipse(.zero, rx: 10, ry: 8)))
         precondition(!CircleGeometry.isLoop((0...40).map { CGPoint(x: $0 * 5, y: $0 * 3) }))

@@ -8,6 +8,11 @@ final class CircleIntentState {
     enum Phase { case idle, tracing, recognizing, inferring, finished }
     var phase = Phase.idle
     var outline: [CGPoint] = []
+    var flowOrigin: CGPoint?
+    var flowBegan: TimeInterval = 0
+    var pointTimes: [TimeInterval] = []
+    var releasedAt: TimeInterval?
+
     var textBounds: [CGRect] = []
     var selectionBounds = CGRect.zero
     var recognizedText = ""
@@ -29,10 +34,21 @@ final class CircleIntentState {
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
         phase = .idle; outline = []; textBounds = []; popupBounds = .zero
+        flowOrigin = nil; pointTimes = []; releasedAt = nil; flowBegan = 0
     }
 
     func trace(_ points: [CGPoint]) {
         if phase != .tracing { cancel(); phase = .tracing; issue = nil; recognizedText = "" }
+        let now = Date.timeIntervalSinceReferenceDate
+        if points.count > pointTimes.count {
+            pointTimes.append(contentsOf: repeatElement(now, count: points.count - pointTimes.count))
+        }
+        if flowOrigin == nil, let origin = CircleGeometry.flowOrigin(points) {
+            flowOrigin = origin
+            flowBegan = now
+            // The initial accumulated arc starts as a seed and unfurls in touch order.
+            pointTimes = points.indices.map { now + Double($0) / Double(max(1, points.count - 1)) * 0.16 }
+        }
         outline = points
         selectionBounds = CircleGeometry.path(points).boundingBoxOfPath
     }
@@ -41,6 +57,8 @@ final class CircleIntentState {
         guard #available(iOS 27, *) else {
             issue = "Handwriting intent requires iPadOS 27."; phase = .finished; return
         }
+        releasedAt = Date.timeIntervalSinceReferenceDate
+        if flowOrigin == nil { flowOrigin = CGPoint(x: selectionBounds.midX, y: selectionBounds.midY); flowBegan = releasedAt! }
         task?.cancel(); timeout?.cancel()
         let id = UUID(); requestID = id
         phase = .recognizing; issue = nil; intent = ""; evidence = ""; clarification = ""
@@ -57,9 +75,11 @@ final class CircleIntentState {
             guard requestID == id, !Task.isCancelled else { return }
             recognizedText = reading.text
             recognitionMethod = reading.method
-            withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .spring(response: 0.62, dampingFraction: 0.48)) {
+            var placement = Transaction(animation: nil)
+            placement.disablesAnimations = true
+            withTransaction(placement) {
                 self.textBounds = reading.boxes.map {
-                    PageGeometry.screenRect($0, scale: scale, offset: offset).insetBy(dx: -5, dy: -7)
+                    PageGeometry.screenRect($0, scale: scale, offset: offset).insetBy(dx: -14, dy: -12)
                 }
                 self.phase = .inferring
             }

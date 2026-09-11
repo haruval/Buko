@@ -15,6 +15,8 @@ struct ContentView: View {
     @Query(sort: \TrashedPage.deletedAt, order: .reverse) private var trashedPages: [TrashedPage]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
     @AppStorage("pplTestNoteID") private var pplTestNoteID = ""
+    @AppStorage("testLectureTitleMigrated") private var testLectureTitleMigrated = false
+    @State private var showsDevelopment = false
     @State private var canvasRevision = UUID()
     @State private var pagesVisible = false
     @State private var renamingPage: NotebookPage?
@@ -46,6 +48,7 @@ struct ContentView: View {
         .tint(.accentColor)
         .task {
             normalizeDuplicateTitles()
+            migrateTestLectureTitle()
             if pplTestNoteID.isEmpty { recreateTestNote() }
             if selection == nil {
                 if notes.isEmpty && trashedNotes.isEmpty { createNote() }
@@ -251,12 +254,13 @@ struct ContentView: View {
 
                 ExpandingGlassPanel(
                     isExpanded: settingsVisible,
-                    size: CGSize(width: min(300, size.width - 104),
-                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 290),
+                    size: CGSize(width: min(showsTrash ? 300 : showsDevelopment ? 280 : 224, size.width - 104),
+                                 height: showsTrash ? max(220, min(440, size.height - 120)) : showsDevelopment ? 280 : 208),
                     alignment: .topTrailing, anchor: .topTrailing
                 ) {
                     SettingsPanel(
-                        trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash, showsGrid: $showsGrid,
+                        trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash,
+                        showsDevelopment: $showsDevelopment, showsGrid: $showsGrid,
                         recreateTestNote: {
                             recreateTestNote()
                             if settingsVisible { toggleSettings() }
@@ -273,6 +277,7 @@ struct ContentView: View {
                 }
                 .glassEffectID("settings", in: glassNamespace)
                 .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82), value: showsTrash)
+                .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82), value: showsDevelopment)
             }
         }
     }
@@ -282,6 +287,7 @@ struct ContentView: View {
             settingsVisible.toggle()
             if settingsVisible {
                 showsTrash = false
+                showsDevelopment = false
                 pagesVisible = false
                 if horizontalSizeClass == .compact { sidebarVisible = false }
             }
@@ -317,12 +323,24 @@ struct ContentView: View {
         selection = note
     }
 
+    private func migrateTestLectureTitle() {
+        guard !testLectureTitleMigrated else { return }
+        do {
+            let all = try modelContext.fetch(FetchDescriptor<Note>())
+            if let note = all.first(where: { $0.id.uuidString == pplTestNoteID }) {
+                let title = Note.uniqueTitle("Test Lecture", occupied: Set(all.filter { $0.id != note.id }.map(\.title)))
+                guard performEdit(notes: [note], { note.title = title }) else { return }
+            }
+            testLectureTitleMigrated = true
+        } catch { persistenceError = error.localizedDescription }
+    }
+
     private func recreateTestNote() {
         guard flushDrawing() else { return }
         let all = (try? modelContext.fetch(FetchDescriptor<Note>())) ?? []
         // Identity, never a title match, scopes reset to the generated fixture.
         let previous = all.first { $0.id.uuidString == pplTestNoteID }
-        let note = Note(title: availableTitle("TEST — PPL"))
+        let note = Note(title: availableTitle("Test Lecture"))
         note.drawingData = PPLTestNote.drawing().dataRepresentation()
         note.pageLayoutVersion = 2
         guard performEdit(notes: previous.map { [$0] } ?? [], {

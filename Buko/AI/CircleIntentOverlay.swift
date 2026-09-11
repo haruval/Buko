@@ -3,7 +3,6 @@ import SwiftUI
 struct CircleIntentOverlay: View {
     let state: CircleIntentState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var glass
 
     var body: some View {
         GeometryReader { geometry in
@@ -28,33 +27,41 @@ struct CircleIntentOverlay: View {
                     }
                 }
             }
-            .animation(reduceMotion ? nil : .spring(response: 0.58, dampingFraction: 0.58), value: state.phase)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .ignoresSafeArea()
     }
 
     private func jelly(in viewport: CGSize) -> some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !state.processing || reduceMotion)) { timeline in
-            let wave = reduceMotion ? 0 : sin(timeline.date.timeIntervalSinceReferenceDate * 3.6)
-            let shape = SelectionJellyShape(points: state.outline, boxes: state.textBounds)
-            GlassEffectContainer(spacing: 12) {
-                shape.fill(.clear)
-                    .glassEffect(.clear, in: shape)
-                    .glassEffectID("selection-jelly", in: glass)
-                    .overlay {
-                        shape.fill(.white.opacity(state.processing ? 0.06 + 0.04 * wave : 0.025))
-                        shape.stroke(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.08), .cyan.opacity(0.55)],
-                                                    startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.4)
-                            .opacity(state.processing ? 0.7 + 0.25 * wave : 0.75)
-                    }
-                    .phaseAnimator([false, true], trigger: state.phase) { content, expanded in
-                        content.scaleEffect(x: reduceMotion ? 1 : (expanded ? 1.035 : 1),
-                                            y: reduceMotion ? 1 : (expanded ? 0.96 : 1),
-                                            anchor: UnitPoint(x: state.selectionBounds.midX / max(1, viewport.width),
-                                                              y: state.selectionBounds.midY / max(1, viewport.height)))
-                    } animation: { _ in reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.38) }
+        TimelineView(.animation(minimumInterval: 1.0 / 60,
+                               paused: reduceMotion || (!state.processing && state.phase != .tracing))) { timeline in
+            let now = timeline.date.timeIntervalSinceReferenceDate
+            let wave = reduceMotion ? 0 : sin(now * 3.6)
+            // Word glass has its own identity and a fixed viewport. It never
+            // inherits the tracing spring, popup layout, or a vertical transition.
+            if !state.textBounds.isEmpty {
+                let shape = WordJellyShape(boxes: state.textBounds)
+                glassSurface(shape, wave: wave)
+                    .frame(width: viewport.width, height: viewport.height)
+                    .transaction { $0.animation = nil; $0.disablesAnimations = true }
+            } else if let origin = state.flowOrigin {
+                let shape = CircleFlowShape(points: state.outline, times: state.pointTimes,
+                    origin: origin, now: now, releasedAt: state.releasedAt, reduceMotion: reduceMotion)
+                glassSurface(shape, wave: wave)
+                    .frame(width: viewport.width, height: viewport.height)
             }
         }
+    }
+
+    private func glassSurface<S: Shape>(_ shape: S, wave: Double) -> some View {
+        shape.fill(.clear)
+            .glassEffect(.clear, in: shape)
+            .overlay {
+                shape.fill(.white.opacity(state.processing ? 0.06 + 0.04 * wave : 0.025))
+                shape.stroke(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.08), .cyan.opacity(0.55)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
+                    .opacity(state.processing ? 0.7 + 0.25 * wave : 0.75)
+            }
     }
 
     private var popup: some View {
@@ -99,14 +106,55 @@ struct CircleIntentOverlay: View {
     }
 }
 
-/// Native glass follows the sampled gesture, then recognizer-derived word envelopes.
-private struct SelectionJellyShape: Shape {
+/// Ordered contour samples carry their arrival times: the radial spring front
+/// follows clockwise/counterclockwise input naturally, rather than filling a chord.
+private struct CircleFlowShape: Shape {
     let points: [CGPoint]
+    let times: [TimeInterval]
+    let origin: CGPoint
+    let now: TimeInterval
+    let releasedAt: TimeInterval?
+    let reduceMotion: Bool
+
+    func path(in rect: CGRect) -> Path {
+        guard points.count >= 3, let first = points.first else { return Path() }
+        let contour = points.enumerated().map { index, point -> CGPoint in
+            let age = now - (index < times.count ? times[index] : now)
+            let growth = reduceMotion ? 1 : CircleGeometry.springGrowth(age: age)
+            return CGPoint(x: origin.x + (point.x - origin.x) * growth,
+                           y: origin.y + (point.y - origin.y) * growth)
+        }
+        if let releasedAt, reduceMotion || now - releasedAt > 0.75 {
+            return smoothed(contour)
+        }
+        // Collapse the two radial edges into the start point as the loop closes.
+        let closing = releasedAt.map { reduceMotion ? 1 : min(1, max(0, (now - $0) / 0.55)) } ?? 0
+        let hub = CGPoint(x: origin.x + (first.x - origin.x) * closing,
+                          y: origin.y + (first.y - origin.y) * closing)
+        return smoothed([hub] + contour)
+    }
+
+    private func smoothed(_ points: [CGPoint]) -> Path {
+        guard points.count > 2 else { return Path() }
+        var path = Path()
+        let first = points[0], last = points[points.count - 1]
+        path.move(to: CGPoint(x: (first.x + last.x) / 2, y: (first.y + last.y) / 2))
+        for index in points.indices {
+            let point = points[index], next = points[(index + 1) % points.count]
+            path.addQuadCurve(to: CGPoint(x: (point.x + next.x) / 2, y: (point.y + next.y) / 2), control: point)
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct WordJellyShape: Shape {
     let boxes: [CGRect]
     func path(in rect: CGRect) -> Path {
-        if boxes.isEmpty { return Path(CircleGeometry.path(points)) }
         var path = Path()
-        for box in boxes { path.addRoundedRect(in: box, cornerSize: CGSize(width: min(12, box.height / 2), height: min(12, box.height / 2))) }
+        for box in boxes {
+            path.addRoundedRect(in: box, cornerSize: CGSize(width: 14, height: 14))
+        }
         return path
     }
 }

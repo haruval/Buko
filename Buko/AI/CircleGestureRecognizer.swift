@@ -56,7 +56,11 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         guard state == .possible || state == .began || state == .changed else { return }
         if state == .began || state == .changed {
-            state = CircleGeometry.isLoop(points) ? .ended : .cancelled
+            if let completed = CircleGeometry.completedLoop(points) {
+                points = completed
+                preview?(points)
+                state = .ended
+            } else { state = .cancelled }
         } else { state = .failed }
     }
 
