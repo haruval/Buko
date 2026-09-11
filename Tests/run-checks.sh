@@ -34,3 +34,8 @@ xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
     Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift Tests/NotebookSafetyChecks.swift \
     -o "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
 "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink" "$BUKO_CHECK_DIR/legacy.store"
+
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift Buko/AI/CircleGeometry.swift Tests/CircleGeometryChecks.swift \
+    -o "$BUKO_CHECK_DIR/circle"
+"$BUKO_CHECK_DIR/circle"

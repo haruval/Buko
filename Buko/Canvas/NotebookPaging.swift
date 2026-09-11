@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// Portrait 13-inch iPad Pro proportions (1032 × 1376 points) in stable document coordinates.
-enum NotebookPaging {
+nonisolated enum NotebookPaging {
     static let pageHeight: CGFloat = 1_000 * 1376 / 1032
     // Public UIKit exposes no physical display corner radius. This reference
     // radius is tuned for the 13-inch display and scales with the paper.

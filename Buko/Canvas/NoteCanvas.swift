@@ -59,11 +59,12 @@ struct NoteCanvas: UIViewRepresentable {
             self.onDrawingChange = onDrawingChange
         }
 
-        func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) { session.isDrawing = true }
+        func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) { host?.circleIntent.cancel(); session.isDrawing = true }
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) { session.isDrawing = false }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             guard hasLoadedDrawing, let host, !host.isUpdatingInk else { return }
+            host.circleIntent.cancel()
             // Undo may restore strokes created under another appearance.
             host.normalizeDisplayedInk()
             onDrawingChange(MonochromeInk.canonical(canvasView.drawing).dataRepresentation())

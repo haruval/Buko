@@ -9,7 +9,7 @@ typealias InkColor = NSColor
 
 /// Saved ink is always black. Presentation is an explicit recoloring of the same
 /// stroke values, preserving their path, pressure, transform, mask, and random seed.
-enum MonochromeInk {
+nonisolated enum MonochromeInk {
     static func matches(_ lhs: InkColor, _ rhs: InkColor) -> Bool {
         #if canImport(UIKit)
         var left = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))

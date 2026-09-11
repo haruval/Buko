@@ -63,7 +63,7 @@ final class PageSelectionTests: XCTestCase {
         expect("Page 2 of 2", on: canvas)
         restore1.tap()
         expect("Page 1 of 3", on: canvas)
-        app.buttons["Close settings"].tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         app.buttons["pageNavigator"].tap()
         Thread.sleep(forTimeInterval: 0.7)
         XCTAssertEqual(app.buttons["selectPage-1"].value as? String, "Not selected")

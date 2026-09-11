@@ -14,6 +14,7 @@ struct ContentView: View {
     private var trashedNotes: [Note]
     @Query(sort: \TrashedPage.deletedAt, order: .reverse) private var trashedPages: [TrashedPage]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
+    @AppStorage("pplTestNoteID") private var pplTestNoteID = ""
     @State private var canvasRevision = UUID()
     @State private var pagesVisible = false
     @State private var renamingPage: NotebookPage?
@@ -45,11 +46,14 @@ struct ContentView: View {
         .tint(.accentColor)
         .task {
             normalizeDuplicateTitles()
-            if notes.isEmpty && trashedNotes.isEmpty { createNote() }
-            else if selection == nil, let note = notes.first { select(note) }
+            if pplTestNoteID.isEmpty { recreateTestNote() }
+            if selection == nil {
+                if notes.isEmpty && trashedNotes.isEmpty { createNote() }
+                else if let note = notes.first { select(note) }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { saveNow() }
+            if phase != .active { session.host?.circleIntent.cancel(); saveNow() }
         }
         .onChange(of: sidebarVisible) { _, _ in titleFocused = false }
         .onChange(of: settingsVisible) { _, _ in titleFocused = false }
@@ -126,6 +130,13 @@ struct ContentView: View {
                 PagePullIndicator(state: session.pagePull)
                     .ignoresSafeArea()
 
+                if settingsVisible {
+                    Color.clear.contentShape(.rect).ignoresSafeArea()
+                        .onTapGesture { toggleSettings() }
+                        .accessibilityLabel("Dismiss settings")
+                        .accessibilityIdentifier("dismissSettingsBackdrop")
+                }
+
                 floatingPanels(in: geometry.size)
                     .environment(\.colorScheme, session.pagePull.topOverBlack ? .dark : colorScheme)
                     .padding(.horizontal, 20)
@@ -140,6 +151,9 @@ struct ContentView: View {
             .overlay(alignment: .bottom) {
                 VStack(spacing: 12) {
                     ToolShelf(session: session)
+                        .simultaneousGesture(TapGesture().onEnded {
+                            if settingsVisible { toggleSettings() }
+                        })
                         .disabled(selectedNote == nil || selectedNote?.pageCount == 0)
                 }
                 .environment(\.colorScheme, session.pagePull.bottomOverBlack ? .dark : colorScheme)
@@ -197,7 +211,7 @@ struct ContentView: View {
     private func toggleSidebar() {
         withAnimation(panelAnimation(opening: !sidebarVisible)) {
             sidebarVisible.toggle()
-            if sidebarVisible && horizontalSizeClass == .compact { settingsVisible = false }
+            settingsVisible = false
         }
     }
 
@@ -238,12 +252,15 @@ struct ContentView: View {
                 ExpandingGlassPanel(
                     isExpanded: settingsVisible,
                     size: CGSize(width: min(300, size.width - 104),
-                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 240),
+                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 290),
                     alignment: .topTrailing, anchor: .topTrailing
                 ) {
                     SettingsPanel(
                         trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash, showsGrid: $showsGrid,
-                        close: toggleSettings, restore: restore, restorePage: restorePage,
+                        recreateTestNote: {
+                            recreateTestNote()
+                            if settingsVisible { toggleSettings() }
+                        }, restore: restore, restorePage: restorePage,
                         emptyTrash: {
                             emptyNoteIDs = Set(trashedNotes.map(\.id))
                             emptyPageIDs = Set(trashedPages.map(\.id))
@@ -251,7 +268,7 @@ struct ContentView: View {
                         }
                     )
                 } compact: {
-                    ShelfButton(title: "Settings", symbol: "gearshape", action: toggleSettings)
+                    ShelfButton(title: "Settings", symbol: "ellipsis", action: toggleSettings)
                         .accessibilityIdentifier("openSettings")
                 }
                 .glassEffectID("settings", in: glassNamespace)
@@ -261,7 +278,7 @@ struct ContentView: View {
     }
 
     private func toggleSettings() {
-        withAnimation(panelAnimation(opening: !settingsVisible)) {
+        withAnimation(reduceMotion ? nil : .spring(response: settingsVisible ? 0.42 : 0.6, dampingFraction: settingsVisible ? 0.82 : 0.52)) {
             settingsVisible.toggle()
             if settingsVisible {
                 showsTrash = false
@@ -293,13 +310,35 @@ struct ContentView: View {
     }
 
     private func select(_ note: Note) {
+        if settingsVisible { toggleSettings() }
         guard note.id != selectedNote?.id, flushDrawing() else { return }
         guard performEdit(notes: [note], { try NotebookEdits.prepare(note) }) else { return }
         resetCanvas()
         selection = note
     }
 
+    private func recreateTestNote() {
+        guard flushDrawing() else { return }
+        let all = (try? modelContext.fetch(FetchDescriptor<Note>())) ?? []
+        // Identity, never a title match, scopes reset to the generated fixture.
+        let previous = all.first { $0.id.uuidString == pplTestNoteID }
+        let note = Note(title: availableTitle("TEST — PPL"))
+        note.drawingData = PPLTestNote.drawing().dataRepresentation()
+        note.pageLayoutVersion = 2
+        guard performEdit(notes: previous.map { [$0] } ?? [], {
+            if let previous, previous.deletedAt == nil { previous.deletedAt = .now }
+            try note.setPages([NotebookPage(), NotebookPage()])
+            modelContext.insert(note)
+            try NotebookEdits.prepare(note)
+        }) else { return }
+        pplTestNoteID = note.id.uuidString
+        resetCanvas()
+        selection = note
+        sidebarVisible = false
+    }
+
     private func createNote() {
+        if settingsVisible { toggleSettings() }
         guard flushDrawing() else { return }
         let note = Note(title: availableTitle("Untitled"))
         guard performEdit({

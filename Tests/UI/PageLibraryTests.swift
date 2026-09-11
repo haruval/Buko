@@ -20,7 +20,7 @@ final class PageLibraryTests: XCTestCase {
         app.buttons["Settings"].tap()
         Thread.sleep(forTimeInterval: 0.8)
         XCTAssertEqual(title.frame.width, titleWidth, accuracy: 1)
-        app.buttons["Close settings"].tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
         for count in 2...3 {
             for _ in 0..<4 {
@@ -61,7 +61,7 @@ final class PageLibraryTests: XCTestCase {
         XCTAssertTrue(restore.waitForExistence(timeout: 5))
         restore.tap()
         expect("Page 2 of 3", on: canvas)
-        app.buttons["Close settings"].tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         navigator.tap()
         Thread.sleep(forTimeInterval: 0.7)
         XCTAssertTrue(renamed.exists)
@@ -81,7 +81,7 @@ final class PageLibraryTests: XCTestCase {
         app.buttons["Empty Trash"].tap()
         confirmation.buttons["Delete permanently"].tap()
         XCTAssertTrue(app.staticTexts["Trash is empty"].waitForExistence(timeout: 5))
-        app.buttons["Close settings"].tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         expect("Page 2 of 2", on: canvas)
         XCUIDevice.shared.press(.home)
         app.terminate()

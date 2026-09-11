@@ -5,7 +5,7 @@ import PencilKit
 @Observable
 final class CanvasSession {
     enum Tool: String, CaseIterable {
-        case pen, eraser
+        case pen, eraser, circle
     }
 
     let pagePull = PagePullState()
