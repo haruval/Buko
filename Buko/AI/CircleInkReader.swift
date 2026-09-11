@@ -8,6 +8,18 @@ import AppKit
 
 /// Snapshot work runs off the input actor. No mutation of the live drawing.
 actor CircleInkReader {
+    // Document points: capture complete neighboring lines, not cropped words.
+    // Keep this bounded and on the selected page to avoid unrelated context.
+    static let contextAbove: CGFloat = 192
+    static let contextBelow: CGFloat = 240
+
+    nonisolated static func contextBounds(around bounds: CGRect) -> CGRect {
+        let pageIndex = max(0, Int(bounds.midY / NotebookPaging.pageStride))
+        let page = NotebookPaging.rect(for: pageIndex)
+        return CGRect(x: page.minX, y: bounds.minY - contextAbove, width: page.width,
+                      height: bounds.height + contextAbove + contextBelow).intersection(page)
+    }
+
     struct Result: Sendable {
         var text: String
         var context: String
@@ -31,11 +43,11 @@ actor CircleInkReader {
         }
         guard !selected.isEmpty else { throw ReadError.noInk }
         let ids = Set(selected.map(\.id))
-        let pageIndex = max(0, Int(bounds.midY / NotebookPaging.pageStride))
-        let contextRect = bounds.insetBy(dx: -100, dy: -160).intersection(NotebookPaging.rect(for: pageIndex))
-        let nearby = drawing.strokes.filter { ids.contains($0.id) || $0.renderBounds.intersects(contextRect) }
+        let contextRect = Self.contextBounds(around: bounds)
+        let nearby = drawing.strokes.filter { !ids.contains($0.id) && $0.renderBounds.intersects(contextRect) }
+        let nearbyIDs = Set(nearby.map(\.id))
         let recognizer = PKStrokeRecognizer(preferredLanguages: [Locale.Language(identifier: "en")])
-        await recognizer.updateDrawing(PKDrawing(strokes: nearby))
+        await recognizer.updateDrawing(PKDrawing(strokes: selected + nearby))
         try Task.checkCancellation()
         let text = (await recognizer.recognizedText(strokeIDs: ids) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         try Task.checkCancellation()
@@ -46,7 +58,10 @@ actor CircleInkReader {
                 try Task.checkCancellation()
                 boxes += matches.filter { !$0.strokes.isDisjoint(with: ids) }.map(\.bounds)
             }
-            let context = await recognizer.recognizedText() ?? ""
+            // Context stays separate from the selected transcript and its boxes.
+            // Never expand the visible jelly or displayed recognized handwriting.
+            let context = nearbyIDs.isEmpty ? "" : (await recognizer.recognizedText(strokeIDs: nearbyIDs) ?? "")
+            try Task.checkCancellation()
             return Result(text: text, context: context,
                 boxes: boxes.isEmpty ? selected.map(\.renderBounds) : boxes, method: "PencilKit strokes")
         }

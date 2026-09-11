@@ -111,6 +111,11 @@ struct CircleIntentOverlay: View {
                         if state.arithmeticChecked { Text("Matrix arithmetic checked locally").font(.caption.weight(.semibold)) }
                         Text("Evidence").font(.caption.weight(.semibold))
                         Text(state.evidence.isEmpty ? "Not available yet." : state.evidence).font(.caption)
+                        Text("Nearby handwriting used as context").font(.caption.weight(.semibold))
+                        Text(state.nearbyContext.isEmpty
+                             ? (state.phase == .recognizing ? "Reading nearby handwriting…" : "No nearby handwriting recognized.")
+                             : state.nearbyContext)
+                            .font(.caption).textSelection(.enabled).accessibilityIdentifier("nearbyHandwritingContext")
                         Text("Recognized handwriting · \(state.recognitionMethod)").font(.caption.weight(.semibold))
                         Text(state.recognizedText.isEmpty ? "Not available yet." : state.recognizedText)
                             .font(.subheadline).textSelection(.enabled).accessibilityIdentifier("recognizedHandwriting")

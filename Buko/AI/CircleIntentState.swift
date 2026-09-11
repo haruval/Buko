@@ -25,6 +25,7 @@ final class CircleIntentState {
     var textBounds: [CGRect] = []
     var selectionBounds = CGRect.zero
     var recognizedText = ""
+    var nearbyContext = ""
     var intent = ""
     var action = ""
     var proposedLines: [String] = []
@@ -81,6 +82,7 @@ final class CircleIntentState {
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
         arithmeticChecked = false
+        nearbyContext = ""
         modelStartedAt = nil
         action = ""; proposedLines = []; intentSeconds = 0; proposalSeconds = 0; recognitionSeconds = 0; elapsed = 0
         phase = .idle; textBounds = []; popupBounds = .zero; popupAnchor = nil
@@ -161,7 +163,9 @@ final class CircleIntentState {
                 }
                 self.phase = .inferring
             }
-            let context = reading.context
+            // Retain exactly the capped text supplied to both model stages.
+            let context = String(reading.context.prefix(IntentPrompts.contextCharacterLimit))
+            nearbyContext = context
             let model = SystemLanguageModel.default
             guard case .available = model.availability else {
                 finishIssue(Self.unavailableMessage(model), id: id); return
