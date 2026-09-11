@@ -17,7 +17,7 @@ struct ToolShelf: View {
             }
             Button { session.tool = .circle } label: {
                 Circle().fill(.clear).frame(width: 20, height: 20)
-                    .glassEffect(.clear.interactive(), in: .circle)
+                    .glassEffect(.clear.tint(CircleAIStyle.glassTint).interactive(), in: .circle)
                     .overlay { Circle().stroke(session.tool == .circle ? Color.accentColor : .primary.opacity(0.65), lineWidth: 1.5) }
                     .frame(width: 46, height: 46)
                     .background(session.tool == .circle ? Color.accentColor.opacity(0.12) : .clear, in: .circle)

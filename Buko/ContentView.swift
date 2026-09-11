@@ -379,7 +379,7 @@ struct ContentView: View {
             return false
         }
         if let canvas = session.canvas, let note = selectedNote {
-            note.drawingData = MonochromeInk.canonical(canvas.drawing).dataRepresentation()
+            note.drawingData = (session.host?.canonicalDrawing ?? MonochromeInk.canonical(canvas.drawing)).dataRepresentation()
         }
         return saveNow()
     }

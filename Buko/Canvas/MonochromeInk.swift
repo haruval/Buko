@@ -37,3 +37,34 @@ nonisolated enum MonochromeInk {
         recolor(drawing, to: .black)
     }
 }
+
+/// PencilKit 27 can retain off-screen tiles after an ink-only change. Refresh
+/// every displayed stroke's render identity, while retaining its document ID for
+/// persistence and for old drawings restored by undo. This state lives per note.
+nonisolated struct InkPresentation {
+    private var documentIDs: [UUID: UUID] = [:]
+
+    mutating func refresh(_ drawing: PKDrawing, to color: InkColor) -> PKDrawing {
+        guard #available(iOS 27, macOS 27, *) else { return MonochromeInk.recolor(drawing, to: color) }
+        return PKDrawing(strokes: drawing.strokes.map { original in
+            let documentID = documentIDs[original.id] ?? original.id
+            let displayID = UUID()
+            documentIDs[displayID] = documentID
+            return copy(original, color: color, id: displayID)
+        })
+    }
+
+    func canonical(_ drawing: PKDrawing) -> PKDrawing {
+        guard #available(iOS 27, macOS 27, *) else { return MonochromeInk.canonical(drawing) }
+        return PKDrawing(strokes: drawing.strokes.map { original in
+            copy(original, color: .black, id: documentIDs[original.id] ?? original.id)
+        })
+    }
+
+    @available(iOS 27, macOS 27, *)
+    private func copy(_ stroke: PKStroke, color: InkColor, id: UUID) -> PKStroke {
+        PKStroke(ink: PKInk(stroke.ink.inkType, color: color), path: stroke.path,
+                 transform: stroke.transform, mask: stroke.mask, randomSeed: stroke.randomSeed,
+                 id: id, renderGroupID: stroke.renderGroupID, renderState: stroke.renderState)
+    }
+}

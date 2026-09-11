@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// Shared native-glass tint for the circle AI interaction and its toolbar affordance.
+enum CircleAIStyle {
+    static let green = Color(red: 0.58, green: 0.85, blue: 0.63)
+    static let glassTint = green.opacity(0.35)
+}
+
 struct CircleIntentOverlay: View {
     let state: CircleIntentState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -51,10 +57,10 @@ struct CircleIntentOverlay: View {
 
     private func glassSurface<S: Shape>(_ shape: S, wave: Double) -> some View {
         shape.fill(.clear)
-            .glassEffect(.clear, in: shape)
+            .glassEffect(.clear.tint(CircleAIStyle.glassTint), in: shape)
             .overlay {
                 shape.fill(.white.opacity(state.processing ? 0.06 + 0.04 * wave : 0.025))
-                shape.stroke(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.08), .cyan.opacity(0.55)],
+                shape.stroke(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.08), CircleAIStyle.green.opacity(0.65)],
                                             startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
                     .opacity(state.processing ? 0.7 + 0.25 * wave : 0.75)
             }
@@ -88,7 +94,7 @@ struct CircleIntentOverlay: View {
         }
         .padding(16)
         // Regular native glass keeps diagnostic text readable over dense handwriting.
-        .glassEffect(.regular, in: .rect(cornerRadius: 26))
+        .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.2)), in: .rect(cornerRadius: 26))
         .accessibilityIdentifier("intentPopup")
     }
 

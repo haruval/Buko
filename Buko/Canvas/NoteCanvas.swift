@@ -70,7 +70,7 @@ struct NoteCanvas: UIViewRepresentable {
             host.circleIntent.cancel()
             // Undo may restore strokes created under another appearance.
             host.normalizeDisplayedInk()
-            onDrawingChange(MonochromeInk.canonical(canvasView.drawing).dataRepresentation())
+            onDrawingChange(host.canonicalDrawing.dataRepresentation())
             session.refreshUndoState()
             host.invalidateEdgeSnapshot()
         }

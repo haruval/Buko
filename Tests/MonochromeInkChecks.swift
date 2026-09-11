@@ -28,6 +28,31 @@ struct MonochromeInkChecks {
         precondition(light.strokes[0].mask?.bounds == mask.bounds)
         precondition(light.strokes[0].randomSeed == stroke.randomSeed)
         precondition(MonochromeInk.matches(original.strokes[0].ink.color, .white))
+        if #available(macOS 27, *) {
+            // Exercise a whole tall note, not just its visible first page.
+            let allPages = PKDrawing(strokes: (0..<8).map { page in
+                PKStroke(ink: PKInk(.pen, color: .black), path: path,
+                         transform: CGAffineTransform(translationX: 25, y: CGFloat(page) * 1500),
+                         mask: mask, randomSeed: 42)
+            })
+            var presentation = InkPresentation()
+            let darkPages = presentation.refresh(allPages, to: .white)
+            precondition(darkPages.strokes.count == allPages.strokes.count)
+            for (source, displayed) in zip(allPages.strokes, darkPages.strokes) {
+                precondition(source.id != displayed.id, "Off-screen strokes need fresh render identities too")
+                precondition(MonochromeInk.matches(displayed.ink.color, .white))
+                precondition(displayed.transform == source.transform && displayed.path.count == source.path.count)
+                precondition(displayed.randomSeed == source.randomSeed && displayed.mask?.bounds == source.mask?.bounds)
+            }
+            let lightPages = presentation.refresh(darkPages, to: .black)
+            let canonicalPages = presentation.canonical(lightPages)
+            precondition(canonicalPages.strokes.map(\.id) == allPages.strokes.map(\.id))
+            precondition(presentation.canonical(darkPages).strokes.map(\.id) == allPages.strokes.map(\.id),
+                         "Older undo snapshots must still recover document identities")
+            let reopened = try PKDrawing(data: canonicalPages.dataRepresentation())
+            precondition(reopened.strokes.map(\.id) == allPages.strokes.map(\.id))
+            precondition(reopened.strokes.allSatisfy { MonochromeInk.matches($0.ink.color, .black) })
+        }
         print("Monochrome ink checks passed: legacy white ink, light/dark presentation, canonical persistence, and stroke geometry preservation.")
     }
 }

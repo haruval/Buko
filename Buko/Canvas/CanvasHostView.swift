@@ -64,6 +64,9 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                       height: documentSize.height)
     }
     private var isOverview: Bool { PageGeometry.isOverview(scale: canvas.zoomScale, fitScale: pageFitScale) }
+    private var inkPresentation = InkPresentation()
+    var canonicalDrawing: PKDrawing { inkPresentation.canonical(canvas.drawing) }
+
     private var presentationStyle: UIUserInterfaceStyle = .unspecified
     private var inkColor: UIColor { presentationStyle == .dark ? .white : .black }
 
@@ -186,10 +189,10 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let manager = canvas.undoManager
         let wasRegistering = manager?.isUndoRegistrationEnabled == true
         if wasRegistering { manager?.disableUndoRegistration() }
-        let recolored = MonochromeInk.recolor(canvas.drawing, to: inkColor)
-        // PencilKit 27 retains rendered tiles for unchanged stroke identities.
-        // Clear that presentation cache synchronously, without registering undo.
-        // The original stroke IDs and geometry survive in the replacement drawing.
+        let recolored = inkPresentation.refresh(canvas.drawing, to: inkColor)
+        // Refresh the entire note, including unmounted/off-screen tiles. Merely
+        // clearing/reassigning a drawing with unchanged IDs refreshes visible ink
+        // but can leave other pages cached. Canonical IDs are restored on save.
         canvas.drawing = PKDrawing()
         canvas.drawing = recolored
         if wasRegistering { manager?.enableUndoRegistration() }
