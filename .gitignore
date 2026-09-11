@@ -1,0 +1,10 @@
+# Local project direction and agent instructions
+AGENTS.md
+
+# Xcode local state and build products
+.DS_Store
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+.xcodebuildmcp/
