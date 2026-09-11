@@ -22,6 +22,17 @@ struct PageGeometryChecks {
         precondition(PageGeometry.shouldSnap(scale: fit * 1.25, fitScale: fit))
         precondition(PageGeometry.isOverview(scale: fit * 0.7, fitScale: fit))
         precondition(!PageGeometry.isOverview(scale: fit, fitScale: fit))
+        precondition(PageGeometry.zoomPreparation(relativeScale: 1) == 0)
+        precondition(PageGeometry.zoomPreparation(relativeScale: 0.96) > 0)
+        precondition(PageGeometry.zoomPreparation(relativeScale: 0.96) < 0.5)
+        precondition(PageGeometry.zoomPreparation(relativeScale: 0.87) == 1)
+        let overview = PageGeometry.overviewScale(fitScale: fit, viewport: portrait, pageHeight: page.height)
+        precondition(!PageGeometry.shouldSnap(scale: overview, fitScale: fit))
+        precondition(page.height * overview < portrait.height)
+        let landscape = CGSize(width: 1376, height: 1032)
+        let landscapeFit = NotebookPaging.fitScale(viewport: landscape)
+        precondition(page.height * PageGeometry.overviewScale(fitScale: landscapeFit,
+            viewport: landscape, pageHeight: page.height) < landscape.height)
         let tapped = PageGeometry.documentPoint(CGPoint(x: 100, y: 200), scale: 0.5, offset: CGPoint(x: 500, y: 600))
         precondition(tapped == CGPoint(x: 1_200, y: 1_600))
         let scrolled = PageGeometry.screenRect(NotebookPaging.rect(for: 2), scale: fit,

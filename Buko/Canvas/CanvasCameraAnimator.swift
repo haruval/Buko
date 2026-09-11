@@ -5,10 +5,11 @@ import UIKit
 final class CanvasCameraAnimator {
     private var displayLink: CADisplayLink?
     private var start: CFTimeInterval = 0
+    private var duration: CFTimeInterval = 0.55
     private var step: ((CGFloat) -> Void)?
     private var completion: (() -> Void)?
 
-    func animate(step: @escaping (CGFloat) -> Void, completion: @escaping () -> Void) {
+    func animate(duration: CFTimeInterval = 0.55, step: @escaping (CGFloat) -> Void, completion: @escaping () -> Void) {
         cancel()
         if UIAccessibility.isReduceMotionEnabled {
             step(1)
@@ -16,6 +17,7 @@ final class CanvasCameraAnimator {
             return
         }
         self.step = step
+        self.duration = max(0.01, duration)
         self.completion = completion
         start = CACurrentMediaTime()
         let link = CADisplayLink(target: self, selector: #selector(tick))
@@ -24,7 +26,7 @@ final class CanvasCameraAnimator {
     }
 
     @objc private func tick() {
-        let progress = min(1, (CACurrentMediaTime() - start) / 0.55)
+        let progress = min(1, (CACurrentMediaTime() - start) / duration)
         step?(progress)
         if progress >= 1 {
             let finished = completion

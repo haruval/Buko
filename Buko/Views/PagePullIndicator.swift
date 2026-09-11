@@ -29,7 +29,8 @@ struct PagePullIndicator: View {
             if state.indicatorVisible || (state.isTurning && state.didCreate) {
                 GlassEffectContainer(spacing: 22) {
                     ZStack(alignment: .topLeading) {
-                        Text(state.isTurning ? "Page \(state.pageCount) created" : "Scroll to create page")
+                        Text(state.isTurning ? "Page \(state.pageCount) created"
+                             : state.progress >= 1 ? "Release to create page" : "Scroll to create page")
                             .font(.subheadline.weight(.medium))
                             .padding(.horizontal, 20)
                             .frame(height: 44)
@@ -54,7 +55,8 @@ struct PagePullIndicator: View {
                 }
                 .environment(\.colorScheme, .dark)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(state.isTurning ? "New page created" : "Scroll to create page")
+                .accessibilityLabel(state.isTurning ? "New page created"
+                                    : state.progress >= 1 ? "Release to create page" : "Scroll to create page")
             }
         }
         .allowsHitTesting(false)

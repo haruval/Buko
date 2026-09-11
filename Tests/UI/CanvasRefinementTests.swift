@@ -37,7 +37,9 @@ final class CanvasRefinementTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Release to create page"].exists)
 
         // Lift, then deliberately pull again from the settled bottom.
-        drag(canvas, velocity: .slow, hold: 0.3)
+        // The recording must show the release cue and unchanged 1/1 count for
+        // this entire hold, followed by exactly one append when the finger lifts.
+        drag(canvas, velocity: .slow, hold: 2)
         expect("Page 2 of 2", on: canvas)
         Thread.sleep(forTimeInterval: 0.8)
         drag(canvas, velocity: .fast, hold: 0)

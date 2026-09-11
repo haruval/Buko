@@ -14,13 +14,22 @@ final class NotebookInteractionTests: XCTestCase {
         app.buttons["New note"].tap()
         app.buttons["Hide notes"].tap()
         Thread.sleep(forTimeInterval: 0.6)
-        app.descendants(matching: .any)["Canvas zoom test area"].pinch(withScale: 0.5, velocity: -1)
+        let pinchArea = app.descendants(matching: .any)["Canvas zoom test area"]
+        // Letting go inside the resistance returns to fit; a short additional
+        // squeeze crosses the detent and completes the snap into overview.
+        pinchArea.pinch(withScale: 0.95, velocity: -0.2)
+        expect("Page 1 of 1", on: canvas)
+        pinchArea.pinch(withScale: 0.84, velocity: -0.2)
         expectation(for: NSPredicate(format: "value CONTAINS 'overview'"), evaluatedWith: canvas)
         waitForExpectations(timeout: 5)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Sticky zoom released into sharp overview"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        pinchArea.pinch(withScale: 0.8, velocity: -0.5)
+        XCTAssertTrue((canvas.value as? String ?? "").contains("overview"))
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.5)).tap()
+        expect("Page 1 of 1", on: canvas)
     }
 
     @MainActor

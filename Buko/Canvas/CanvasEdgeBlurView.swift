@@ -94,7 +94,8 @@ final class CanvasEdgeBlurView: UIView {
         let imageFrame = PageGeometry.screenRect(snapshotRect, scale: scale, offset: offset)
         let edgeFrame = (viewportEdges ? bounds : PageGeometry.screenRect(boundary, scale: scale, offset: offset))
             .offsetBy(dx: -imageFrame.minX, dy: -imageFrame.minY)
-        let band = 72 + min(1.5, strength) * 150
+        let band = viewportEdges ? min(bounds.width, bounds.height) * (0.02 + strength * 0.08)
+            : 72 + min(1.5, strength) * 150
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, image) in images.enumerated() {
