@@ -21,20 +21,21 @@ struct NotesSidebar: View {
             }
             .padding(.leading, 8)
 
-            HStack {
-                Text("YOUR NOTES")
-                    .font(.caption2.weight(.semibold))
-                    .tracking(1.8)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(notes.count, format: .number)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 10)
-
             ScrollView {
                 LazyVStack(spacing: 8) {
+                    HStack {
+                        Text("Uncategorized")
+                            .font(.caption2.weight(.semibold))
+                            .tracking(1.8)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(notes.count, format: .number)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 16)
+
                     ForEach(notes) { note in
                         Button { select(note) } label: {
                             HStack(spacing: 12) {

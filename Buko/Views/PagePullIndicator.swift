@@ -29,15 +29,16 @@ struct PagePullIndicator: View {
             if state.indicatorVisible || (state.isTurning && state.didCreate) {
                 GlassEffectContainer(spacing: 22) {
                     ZStack(alignment: .topLeading) {
-                        Text(state.isTurning ? "Page \(state.pageCount) created"
-                             : state.progress >= 1 ? "Release to create page" : "Scroll to create page")
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 20)
-                            .frame(height: 44)
-                            .bukoGlass(cornerRadius: 22)
-                            .glassEffectID("pull-label", in: glass)
-                            .opacity(state.isTurning ? max(0, 1 - state.creationProgress * 3) : 1)
-                            .position(state.indicatorCenter)
+                        if !state.isTurning {
+                            Text(state.progress >= 1 ? "Release to create page" : "Scroll to create page")
+                                .font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 20)
+                                .frame(height: 44)
+                                .bukoGlass(cornerRadius: 22)
+                                .glassEffectID("pull-label", in: glass)
+                                .position(state.indicatorCenter)
+                                .transition(.identity)
+                        }
 
                         let creating = state.isTurning && state.didCreate
                         let diameter: CGFloat = 20 + min(1, state.progress) * 6
