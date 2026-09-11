@@ -7,6 +7,7 @@ final class Note {
     var title: String
     var createdAt: Date
     var updatedAt: Date
+    var deletedAt: Date? = nil
     @Attribute(.externalStorage) var drawingData: Data
 
     init(title: String = "Untitled") {

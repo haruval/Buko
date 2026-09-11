@@ -5,9 +5,15 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Query(sort: \Note.createdAt, order: .reverse) private var notes: [Note]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Query(filter: #Predicate<Note> { $0.deletedAt == nil }, sort: \Note.createdAt, order: .reverse)
+    private var notes: [Note]
+    @Query(filter: #Predicate<Note> { $0.deletedAt != nil }, sort: \Note.deletedAt, order: .reverse)
+    private var trashedNotes: [Note]
     @State private var selectedID: UUID?
     @State private var sidebarVisible = true
+    @State private var settingsVisible = false
+    @State private var showsTrash = false
     @State private var session = CanvasSession()
     @State private var renamingNote: Note?
     @State private var newTitle = ""
@@ -22,7 +28,7 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
-                Color(uiColor: .systemBackground).ignoresSafeArea()
+                Color("CanvasBackground").ignoresSafeArea()
                 if let note = selectedNote {
                     NoteCanvas(note: note, session: session) { data in
                         note.drawingData = data
@@ -33,41 +39,18 @@ struct ContentView: View {
                     .ignoresSafeArea()
                 }
 
-                GlassEffectContainer(spacing: 20) {
-                    if sidebarVisible {
-                        NotesSidebar(
-                            notes: notes, selectedID: selectedNote?.id,
-                            select: select, create: createNote, hide: toggleSidebar,
-                            rename: { note in
-                                newTitle = note.title
-                                renamingNote = note
-                            }
-                        )
-                        .frame(height: max(240, min(640, geometry.size.height - 120)))
-                        .glassEffectID("library", in: glassNamespace)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
-                    } else {
-                        Button(action: toggleSidebar) {
-                            Image(systemName: "sidebar.left")
-                                .font(.system(size: 20))
-                                .frame(width: 52, height: 52)
-                        }
-                        .buttonStyle(.glass)
-                        .glassEffectID("library", in: glassNamespace)
-                        .accessibilityLabel("Show notes")
-                        .accessibilityIdentifier("showNotes")
-                    }
-                }
-                .padding(20)
+                floatingPanels(in: geometry.size)
+                    .padding(20)
             }
             .overlay(alignment: .bottom) {
                 ToolShelf(session: session)
+                    .disabled(selectedNote == nil)
                     .padding(.bottom, 16)
             }
         }
         .tint(.accentColor)
         .task {
-            if notes.isEmpty { createNote() }
+            if notes.isEmpty && trashedNotes.isEmpty { createNote() }
             else if selectedID == nil { selectedID = notes.first?.id }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -109,7 +92,80 @@ struct ContentView: View {
     private func toggleSidebar() {
         withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)) {
             sidebarVisible.toggle()
+            if sidebarVisible && horizontalSizeClass == .compact { settingsVisible = false }
         }
+    }
+
+    private func floatingPanels(in size: CGSize) -> some View {
+        GlassEffectContainer(spacing: 20) {
+            HStack(alignment: .top) {
+                ExpandingGlassPanel(
+                    isExpanded: sidebarVisible,
+                    size: CGSize(width: min(272, size.width - 104), height: max(220, min(640, size.height - 120))),
+                    alignment: .topLeading, anchor: .topLeading
+                ) {
+                    NotesSidebar(
+                        notes: notes, selectedID: selectedNote?.id,
+                        select: select, create: createNote, hide: toggleSidebar,
+                        rename: { note in
+                            newTitle = note.title
+                            renamingNote = note
+                        }, trash: moveToTrash
+                    )
+                } compact: {
+                    ShelfButton(title: "Show notes", symbol: "sidebar.left", action: toggleSidebar)
+                        .accessibilityIdentifier("showNotes")
+                }
+                .glassEffectID("library", in: glassNamespace)
+
+                Spacer(minLength: 12)
+
+                ExpandingGlassPanel(
+                    isExpanded: settingsVisible,
+                    size: CGSize(width: min(300, size.width - 104),
+                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 168),
+                    alignment: .topTrailing, anchor: .topTrailing
+                ) {
+                    SettingsPanel(
+                        trashedNotes: trashedNotes, showsTrash: $showsTrash,
+                        close: toggleSettings, restore: restore
+                    )
+                } compact: {
+                    ShelfButton(title: "Settings", symbol: "gearshape", action: toggleSettings)
+                        .accessibilityIdentifier("openSettings")
+                }
+                .glassEffectID("settings", in: glassNamespace)
+                .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82), value: showsTrash)
+            }
+        }
+    }
+
+    private func toggleSettings() {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)) {
+            settingsVisible.toggle()
+            if settingsVisible {
+                showsTrash = false
+                if horizontalSizeClass == .compact { sidebarVisible = false }
+            }
+        }
+    }
+
+    private func moveToTrash(_ note: Note) {
+        let wasSelected = selectedNote?.id == note.id
+        note.deletedAt = .now
+        if wasSelected {
+            selectedID = notes.first { $0.id != note.id && $0.deletedAt == nil }?.id
+            session = CanvasSession()
+        }
+        saveNow()
+    }
+
+    private func restore(_ note: Note) {
+        note.deletedAt = nil
+        note.updatedAt = .now
+        saveNow()
+        session = CanvasSession()
+        selectedID = note.id
     }
 
     private func select(_ note: Note) {

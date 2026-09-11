@@ -1,9 +1,50 @@
 import SwiftUI
 
 extension View {
-    /// Native clear glass lets the note stay legible beneath the floating chrome.
-    func bukoGlass(cornerRadius: CGFloat = 28) -> some View {
-        glassEffect(.clear, in: .rect(cornerRadius: cornerRadius))
+    func bukoGlass(cornerRadius: CGFloat = 28, interactive: Bool = false) -> some View {
+        modifier(BukoGlass(cornerRadius: cornerRadius, interactive: interactive))
+    }
+}
+
+private struct BukoGlass: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let cornerRadius: CGFloat
+    let interactive: Bool
+
+    func body(content: Content) -> some View {
+        content.glassEffect(
+            .clear.tint(Color("GlassTint").opacity(colorScheme == .dark ? 0.38 : 0.24)).interactive(interactive),
+            in: .rect(cornerRadius: cornerRadius)
+        )
+    }
+}
+
+/// Keep one glass surface alive while its bounds expand from the button's corner.
+/// Both directions share the same geometry, so opening never slides in from offscreen.
+struct ExpandingGlassPanel<Expanded: View, Compact: View>: View {
+    let isExpanded: Bool
+    let size: CGSize
+    let alignment: Alignment
+    let anchor: UnitPoint
+    @ViewBuilder var expanded: () -> Expanded
+    @ViewBuilder var compact: () -> Compact
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack(alignment: alignment) {
+            if isExpanded {
+                expanded()
+                    .frame(width: size.width, height: size.height)
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.15, anchor: anchor).combined(with: .opacity))
+            } else {
+                compact()
+                    .frame(width: 52, height: 52)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: isExpanded ? size.width : 52, height: isExpanded ? size.height : 52, alignment: alignment)
+        .clipShape(.rect(cornerRadius: isExpanded ? 32 : 26))
+        .bukoGlass(cornerRadius: isExpanded ? 32 : 26)
     }
 }
 

@@ -7,6 +7,7 @@ struct NotesSidebar: View {
     let create: () -> Void
     let hide: () -> Void
     let rename: (Note) -> Void
+    let trash: (Note) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -64,6 +65,7 @@ struct NotesSidebar: View {
                         .accessibilityAddTraits(note.id == selectedID ? [.isSelected] : [])
                         .contextMenu {
                             Button("Rename", systemImage: "pencil") { rename(note) }
+                            Button("Delete", systemImage: "trash", role: .destructive) { trash(note) }
                         }
                     }
                 }
@@ -76,11 +78,11 @@ struct NotesSidebar: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.plain)
+            .bukoGlass(interactive: true)
             .accessibilityIdentifier("newNote")
         }
         .padding(18)
-        .frame(width: 272)
-        .bukoGlass(cornerRadius: 32)
+
     }
 }

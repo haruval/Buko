@@ -38,7 +38,8 @@ struct NoteCanvas: UIViewRepresentable {
         canvas.drawingPolicy = session.allowsFingerDrawing ? .anyInput : .pencilOnly
         switch session.tool {
         case .pen:
-            canvas.tool = PKInkingTool(.pen, color: UIColor.label, width: 2.5)
+            // PencilKit adapts its canonical ink colors to the canvas appearance.
+            canvas.tool = PKInkingTool(.pen, color: .black, width: 2.5)
         case .eraser:
             canvas.tool = PKEraserTool(.vector)
         }
@@ -65,37 +66,31 @@ struct NoteCanvas: UIViewRepresentable {
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            host?.updatePaperFrame()
+            host?.updateGuideFrame()
             host?.extendIfNeeded()
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
-            host?.updatePaperFrame()
+            host?.updateGuideFrame()
         }
     }
 }
 
-/// A fixed-width writing page inside a wider workspace. The page is only a visual
-/// guide: PencilKit can draw on either side, and the document grows down on demand.
+/// PencilKit remains the only scroll/zoom owner. Corner guides are a noninteractive
+/// overlay in viewport coordinates; the writing surface has no permanent page edges.
 final class CanvasHostView: UIView {
     let canvas = PKCanvasView()
-    private let paper = UIView()
-    private let pageWidth: CGFloat = 1_000
-    private let pageOriginX: CGFloat = 1_000
-    private let workspaceWidth: CGFloat = 3_000
+    private let guides = UIView()
+    private let cornerLayer = CAShapeLayer()
+    private var guideRect = CGRect.zero
+    private var lastViewportSize = CGSize.zero
     var documentHeight: CGFloat = 6_000
     private var hasPositionedPage = false
-    private(set) var pageFitScale: CGFloat = 1
+    private var pageFitScale: CGFloat = 1
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .secondarySystemBackground
-        paper.backgroundColor = .systemBackground
-        paper.layer.shadowColor = UIColor.black.cgColor
-        paper.layer.shadowOpacity = 0.08
-        paper.layer.shadowRadius = 16
-        paper.isUserInteractionEnabled = false
-        addSubview(paper)
+        backgroundColor = UIColor(named: "CanvasBackground")
         canvas.backgroundColor = .clear
         canvas.isOpaque = false
         canvas.contentInsetAdjustmentBehavior = .never
@@ -104,8 +99,22 @@ final class CanvasHostView: UIView {
         canvas.showsVerticalScrollIndicator = false
         canvas.maximumZoomScale = 4
         canvas.accessibilityLabel = "Note canvas"
-        canvas.accessibilityHint = "Write with Apple Pencil. Drag with a finger to move, or pinch to zoom."
+        canvas.accessibilityHint = "Write with Apple Pencil. Drag to move. Pinch to zoom; release near page size to snap to fit."
         addSubview(canvas)
+
+        guides.isUserInteractionEnabled = false
+        guides.isAccessibilityElement = false
+        guides.alpha = 0
+        cornerLayer.fillColor = UIColor.clear.cgColor
+        cornerLayer.lineWidth = 1.8
+        cornerLayer.lineCap = .round
+        cornerLayer.lineJoin = .round
+        guides.layer.addSublayer(cornerLayer)
+        addSubview(guides)
+        canvas.pinchGestureRecognizer?.addTarget(self, action: #selector(pinchChanged(_:)))
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: CanvasHostView, _: UITraitCollection) in
+            view.updateGuideFrame()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
@@ -113,26 +122,85 @@ final class CanvasHostView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.width > 0, bounds.height > 0 else { return }
+        let oldSize = lastViewportSize
+        let oldScale = canvas.zoomScale
+        let oldCenter = CGPoint(x: (canvas.contentOffset.x + oldSize.width / 2) / oldScale,
+                                y: (canvas.contentOffset.y + oldSize.height / 2) / oldScale)
         canvas.frame = bounds
+        guides.frame = bounds
         if !hasPositionedPage {
             hasPositionedPage = true
-            pageFitScale = bounds.width / pageWidth
+            pageFitScale = PageGeometry.fitScale(for: bounds.size)
             canvas.minimumZoomScale = pageFitScale * 0.3
-            canvas.contentSize = CGSize(width: workspaceWidth, height: documentHeight)
+            canvas.contentSize = CGSize(width: PageGeometry.workspaceWidth, height: documentHeight)
             canvas.zoomScale = pageFitScale
-            canvas.contentOffset = CGPoint(x: pageOriginX * pageFitScale, y: 0)
+            canvas.contentOffset = CGPoint(x: PageGeometry.pageOriginX * pageFitScale, y: 0)
+        } else if oldSize != bounds.size {
+            // Preserve relative magnification and reading position through rotation/resizing.
+            let relativeScale = oldScale / pageFitScale
+            pageFitScale = PageGeometry.fitScale(for: bounds.size)
+            canvas.minimumZoomScale = pageFitScale * 0.3
+            canvas.zoomScale = min(canvas.maximumZoomScale, max(canvas.minimumZoomScale, relativeScale * pageFitScale))
+            canvas.contentOffset = CGPoint(
+                x: max(0, oldCenter.x * canvas.zoomScale - bounds.width / 2),
+                y: max(0, oldCenter.y * canvas.zoomScale - bounds.height / 2)
+            )
+            guides.alpha = 0
         }
-        updatePaperFrame()
+        lastViewportSize = bounds.size
+        updateGuideFrame()
     }
 
-    func updatePaperFrame() {
-        let scale = canvas.zoomScale
-        paper.frame = CGRect(
-            x: pageOriginX * scale - canvas.contentOffset.x,
-            y: -canvas.contentOffset.y,
-            width: pageWidth * scale,
-            height: documentHeight * scale
-        )
+    @objc private func pinchChanged(_ recognizer: UIPinchGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            guideRect = PageGeometry.pageRect(viewport: bounds.size, scale: canvas.zoomScale, offset: canvas.contentOffset)
+            updateGuideFrame()
+            setGuidesVisible(true)
+        case .ended:
+            setGuidesVisible(false)
+            // Let PencilKit finish consuming the pinch before applying the fit detent.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.canvas.pinchGestureRecognizer?.state != .began,
+                      self.canvas.pinchGestureRecognizer?.state != .changed,
+                      PageGeometry.shouldSnap(scale: self.canvas.zoomScale, fitScale: self.pageFitScale) else { return }
+                self.canvas.zoom(to: self.guideRect, animated: !UIAccessibility.isReduceMotionEnabled)
+                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            }
+        case .cancelled, .failed:
+            setGuidesVisible(false)
+        default:
+            break
+        }
+    }
+
+    private func setGuidesVisible(_ visible: Bool) {
+        UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.18,
+                       delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.guides.alpha = visible ? 1 : 0
+        }
+    }
+
+    func updateGuideFrame() {
+        guard !guideRect.isEmpty else { return }
+        let rect = PageGeometry.screenRect(guideRect, scale: canvas.zoomScale, offset: canvas.contentOffset).insetBy(dx: 3, dy: 3)
+        let length: CGFloat = min(22, min(rect.width, rect.height) / 4)
+        let path = UIBezierPath()
+        for (point, dx, dy) in [
+            (CGPoint(x: rect.minX, y: rect.minY), CGFloat(1), CGFloat(1)),
+            (CGPoint(x: rect.maxX, y: rect.minY), CGFloat(-1), CGFloat(1)),
+            (CGPoint(x: rect.minX, y: rect.maxY), CGFloat(1), CGFloat(-1)),
+            (CGPoint(x: rect.maxX, y: rect.maxY), CGFloat(-1), CGFloat(-1))
+        ] {
+            path.move(to: CGPoint(x: point.x + dx * length, y: point.y))
+            path.addLine(to: point)
+            path.addLine(to: CGPoint(x: point.x, y: point.y + dy * length))
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        cornerLayer.path = path.cgPath
+        cornerLayer.strokeColor = UIColor(named: "AccentColor")?.resolvedColor(with: traitCollection).withAlphaComponent(0.8).cgColor
+        CATransaction.commit()
     }
 
     func extendIfNeeded() {
@@ -142,7 +210,7 @@ final class CanvasHostView: UIView {
         let neededHeight = max(visibleBottom, drawingBottom) + 1_500
         guard neededHeight > documentHeight else { return }
         documentHeight = (neededHeight / 2_000).rounded(.up) * 2_000
-        canvas.contentSize = CGSize(width: workspaceWidth * canvas.zoomScale, height: documentHeight * canvas.zoomScale)
-        updatePaperFrame()
+        canvas.contentSize = CGSize(width: PageGeometry.workspaceWidth * canvas.zoomScale, height: documentHeight * canvas.zoomScale)
+        updateGuideFrame()
     }
 }
