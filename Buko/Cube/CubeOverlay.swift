@@ -12,6 +12,7 @@ final class CubeState: NSObject {
     private(set) var appearance: CGFloat = 0
     private(set) var stretch: CGFloat = 0
     private(set) var tilt = CGVector.zero
+    private(set) var facePull = CGVector.zero
     private(set) var voice: CGFloat = 0
     @ObservationIgnored private var dynamics = CubeDynamics(position: .zero)
     @ObservationIgnored private var page = CGRect.zero
@@ -25,13 +26,15 @@ final class CubeState: NSObject {
     var badgeVisible: Bool { active && (microphone.status == .denied || microphone.status == .unavailable) }
     var hitBounds: CGRect {
         guard active else { return .zero }
-        return CGRect(x: center.x - 58 * scale, y: center.y - 58 * scale, width: 116 * scale, height: 116 * scale)
+        let reach = CubeDynamics.edgeInset * scale
+        return CGRect(x: center.x - reach, y: center.y - reach, width: 2 * reach, height: 2 * reach)
     }
 
     func spawn(page: CGRect, at point: CGPoint, scale: CGFloat, offset: CGPoint) {
         self.page = page; self.scale = scale; self.offset = offset
         dynamics = CubeDynamics(position: CubeDynamics.clamp(point, to: page.insetBy(dx: CubeDynamics.edgeInset, dy: CubeDynamics.edgeInset)))
         active = true; visible = true; ending = nil; dragOffset = nil
+        facePull = .zero; tilt = .zero; stretch = 0; voice = 0
         began = CACurrentMediaTime(); appearance = UIAccessibility.isReduceMotionEnabled ? 1 : 0
         updateProjection(scale: scale, offset: offset)
         startClock()
@@ -101,9 +104,10 @@ final class CubeState: NSObject {
         }
         voice = dynamics.voice
         stretch = reduce ? 0 : min(0.16, hypot(dynamics.velocity.dx, dynamics.velocity.dy) / 5000) + dynamics.collision * 0.12
-        let targetTilt = CGVector(dx: reduce ? 0 : max(-18, min(18, dynamics.velocity.dy / 35)),
-                                  dy: reduce ? 0 : max(-18, min(18, -dynamics.velocity.dx / 35)))
-        tilt = CGVector(dx: tilt.dx + (targetTilt.dx - tilt.dx) * 0.2, dy: tilt.dy + (targetTilt.dy - tilt.dy) * 0.2)
+        facePull = dynamics.facePull
+        // Pulling up offsets the top upward, leaving the bottom wall exposed.
+        // A small tilt adds perspective without moving the lower face ahead.
+        tilt = CGVector(dx: facePull.dy * 0.35, dy: -facePull.dx * 0.35)
         updateProjection(scale: scale, offset: offset)
     }
 }
@@ -121,8 +125,8 @@ struct CubeOverlay: View {
             ZStack(alignment: .topLeading) {
                 if state.visible {
                     cube
-                        .scaleEffect(x: state.appearance * (1 + state.stretch) * (1 + state.voice * 0.16),
-                                     y: state.appearance / (1 + state.stretch) * (1 + state.voice * 0.16))
+                        .scaleEffect(x: state.appearance * (1 + state.stretch) * (1 + state.voice * CubeDynamics.voiceScaleGain),
+                                     y: state.appearance / (1 + state.stretch) * (1 + state.voice * CubeDynamics.voiceScaleGain))
                         .scaleEffect(state.scale)
                         .position(state.center)
                         .opacity(min(1, state.appearance * 3))
@@ -169,25 +173,25 @@ struct CubeOverlay: View {
 
     private var cube: some View {
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-        let depth = min(12, hypot(state.tilt.dx, state.tilt.dy) * 0.45)
         return ZStack {
-            // A rounded lower face exposes thickness only as the cube tilts.
+            // One consistently tinted glass surface spans the body and top.
+            // Stacking a second tinted face would darken the cube while pulling.
+            let wall = CubeSideWall(pull: state.facePull)
+            wall.fill(.clear)
+                .glassEffect(.clear.tint(CircleAIStyle.glassTint), in: wall)
+            // The moving face is defined by its rim rather than another glass layer.
             shape.fill(.clear)
-                .glassEffect(.clear.tint(CircleAIStyle.green.opacity(0.65)), in: shape)
-                .offset(x: -state.tilt.dy * 0.35, y: depth * 0.5 + state.tilt.dx * 0.2)
-                .opacity(min(1, depth / 5))
-            shape.fill(.clear)
-                .glassEffect(.clear.tint(CircleAIStyle.glassTint), in: shape)
                 .overlay {
                     shape.stroke(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.05), CircleAIStyle.green.opacity(0.75)],
                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.3)
                 }
                 .rotation3DEffect(.degrees(state.tilt.dx), axis: (x: 1, y: 0, z: 0), perspective: 0.4)
                 .rotation3DEffect(.degrees(state.tilt.dy), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
+                .offset(x: state.facePull.dx, y: state.facePull.dy)
         }
         .frame(width: CubeDynamics.side, height: CubeDynamics.side)
-        .shadow(color: .black.opacity(0.14), radius: 3 + depth * 0.3, y: 2 + depth * 0.3)
-        .contentShape(.rect(cornerRadius: 18))
+        .shadow(color: .black.opacity(0.14), radius: 3, y: 2)
+        .contentShape(CubeSideWall(pull: state.facePull))
     }
 }
 
@@ -195,5 +199,33 @@ final class CubeOverlayContainer: UIView {
     weak var state: CubeState?
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         state?.hitBounds.contains(point) ?? false
+    }
+}
+
+/// A rounded extrusion joining two translated faces, rather than two detached squares.
+private struct CubeSideWall: Shape {
+    let pull: CGVector
+    func path(in rect: CGRect) -> Path {
+        let radius: CGFloat = 18
+        let inset = rect.insetBy(dx: radius, dy: radius)
+        let corners = [CGPoint(x: inset.minX, y: inset.minY), CGPoint(x: inset.maxX, y: inset.minY),
+                       CGPoint(x: inset.maxX, y: inset.maxY), CGPoint(x: inset.minX, y: inset.maxY)]
+        let points = (corners + corners.map { CGPoint(x: $0.x + pull.dx, y: $0.y + pull.dy) })
+            .sorted { $0.x == $1.x ? $0.y < $1.y : $0.x < $1.x }
+        func cross(_ a: CGPoint, _ b: CGPoint, _ c: CGPoint) -> CGFloat {
+            (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+        }
+        func chain(_ points: [CGPoint]) -> [CGPoint] {
+            var result: [CGPoint] = []
+            for point in points {
+                while result.count >= 2 && cross(result[result.count - 2], result[result.count - 1], point) <= 0 { result.removeLast() }
+                result.append(point)
+            }
+            return result
+        }
+        let hull = Array(chain(points).dropLast()) + Array(chain(points.reversed()).dropLast())
+        let core = CircleGeometry.path(hull)
+        let rim = core.copy(strokingWithWidth: radius * 2, lineCap: .round, lineJoin: .round, miterLimit: 2)
+        return Path(core.union(rim))
     }
 }

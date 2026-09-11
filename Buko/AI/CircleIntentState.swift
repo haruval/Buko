@@ -47,7 +47,16 @@ final class CircleIntentState {
 
     var processing: Bool { phase == .recognizing || phase == .inferring || phase == .proposing }
 
-    /// Routine input/camera changes can cancel work, but only X dismisses a result.
+    var hasPreview: Bool { processing || phase == .finished }
+
+    /// Camera movement abandons only an unfinished drawn gesture. Once a request
+    /// owns a snapshot, it continues independently of the current viewport.
+    func cancelTracing() {
+        guard phase == .tracing else { return }
+        cancel()
+    }
+
+    /// Editing, tool changes and backgrounding may invalidate pending work.
     func cancelPending() {
         guard phase != .finished else { return }
         cancel()
@@ -93,7 +102,7 @@ final class CircleIntentState {
     }
 
     func trace(_ points: [CGPoint]) {
-        guard phase != .finished else { return }
+        guard !hasPreview else { return }
         if phase != .tracing { cancel(); phase = .tracing; issue = nil; recognizedText = "" }
         tracedPoints = points
         let now = Date.timeIntervalSinceReferenceDate
@@ -107,7 +116,7 @@ final class CircleIntentState {
     }
 
     func analyze(drawing: PKDrawing, polygon: [CGPoint], screenPolygon: [CGPoint], scale: CGFloat, offset: CGPoint) {
-        guard phase != .finished else { return }
+        guard !hasPreview else { return }
         captureScale = scale; captureOffset = offset; projection = .identity
         selectionBounds = CircleGeometry.path(screenPolygon).boundingBoxOfPath
         closedAt = Date.timeIntervalSinceReferenceDate

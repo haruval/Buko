@@ -154,7 +154,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     func configure(tool: CanvasSession.Tool, allowsFingerDrawing: Bool, showsGrid: Bool, colorScheme: ColorScheme) {
         setAppearance(colorScheme == .dark ? .dark : .light)
-        if self.tool != tool { cancelCircleInteraction() }
+        if self.tool != tool { cancelCircleInteraction(); circleIntent.cancelPending() }
         self.tool = tool
         if tool != .cube { cube.despawn() }
         circleGesture.singleFinger = tool == .circle
@@ -489,7 +489,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     func beginPagePull() {
-        circleIntent.cancelPending()
+        circleIntent.cancelTracing()
         guard !isSnapping, !pageTurnPending, !isPullActive else { return }
         wheelEnd?.cancel()
         isPullActive = true
@@ -690,14 +690,14 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             }
             circleIntent.analyze(drawing: canvas.drawing, polygon: polygon, screenPolygon: recognizer.points,
                                  scale: canvas.zoomScale, offset: canvas.contentOffset)
-        case .cancelled, .failed: circleIntent.cancelPending()
+        case .cancelled, .failed: circleIntent.cancelTracing()
         default: break
         }
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         if gestureRecognizer === circleGesture {
-            return tool != .cube && circleIntent.phase != .finished && !isOverview && !isPinching && !isSnapping && !pageTurnPending
+            return tool != .cube && !circleIntent.hasPreview && !isOverview && !isPinching && !isSnapping && !pageTurnPending
                 && touch.type == .direct && !circleContainer.point(inside: touch.location(in: circleContainer), with: nil)
         }
         return isOverview && !isPinching && !isSnapping
@@ -772,7 +772,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             circleGesture.isEnabled = false
             circleGesture.isEnabled = true
         }
-        circleIntent.cancelPending()
+        circleIntent.cancelTracing()
     }
 
     func stopAnimations() {

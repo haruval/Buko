@@ -5,12 +5,16 @@ import CoreGraphics
 nonisolated struct CubeDynamics {
     static let side: CGFloat = 64
     // Reserves room for microphone expansion, deformation and the rounded page corner.
-    static let edgeInset: CGFloat = 56
+    static let edgeInset: CGFloat = 104
+    static let voiceScaleGain: CGFloat = 0.45
+    static let maximumFacePull: CGFloat = 20
     var position: CGPoint
     var velocity = CGVector.zero
     var target: CGPoint?
     var collision: CGFloat = 0
     var voice: CGFloat = 0
+    var facePull = CGVector.zero
+    private var faceVelocity = CGVector.zero
     private var voiceVelocity: CGFloat = 0
 
     mutating func step(seconds: CGFloat, page: CGRect, level: CGFloat, reduceMotion: Bool) {
@@ -49,11 +53,36 @@ nonisolated struct CubeDynamics {
             }
             position = bounded
             collision *= exp(-10 * dt)
-            // Volume is a spring target, never the raw per-buffer amplitude.
-            voiceVelocity += ((min(1, max(0, level)) - voice) * 150 - voiceVelocity * 21) * dt
+            // The grabbed top leads the heavier body in the finger's direction.
+            // It relaxes independently after release instead of flipping with velocity.
+            let goal = target.map { Self.clamp($0, to: limits) }
+            var desiredPull = goal.map { CGVector(dx: ($0.x - position.x) * 0.8 + velocity.dx * 0.012,
+                                                  dy: ($0.y - position.y) * 0.8 + velocity.dy * 0.012) } ?? .zero
+            let distance = hypot(desiredPull.dx, desiredPull.dy)
+            if distance > Self.maximumFacePull {
+                desiredPull.dx *= Self.maximumFacePull / distance
+                desiredPull.dy *= Self.maximumFacePull / distance
+            }
+            if reduceMotion { facePull = .zero; faceVelocity = .zero }
+            else {
+                faceVelocity.dx += ((desiredPull.dx - facePull.dx) * 520 - faceVelocity.dx * 30) * dt
+                faceVelocity.dy += ((desiredPull.dy - facePull.dy) * 520 - faceVelocity.dy * 30) * dt
+                facePull.dx += faceVelocity.dx * dt; facePull.dy += faceVelocity.dy * dt
+            }
+            // Faster attack makes syllables visible, with a softer decay in silence.
+            let voiceTarget = min(1, max(0, level))
+            let stiffness: CGFloat = voiceTarget > voice ? 420 : 220
+            let damping: CGFloat = voiceTarget > voice ? 28 : 24
+            voiceVelocity += ((voiceTarget - voice) * stiffness - voiceVelocity * damping) * dt
             voice = min(1, max(0, voice + voiceVelocity * dt))
         }
         if target == nil, hypot(velocity.dx, velocity.dy) < 0.5 { velocity = .zero }
+    }
+
+    static func microphoneLevel(rms: Float) -> CGFloat {
+        let db = 20 * log10(max(0.00001, rms))
+        let normalized = min(1, max(0, (db + 60) / 35))
+        return CGFloat(pow(normalized, 0.7))
     }
 
     static func clamp(_ point: CGPoint, to rect: CGRect) -> CGPoint {

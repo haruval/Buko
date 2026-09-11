@@ -66,13 +66,12 @@ final class CubeMicrophone {
             let format = input.outputFormat(forBus: 0)
             guard format.sampleRate > 0, format.channelCount > 0 else { throw MicError.noInput }
             let meter = envelope
-            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            input.installTap(onBus: 0, bufferSize: 512, format: format) { buffer, _ in
                 guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
                 var sum: Float = 0
                 for i in 0..<Int(buffer.frameLength) { sum += samples[i] * samples[i] }
                 let rms = sqrt(sum / Float(buffer.frameLength))
-                let db = 20 * log10(max(0.00001, rms))
-                meter.write(CGFloat(min(1, max(0, (db + 55) / 40))))
+                meter.write(CubeDynamics.microphoneLevel(rms: rms))
             }
             engine = audio
             audio.prepare()
