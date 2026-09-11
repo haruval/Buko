@@ -1,10 +1,21 @@
 # Buko: pre-device security and data-safety review
 
-Reviewed September 10, 2026, against the current working tree, including page spacing, the page library, recoverable page deletion, and Empty Trash.
+Reviewed September 11, 2026, against the current working tree, including page multi-selection, transactional bulk Trash, page spacing, recoverable page deletion, and Empty Trash.
 
 The subsequent page-only update removes freeform growth and adds a fresh-pull creation gate and inline title editing. Its version-2 page-coverage migration preserves drawing bytes and existing page IDs while adding descriptors for older ink below the saved page count. Migration, deletion/rollback, and ink-preservation checks passed again, together with portrait/landscape simulator interaction tests. No new permissions, networking, or filesystem deletion were added.
 
 **Assessment:** reasonable to test on your iPad with disposable notes. No app-code behavior indicating device compromise, data exfiltration, or modification of other apps was found. This is a source/configuration review and simulator validation, not a guarantee of zero risk or a penetration test of iPadOS.
+
+Because the device contains vital data, make and verify a current backup before installing development builds. An [encrypted Finder backup](https://support.apple.com/en-us/108796) is one option; retain its password. Keep independent copies of irreplaceable files, and use disposable notes in Buko until export/backup is implemented. The physical iPad, its backups, and its final signed installation were not accessed or verified during this review.
+
+## September 11 device build and bulk-deletion review
+
+- An **unsigned arm64 iPhoneOS build succeeded**, using the normal Buko scheme and the physical-device SDK, without deployment or provisioning changes. The generated device Info.plist specifies iPadOS 26 minimum and single-window operation, with no sensitive permission descriptions, background modes, file sharing, document import handlers, or URL handlers. No custom entitlement file or third-party package/build script is configured. Linked dependencies are Apple frameworks and Swift/system runtimes; Xcode's own Buko debug library is expected in a Debug build.
+- Rechecked shipping imports, persistence operations, and API use. There are no network requests, shell/process execution, dynamic library loading calls, filesystem removal routines, or APIs requesting other apps' documents/photos/contacts. iPadOS's [sandbox boundary](https://support.apple.com/en-ae/guide/security/sec15bfe098e/web) separates app containers. This limits Buko's access to your existing device data; it is not proof that every software or OS failure is impossible.
+- Multi-selection is scoped to stable page IDs in one note and cleared when the menu closes or the note changes. Bulk deletion revalidates every selected ID before modifying anything, flushes current drawing saves, and stages all archives and the retained drawing in one transaction. It moves pages to Trash; permanent deletion remains a separate confirmed Empty Trash action. Failed batches leave the selection available to retry.
+- Bulk ink processing is one pass. Each archive retains its original page number and full strokes. Unselected pages shift by the number of removed predecessors; other notes are not modified. Isolated tests passed for nonadjacent selection, stale/invalid IDs rejecting the entire batch, rollback after staged bulk deletion, all-page deletion, and out-of-order restoration with original IDs and stroke geometry. Existing migration, corruption, scoped permanent-deletion, unrelated-file preservation, and monochrome-ink checks also passed.
+- Final development signing depends on your Xcode team and provisioning profile. The unsigned build cannot verify the final signed entitlements, on-device file-protection attributes, real hardware load/thermal behavior, or the condition of your iPad's vital data and backups. No physical iPad install, erase, restore, or deletion was performed.
+- The simulator UI test passed selection/deselection of pages 1 and 3, grouped long-press deletion, restoration in reverse order, and relaunch persistence. The final normal simulator build also passed and was installed/launched on the existing simulator without clearing its data. No destructive test was run against the physical iPad or its vital data.
 
 ## Findings addressed
 

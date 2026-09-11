@@ -180,6 +180,8 @@ struct ContentView: View {
             renamePagePresented = true
         }, trash: { (page: NotebookPage) in
             trashPage(page, from: note)
+        }, trashSelection: { ids in
+            trashPages(ids, from: note)
         }, opening: { settingsVisible = false })
         .environment(\.colorScheme, session.pagePull.rightOverBlack ? .dark : colorScheme)
         .padding(.trailing, 20)
@@ -336,8 +338,16 @@ struct ContentView: View {
     }
 
     private func trashPage(_ page: NotebookPage, from note: Note) {
-        guard flushDrawing(), performEdit(notes: [note], { try NotebookEdits.trash(page.id, in: note, context: modelContext) }) else { return }
+        trashPages([page.id], from: note)
+    }
+
+    @discardableResult
+    private func trashPages(_ ids: Set<UUID>, from note: Note) -> Bool {
+        guard flushDrawing(), performEdit(notes: [note], {
+            try NotebookEdits.trashPages(ids, in: note, context: modelContext)
+        }) else { return false }
         resetCanvas()
+        return true
     }
 
     private func restorePage(_ page: TrashedPage) {

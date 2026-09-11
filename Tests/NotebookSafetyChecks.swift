@@ -23,6 +23,62 @@ import SwiftData
                              - CGFloat(index) * NotebookPaging.pageGap) < 0.001)
         }
         let migratedBytes = note.drawingData
+        // Nonadjacent bulk deletion must preserve original archive numbers,
+        // untouched notes, and the complete selection on any failed transaction.
+        let batch = Note(title: "Batch")
+        batch.pageLayoutVersion = 2
+        try batch.setPages((0..<3).map { _ in NotebookPage() })
+        batch.drawingData = migratedBytes
+        context.insert(batch)
+        try context.save()
+        let batchIDs = batch.activePages.map(\.id)
+        let batchMetadata = batch.pageMetadata
+        do {
+            try NotebookEdits.commit(in: context, notes: [batch]) {
+                try NotebookEdits.trashPages([batchIDs[0], batchIDs[2]], in: batch, context: context)
+                throw Injected.failure
+            }
+            preconditionFailure("Expected failed batch rollback")
+        } catch Injected.failure { }
+        try check(batch.drawingData == migratedBytes && batch.pageMetadata == batchMetadata)
+        try check(try context.fetch(FetchDescriptor<TrashedPage>()).isEmpty)
+        do {
+            try NotebookEdits.commit(in: context, notes: [batch]) {
+                try NotebookEdits.trashPages([batchIDs[0], UUID()], in: batch, context: context)
+            }
+            preconditionFailure("A stale selection must fail without deleting valid members")
+        } catch NotebookEdits.EditError.invalidPage { }
+        try check(batch.pageMetadata == batchMetadata && batch.drawingData == migratedBytes)
+        try NotebookEdits.commit(in: context, notes: [batch]) {
+            try NotebookEdits.trashPages([batchIDs[0], batchIDs[2]], in: batch, context: context)
+        }
+        try check(batch.activePages.map(\.id) == [batchIDs[1]])
+        let batchInk = try NotebookEdits.drawing(batch.drawingData)
+        try check(batchInk.strokes.count == 1 && batchInk.strokes[0].randomSeed == migrated.strokes[1].randomSeed)
+        try check(abs(batchInk.strokes[0].transform.ty - migrated.strokes[1].transform.ty + NotebookPaging.pageStride) < 0.001)
+        let readContext = ModelContext(storage)
+        let storedArchives = try readContext.fetch(FetchDescriptor<TrashedPage>())
+        try check(Set(storedArchives.map(\.originalIndex)) == [0, 2])
+        try check(Set(storedArchives.map(\.label)) == ["Batch (page 1)", "Batch (page 3)"])
+        try check(note.drawingData == migratedBytes)
+        for id in [batchIDs[2], batchIDs[0]] {
+            let archive = try context.fetch(FetchDescriptor<TrashedPage>()).first { $0.id == id }!
+            try NotebookEdits.commit(in: context, notes: [batch]) { try NotebookEdits.restore(archive, context: context) }
+        }
+        try check(batch.activePages.map(\.id) == batchIDs)
+        try assertInkEqual(batch.drawingData, migrated)
+        try NotebookEdits.commit(in: context, notes: [batch]) {
+            try NotebookEdits.trashPages(Set(batchIDs), in: batch, context: context)
+        }
+        try check(batch.pageCount == 0 && (try NotebookEdits.drawing(batch.drawingData)).strokes.isEmpty)
+        for id in [batchIDs[2], batchIDs[0], batchIDs[1]] {
+            let archive = try context.fetch(FetchDescriptor<TrashedPage>()).first { $0.id == id }!
+            try NotebookEdits.commit(in: context, notes: [batch]) { try NotebookEdits.restore(archive, context: context) }
+        }
+        try check(batch.activePages.map(\.id) == batchIDs)
+        try assertInkEqual(batch.drawingData, migrated)
+        context.delete(batch) // Only this temporary test fixture.
+        try context.save()
         let older = Note(title: "Older page coverage")
         older.pageLayoutVersion = 1
         try older.setPages([NotebookPage()])

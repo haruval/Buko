@@ -91,28 +91,47 @@ enum NotebookEdits {
     }
 
     static func trash(_ id: UUID, in note: Note, context: ModelContext) throws {
-        guard note.deletedAt == nil else { throw EditError.invalidPage }
+        try trashPages([id], in: note, context: context)
+    }
+
+    /// Stage a whole selection in one pass, with original page numbers and full
+    /// stroke paths. The caller commits once, so a failed batch cannot half-delete.
+    static func trashPages(_ ids: Set<UUID>, in note: Note, context: ModelContext) throws {
+        guard note.deletedAt == nil, !ids.isEmpty else { throw EditError.invalidPage }
         var pages = try note.pages()
         let active = pages.filter { !$0.isTrashed }
-        guard let index = active.firstIndex(where: { $0.id == id }),
-              let slot = pages.firstIndex(where: { $0.id == id }) else { throw EditError.invalidPage }
+        guard active.count == note.pageCount, Set(pages.map(\.id)).count == pages.count,
+              ids.isSubset(of: Set(active.map(\.id))) else { throw EditError.invalidPage }
+        let indices = active.indices.filter { ids.contains(active[$0].id) }
+        let selectedIndices = Set(indices)
+        var removedBefore = [Int](repeating: 0, count: active.count)
+        var removed = 0
+        for index in active.indices {
+            removedBefore[index] = removed
+            if selectedIndices.contains(index) { removed += 1 }
+        }
         let ink = try drawing(note.drawingData)
         var retained: [PKStroke] = []
-        var archived: [PKStroke] = []
+        var archived: [Int: [PKStroke]] = [:]
         for stroke in ink.strokes {
-            let page = owner(of: stroke, count: active.count)
-            if page == index { archived.append(shifted(stroke, by: -CGFloat(index) * NotebookPaging.pageStride)) }
-            else { retained.append(shifted(stroke, by: page > index ? -NotebookPaging.pageStride : 0)) }
+            let index = owner(of: stroke, count: active.count)
+            if selectedIndices.contains(index) {
+                archived[index, default: []].append(shifted(stroke, by: -CGFloat(index) * NotebookPaging.pageStride))
+            } else {
+                retained.append(shifted(stroke, by: -CGFloat(removedBefore[index]) * NotebookPaging.pageStride))
+            }
         }
-        let archive = TrashedPage(id: id, note: note, index: index,
-                                  drawing: PKDrawing(strokes: archived).dataRepresentation())
-        let retainedData = PKDrawing(strokes: retained).dataRepresentation()
-        pages[slot].isTrashed = true
+        let archives = indices.map { index in
+            TrashedPage(id: active[index].id, note: note, index: index,
+                        drawing: PKDrawing(strokes: archived[index] ?? []).dataRepresentation())
+        }
+        let bytes = PKDrawing(strokes: retained).dataRepresentation()
+        for slot in pages.indices where ids.contains(pages[slot].id) { pages[slot].isTrashed = true }
         try note.setPages(pages)
-        note.drawingData = retainedData
-        note.currentPageIndex = min(index, max(0, note.pageCount - 1))
+        note.drawingData = bytes
+        note.currentPageIndex = min(indices[0], max(0, note.pageCount - 1))
         note.updatedAt = .now
-        context.insert(archive)
+        for archive in archives { context.insert(archive) }
     }
 
     @discardableResult
