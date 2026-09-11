@@ -87,7 +87,7 @@ final class NotebookInteractionTests: XCTestCase {
         // Accessibility exposes final frames before the expanding glass settles.
         Thread.sleep(forTimeInterval: 1)
         if app.switches["gridLines"].value as? String == "0" { app.switches["gridLines"].tap() }
-        app.buttons["Close settings"].tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         Thread.sleep(forTimeInterval: 0.6)
 
         pull(canvas, from: 0.60, to: 0.57)

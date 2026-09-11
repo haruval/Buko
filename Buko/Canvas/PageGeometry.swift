@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// Pure document/viewport math shared by pinch feedback and page-fit snapping.
-struct PageGeometry {
+nonisolated struct PageGeometry {
     static let pageWidth: CGFloat = 1_000
     static let pageOriginX: CGFloat = 1_000
     static let workspaceWidth: CGFloat = 3_000

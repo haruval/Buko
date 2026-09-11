@@ -56,7 +56,7 @@ The local, gitignored `AGENTS.md` holds the detailed product vision, engineering
 
 ## Before physical-device testing
 
-See [the device-safety review](DEVICE_SAFETY_REVIEW.md) for checked security boundaries, data-safety fixes, and remaining limitations. Use test notes until export/backup is implemented. Buko currently supports one window to prevent concurrent canvases overwriting the same note.
+Use test notes until export/backup is implemented. Buko currently supports one window to prevent concurrent canvases overwriting the same note.
 
 ## Native API references
 

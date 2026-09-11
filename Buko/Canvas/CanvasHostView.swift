@@ -1,9 +1,15 @@
 import PencilKit
 import UIKit
+import SwiftUI
 
 /// Stable ink coordinates and camera for a vertically stacked page notebook.
 final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     let canvas = PKCanvasView()
+    let circleIntent = CircleIntentState()
+    private let circleGesture = CircleGestureRecognizer()
+    private let circleContainer = CircleOverlayContainer()
+    private var circleHosting: UIHostingController<CircleIntentOverlay>?
+
     var onPageChange: ((Int, Int) -> Void)?
     #if DEBUG
     private var zoomTestArea: UIAccessibilityElement?
@@ -58,7 +64,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                       height: documentSize.height)
     }
     private var isOverview: Bool { PageGeometry.isOverview(scale: canvas.zoomScale, fitScale: pageFitScale) }
-    private var inkColor: UIColor { traitCollection.userInterfaceStyle == .dark ? .white : .black }
+    private var inkPresentation = InkPresentation()
+    var canonicalDrawing: PKDrawing { inkPresentation.canonical(canvas.drawing) }
+
+    private var presentationStyle: UIUserInterfaceStyle = .unspecified
+    private var inkColor: UIColor { presentationStyle == .dark ? .white : .black }
 
     init(pagePull: PagePullState) {
         self.pagePull = pagePull
@@ -79,6 +89,20 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             transitionGradients.append(gradient)
         }
         addSubview(guides)
+        let hosting = UIHostingController(rootView: CircleIntentOverlay(state: circleIntent))
+        hosting.view.backgroundColor = .clear
+        circleHosting = hosting
+        circleContainer.state = circleIntent
+        addSubview(circleContainer)
+        circleContainer.addSubview(hosting.view)
+        circleGesture.addTarget(self, action: #selector(circleChanged(_:)))
+        circleGesture.delegate = self
+        circleGesture.cancelsTouchesInView = true
+        circleGesture.preview = { [weak self] in self?.circleIntent.trace($0) }
+        addGestureRecognizer(circleGesture)
+        canvas.panGestureRecognizer.require(toFail: circleGesture)
+        canvas.pinchGestureRecognizer?.require(toFail: circleGesture)
+        canvas.drawingGestureRecognizer.require(toFail: circleGesture)
         canvas.overrideUserInterfaceStyle = .light
         canvas.backgroundColor = .clear
         canvas.isOpaque = false
@@ -102,8 +126,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             UIAccessibilityCustomAction(name: "Previous page", target: self, selector: #selector(accessiblePreviousPage))
         ]
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: CanvasHostView, _: UITraitCollection) in
-            view.invalidateEdgeSnapshot()
-            view.applyAppearance()
+            view.setAppearance(view.traitCollection.userInterfaceStyle)
         }
     }
 
@@ -120,8 +143,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    func configure(tool: CanvasSession.Tool, allowsFingerDrawing: Bool, showsGrid: Bool) {
+    func configure(tool: CanvasSession.Tool, allowsFingerDrawing: Bool, showsGrid: Bool, colorScheme: ColorScheme) {
+        setAppearance(colorScheme == .dark ? .dark : .light)
+        if self.tool != tool { cancelCircleInteraction() }
         self.tool = tool
+        circleGesture.singleFinger = tool == .circle
         let policy: PKCanvasViewDrawingPolicy = allowsFingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
         if backdrop.showsGrid != showsGrid { invalidateEdgeSnapshot() }
@@ -133,13 +159,22 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private func applyTool() {
         // Reassigning a PencilKit tool cancels its active gestures. SwiftUI updates
         // pull feedback during scrolling, so unchanged tools must be left alone.
-        if tool == .pen {
+        if tool != .eraser {
             if let current = canvas.tool as? PKInkingTool, current.inkType == .pen,
                current.width == 2.5, MonochromeInk.matches(current.color, inkColor) { return }
             canvas.tool = PKInkingTool(.pen, color: inkColor, width: 2.5)
         } else if !(canvas.tool is PKEraserTool) {
             canvas.tool = PKEraserTool(.vector)
         }
+    }
+
+    private func setAppearance(_ style: UIUserInterfaceStyle) {
+        guard style != .unspecified, style != presentationStyle else { return }
+        presentationStyle = style
+        backdrop.overrideUserInterfaceStyle = style
+        circleHosting?.overrideUserInterfaceStyle = style
+        invalidateEdgeSnapshot()
+        applyAppearance()
     }
 
     private func applyAppearance() {
@@ -154,13 +189,20 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let manager = canvas.undoManager
         let wasRegistering = manager?.isUndoRegistrationEnabled == true
         if wasRegistering { manager?.disableUndoRegistration() }
-        canvas.drawing = MonochromeInk.recolor(canvas.drawing, to: inkColor)
+        let recolored = inkPresentation.refresh(canvas.drawing, to: inkColor)
+        // Refresh the entire note, including unmounted/off-screen tiles. Merely
+        // clearing/reassigning a drawing with unchanged IDs refreshes visible ink
+        // but can leave other pages cached. Canonical IDs are restored on save.
+        canvas.drawing = PKDrawing()
+        canvas.drawing = recolored
         if wasRegistering { manager?.enableUndoRegistration() }
         isUpdatingInk = false
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        circleContainer.frame = bounds
+        circleHosting?.view.frame = bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
         isLayingOut = true
         if surface.frame != bounds { surface.frame = bounds }
@@ -243,6 +285,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             return
         }
         guard abs(offset - previousScrollOffset) > 0.1 else { return }
+        cancelCircleInteraction()
         let now = CACurrentMediaTime()
         if now - lastWheelInput > 0.35 {
             wheelCanCreate = NotebookPaging.canBeginCreation(offset: previousScrollOffset, maximum: maximumScrollOffset)
@@ -265,6 +308,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         updateScrollInsets()
         let scale = canvas.zoomScale
         let offset = canvas.contentOffset
+        circleIntent.updateProjection(scale: scale, offset: offset)
         backdrop.update(scale: scale, offset: offset, document: documentSize)
         let pull: CGFloat
         if isPullActive && !isPinching {
@@ -357,7 +401,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         pagePull.scrollProgress = travel > 0 ? min(1, max(0, canvas.contentOffset.y / travel)) : 0
         pagePull.rightOverBlack = !documentFrame.contains(CGPoint(x: bounds.width - 48, y: bounds.midY))
         updateAccessibilityValue()
-        let canDraw = !isOverview && !isPinching && !isSnapping && !pageTurnPending
+        let canDraw = tool != .circle && !isOverview && !isPinching && !isSnapping && !pageTurnPending
         if canvas.drawingGestureRecognizer.isEnabled != canDraw { canvas.drawingGestureRecognizer.isEnabled = canDraw }
     }
 
@@ -419,6 +463,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     func beginPagePull() {
+        circleIntent.cancelPending()
         guard !isSnapping, !pageTurnPending, !isPullActive else { return }
         wheelEnd?.cancel()
         isPullActive = true
@@ -611,8 +656,25 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         updateViewport()
     }
 
+    @objc private func circleChanged(_ recognizer: CircleGestureRecognizer) {
+        switch recognizer.state {
+        case .ended:
+            let polygon = recognizer.points.map {
+                PageGeometry.documentPoint($0, scale: canvas.zoomScale, offset: canvas.contentOffset)
+            }
+            circleIntent.analyze(drawing: canvas.drawing, polygon: polygon, screenPolygon: recognizer.points,
+                                 scale: canvas.zoomScale, offset: canvas.contentOffset)
+        case .cancelled, .failed: circleIntent.cancelPending()
+        default: break
+        }
+    }
+
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        isOverview && !isPinching && !isSnapping
+        if gestureRecognizer === circleGesture {
+            return circleIntent.phase != .finished && !isOverview && !isPinching && !isSnapping && !pageTurnPending
+                && touch.type == .direct && !circleContainer.point(inside: touch.location(in: circleContainer), with: nil)
+        }
+        return isOverview && !isPinching && !isSnapping
     }
 
     @objc private func focusTapped(_ recognizer: UITapGestureRecognizer) {
@@ -679,7 +741,16 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                        y: axis(center.y, min: rect.minY, max: rect.maxY, viewport: bounds.height))
     }
 
+    private func cancelCircleInteraction() {
+        if circleGesture.state == .began || circleGesture.state == .changed {
+            circleGesture.isEnabled = false
+            circleGesture.isEnabled = true
+        }
+        circleIntent.cancelPending()
+    }
+
     func stopAnimations() {
+        cancelCircleInteraction()
         wheelEnd?.cancel()
         pageTurnPending = false
         isPullActive = false

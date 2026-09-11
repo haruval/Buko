@@ -28,7 +28,7 @@ final class CanvasRefinementTests: XCTestCase {
         XCTAssertEqual(title.frame.width, width, accuracy: 1)
         XCTAssertTrue(app.switches["gridLines"].exists)
         XCTAssertFalse(app.staticTexts["Enable infinite canvas (experimental)"].exists)
-        app.buttons["Close settings"].tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
         // A single hard drag reaches the bottom, even with sustained overshoot.
         drag(canvas, velocity: .fast, hold: 0.8)

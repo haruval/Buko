@@ -4,23 +4,23 @@ struct SettingsPanel: View {
     let trashedNotes: [Note]
     let trashedPages: [TrashedPage]
     @Binding var showsTrash: Bool
+    @Binding var showsDevelopment: Bool
     @Binding var showsGrid: Bool
-    let close: () -> Void
+    let recreateTestNote: () -> Void
     let restore: (Note) -> Void
     let restorePage: (TrashedPage) -> Void
     let emptyTrash: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 4) {
-                if showsTrash {
-                    ShelfButton(title: "Back to settings", symbol: "chevron.left") { showsTrash = false }
+        VStack(alignment: .leading, spacing: 12) {
+            if showsTrash || showsDevelopment {
+                HStack(spacing: 4) {
+                    ShelfButton(title: "Back to settings", symbol: "chevron.left") {
+                        showsTrash = false; showsDevelopment = false
+                    }
+                    Text(showsTrash ? "Trash" : "Development").font(.headline)
+                    Spacer()
                 }
-                Text(showsTrash ? "Trash" : "Settings")
-                    .font(.title3.weight(.semibold))
-                    .padding(.leading, showsTrash ? 0 : 8)
-                Spacer(minLength: 0)
-                ShelfButton(title: "Close settings", symbol: "xmark", action: close)
             }
 
             if showsTrash {
@@ -85,12 +85,24 @@ struct SettingsPanel: View {
                     .bukoGlass(interactive: true)
                     .accessibilityIdentifier("emptyTrash")
                 }
+            } else if showsDevelopment {
+                Button(action: recreateTestNote) {
+                    Label("Recreate Test Lecture", systemImage: "arrow.counterclockwise")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(.glass)
+                .accessibilityIdentifier("recreateTestNote")
+                Text("Two pages of editable handwriting with complete and unfinished lecture notes. The previous Test Lecture moves to Trash.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
             } else {
                 Toggle(isOn: $showsGrid) {
                     Label("Grid lines", systemImage: "square.grid.3x3")
                         .font(.subheadline)
                 }
                 .padding(.horizontal, 14)
+                .frame(minHeight: 44)
                 .accessibilityIdentifier("gridLines")
                 Button { showsTrash = true } label: {
                     HStack(spacing: 12) {
@@ -106,9 +118,21 @@ struct SettingsPanel: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("openTrash")
+                Button { showsDevelopment = true } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "hammer")
+                        Text("Development")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                    }.font(.subheadline).padding(14).contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("openDevelopment")
                 Spacer(minLength: 0)
             }
         }
         .padding(18)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settingsPanel")
     }
 }
