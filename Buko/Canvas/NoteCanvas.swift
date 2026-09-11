@@ -47,6 +47,7 @@ struct NoteCanvas: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ host: CanvasHostView, coordinator: Coordinator) {
+        host.cube.shutdown()
         host.stopAnimations()
         host.canvas.delegate = nil
     }

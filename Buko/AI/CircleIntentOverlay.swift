@@ -18,7 +18,9 @@ struct CircleIntentOverlay: View {
                         .allowsHitTesting(false)
                     if state.phase == .finished || state.processing {
                         popup
-                            .frame(width: min(390, geometry.size.width - 32), height: min(600, geometry.size.height - 160))
+                            .frame(width: state.popupBounds.isEmpty
+                                   ? CirclePopupPlacement.preferredWidth(viewport: geometry.size, region: state.selectionBounds.applying(state.projection))
+                                   : min(state.popupBounds.width, geometry.size.width - 32), height: min(600, geometry.size.height - 160))
                             .background {
                                 GeometryReader { card in
                                     Color.clear.onAppear { positionPopup(card.size, viewport: geometry.size) }
