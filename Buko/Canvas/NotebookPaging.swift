@@ -1,8 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// Portrait 13-inch iPad Pro proportions (1032 × 1376 points) in stable document coordinates. Existing ink is never
-/// translated or rescaled when switching between pages and the experimental canvas.
+/// Portrait 13-inch iPad Pro proportions (1032 × 1376 points) in stable document coordinates.
 enum NotebookPaging {
     static let pageHeight: CGFloat = 1_000 * 1376 / 1032
     // Public UIKit exposes no physical display corner radius. This reference
@@ -16,6 +15,12 @@ enum NotebookPaging {
     }
 
     static let pullThreshold: CGFloat = 88
+
+    /// Eligibility is latched at gesture start, never acquired by a fast scroll
+    /// reaching the end. Tolerance only covers subpixel settling at the boundary.
+    static func canBeginCreation(offset: CGFloat, maximum: CGFloat) -> Bool {
+        offset >= maximum - 2
+    }
 
     enum Action: Equatable { case none, previous, next, append }
 
@@ -33,10 +38,6 @@ enum NotebookPaging {
         let visibleHeight = min(page.height, viewport.height / fitScale(viewport: viewport))
         let top = min(max(page.minY, center.y - visibleHeight / 2), page.maxY - visibleHeight)
         return CGRect(x: page.minX, y: top, width: page.width, height: visibleHeight)
-    }
-
-    static func inferredPageCount(drawingMaxY: CGFloat, savedCount: Int) -> Int {
-        max(1, savedCount, Int(ceil((max(0, drawingMaxY) + pageGap) / pageStride)))
     }
 
     static func signedPull(offset: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {

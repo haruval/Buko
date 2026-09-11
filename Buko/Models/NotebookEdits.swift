@@ -38,7 +38,7 @@ enum NotebookEdits {
 
     static func prepare(_ note: Note) throws {
         var ink = try drawing(note.drawingData)
-        guard note.pageLayoutVersion <= 1 else { throw EditError.invalidLayout }
+        guard note.pageLayoutVersion <= 2 else { throw EditError.invalidLayout }
         var pages = try note.pages()
         if note.pageLayoutVersion == 0 {
             let bottom = ink.bounds.isNull ? 0 : ink.bounds.maxY
@@ -54,6 +54,21 @@ enum NotebookEdits {
             note.pageMetadata = metadata
             note.pageLayoutVersion = 1
             note.pageCount = pages.filter { !$0.isTrashed }.count
+        }
+        if note.pageLayoutVersion == 1 {
+            // Older freeform notes could contain ink below their last saved page.
+            // Expose it as pages without changing drawing bytes or existing IDs.
+            // Use stroke starts so a crossing stroke doesn't invent a blank page.
+            var required = note.pageCount
+            for stroke in ink.strokes where stroke.path.count > 0 {
+                let y = stroke.path[0].location.applying(stroke.transform).y
+                guard y.isFinite else { throw EditError.invalidLayout }
+                required = max(required, Int(floor(max(0, y) / NotebookPaging.pageStride)) + 1)
+            }
+            guard pages.filter({ !$0.isTrashed }).count == note.pageCount else { throw EditError.invalidLayout }
+            pages.append(contentsOf: (note.pageCount..<required).map { _ in NotebookPage() })
+            try note.setPages(pages)
+            note.pageLayoutVersion = 2
         }
         guard Set(pages.map(\.id)).count == pages.count,
               pages.filter({ !$0.isTrashed }).count == note.pageCount else { throw EditError.invalidLayout }

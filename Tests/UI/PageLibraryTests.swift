@@ -14,13 +14,12 @@ final class PageLibraryTests: XCTestCase {
         app.buttons["New note"].tap()
         app.buttons["Hide notes"].tap()
         Thread.sleep(forTimeInterval: 0.7)
-        let title = app.staticTexts["currentNoteTitle"]
+        let title = app.textFields["currentNoteTitle"]
         let titleWidth = title.frame.width
-        let noteTitle = title.label
+        let noteTitle = title.value as! String
         app.buttons["Settings"].tap()
         Thread.sleep(forTimeInterval: 0.8)
         XCTAssertEqual(title.frame.width, titleWidth, accuracy: 1)
-        if app.switches["infiniteCanvas"].value as? String == "1" { app.switches["infiniteCanvas"].tap() }
         app.buttons["Close settings"].tap()
 
         for count in 2...3 {
@@ -108,7 +107,7 @@ final class PageLibraryTests: XCTestCase {
         app.buttons["New note"].tap()
         app.buttons["Hide notes"].tap()
         Thread.sleep(forTimeInterval: 0.7)
-        let title = app.staticTexts["currentNoteTitle"].label
+        let title = app.textFields["currentNoteTitle"].value as! String
         app.buttons["pageNavigator"].tap()
         Thread.sleep(forTimeInterval: 0.7)
         app.buttons.matching(identifier: "pageThumbnail").firstMatch.press(forDuration: 1)

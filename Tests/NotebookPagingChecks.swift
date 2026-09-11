@@ -6,14 +6,17 @@ struct NotebookPagingChecks {
     static func main() {
         precondition(abs(NotebookPaging.pageHeight / PageGeometry.pageWidth - 1376 / 1032) < 0.0001)
         precondition(NotebookPaging.rect(for: 1).minY == NotebookPaging.rect(for: 0).maxY + NotebookPaging.pageGap)
-        precondition(NotebookPaging.inferredPageCount(drawingMaxY: 0, savedCount: 1) == 1)
-        precondition(NotebookPaging.inferredPageCount(drawingMaxY: 0, savedCount: 4) == 4)
-        precondition(NotebookPaging.inferredPageCount(drawingMaxY: NotebookPaging.pageStride + 1, savedCount: 1) == 2)
         precondition(NotebookPaging.action(pull: 87, index: 0, count: 1) == .none)
         precondition(NotebookPaging.action(pull: 88, index: 0, count: 1) == .append)
         precondition(NotebookPaging.action(pull: 100, index: 0, count: 2) == .none)
         precondition(NotebookPaging.action(pull: -100, index: 1, count: 2) == .none)
         precondition(NotebookPaging.action(pull: -100, index: 0, count: 2) == .none)
+        // Even enormous travel cannot grant a gesture that began on the page
+        // permission to create. A separate pull at the bottom is required.
+        precondition(!NotebookPaging.canBeginCreation(offset: 0, maximum: 200))
+        precondition(!NotebookPaging.canBeginCreation(offset: 500, maximum: 800))
+        precondition(NotebookPaging.canBeginCreation(offset: 799.5, maximum: 800))
+        precondition(NotebookPaging.canBeginCreation(offset: 820, maximum: 800))
         precondition(NotebookPaging.signedPull(offset: -70, minimum: -20, maximum: 80) == -50)
         precondition(NotebookPaging.signedPull(offset: 150, minimum: -20, maximum: 80) == 70)
         precondition(NotebookPaging.signedPull(offset: 0, minimum: -20, maximum: 80) == 0)

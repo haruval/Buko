@@ -14,7 +14,7 @@ import SwiftData
         let original = try NotebookEdits.drawing(note.drawingData)
         let oldDate = note.updatedAt
         try NotebookEdits.commit(in: context, notes: [note]) { try NotebookEdits.prepare(note) }
-        try check(note.pageLayoutVersion == 1 && note.activePages.count == 3 && note.updatedAt == oldDate)
+        try check(note.pageLayoutVersion == 2 && note.activePages.count == 3 && note.updatedAt == oldDate)
         let migrated = try NotebookEdits.drawing(note.drawingData)
         for index in 0..<3 {
             try check(migrated.strokes[index].path[0].location == original.strokes[index].path[0].location)
@@ -23,6 +23,18 @@ import SwiftData
                              - CGFloat(index) * NotebookPaging.pageGap) < 0.001)
         }
         let migratedBytes = note.drawingData
+        let older = Note(title: "Older page coverage")
+        older.pageLayoutVersion = 1
+        try older.setPages([NotebookPage()])
+        let firstID = older.activePages[0].id
+        older.drawingData = migratedBytes
+        try NotebookEdits.prepare(older)
+        try check(older.pageCount == 3 && older.activePages[0].id == firstID && older.drawingData == migratedBytes)
+        let empty = Note(title: "Empty")
+        empty.pageLayoutVersion = 1
+        try empty.setPages([])
+        try NotebookEdits.prepare(empty)
+        try check(empty.pageCount == 0)
         try NotebookEdits.commit(in: context, notes: [note]) { try NotebookEdits.prepare(note) }
         try check(note.drawingData == migratedBytes)
         let ids = note.activePages.map(\.id)

@@ -1,7 +1,7 @@
 import PencilKit
 import UIKit
 
-/// Stable ink coordinates shared by a page notebook and an optional freeform camera.
+/// Stable ink coordinates and camera for a vertically stacked page notebook.
 final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     let canvas = PKCanvasView()
     var onPageChange: ((Int, Int) -> Void)?
@@ -14,16 +14,15 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private let edgeBlur = CanvasEdgeBlurView()
     private let guides = CanvasGuidesView()
     private let edgeMask = CanvasEdgeMask.makeLayer()
+    private let bezelMask = CanvasEdgeMask.makeLayer()
     private let pageMask = CAShapeLayer()
     private let transitionShade = CALayer()
     private var transitionGradients: [CAGradientLayer] = []
     private let camera = CanvasCameraAnimator()
     private var guideRect = CGRect.zero
     private var lastViewportSize = CGSize.zero
-    private var infiniteHeight: CGFloat = 6_000
     private var pageCount = 1
     private var pageIndex = 0
-    private var infiniteCanvasEnabled = false
     private var pageFitScale: CGFloat = 1
     private var isPinching = false
     private var isSnapping = false
@@ -39,17 +38,20 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private var wasArmed = false
     private var isPullActive = false
     private var dragStartOffset: CGFloat = 0
+    private var canCreateFromPull = false
+    private var previousScrollOffset: CGFloat = 0
+    private var lastWheelInput: CFTimeInterval = 0
+    private var wheelCanCreate = false
     private var pageTurnPending = false
     private var wheelEnd: DispatchWorkItem?
     private(set) var isUpdatingInk = false
 
     private var documentSize: CGSize {
         CGSize(width: PageGeometry.workspaceWidth,
-               height: infiniteCanvasEnabled ? infiniteHeight : NotebookPaging.documentHeight(count: pageCount))
+               height: NotebookPaging.documentHeight(count: pageCount))
     }
     private var currentPageRect: CGRect { NotebookPaging.rect(for: pageIndex) }
     private var boundaryRect: CGRect {
-        if infiniteCanvasEnabled { return CGRect(origin: .zero, size: documentSize) }
         return CGRect(x: PageGeometry.pageOriginX, y: 0, width: PageGeometry.pageWidth,
                       height: documentSize.height)
     }
@@ -68,9 +70,9 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         layer.addSublayer(transitionShade)
         for _ in 0..<4 {
             let gradient = CAGradientLayer()
-            gradient.colors = [UIColor.black.withAlphaComponent(0.8).cgColor,
-                               UIColor.black.withAlphaComponent(0.32).cgColor, UIColor.clear.cgColor]
-            gradient.locations = [0, 0.35, 1]
+            gradient.colors = [UIColor.black.cgColor, UIColor.black.cgColor,
+                               UIColor.black.withAlphaComponent(0.4).cgColor, UIColor.clear.cgColor]
+            gradient.locations = [0, 0.16, 0.52, 1]
             transitionShade.addSublayer(gradient)
             transitionGradients.append(gradient)
         }
@@ -87,7 +89,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         canvas.showsVerticalScrollIndicator = false
         canvas.maximumZoomScale = 4
         canvas.accessibilityLabel = "Note canvas"
-        canvas.accessibilityHint = "Scroll freely through pages. Scroll past the final page to add a new page. Pinch out to look around, then tap to return to writing."
+        canvas.accessibilityHint = "Scroll freely through pages. At the bottom, lift and pull again to add a page. Pinch out to look around, then tap to return to writing."
         canvas.pinchGestureRecognizer?.addTarget(self, action: #selector(pinchChanged(_:)))
         let focusTap = UITapGestureRecognizer(target: self, action: #selector(focusTapped(_:)))
         focusTap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue), NSNumber(value: UITouch.TouchType.pencil.rawValue)]
@@ -107,10 +109,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     func load(_ drawing: PKDrawing, savedPageCount: Int, pageIndex: Int) {
         canvas.drawing = MonochromeInk.recolor(drawing, to: inkColor)
-        let bottom = drawing.bounds.isNull ? 0 : drawing.bounds.maxY
         pageCount = max(1, savedPageCount)
         self.pageIndex = min(max(0, pageIndex), pageCount - 1)
-        infiniteHeight = max(6_000, bottom + 2_000, NotebookPaging.documentHeight(count: pageCount))
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.syncPageState()
@@ -118,30 +118,12 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    func configure(tool: CanvasSession.Tool, allowsFingerDrawing: Bool, showsGrid: Bool, infiniteCanvasEnabled: Bool) {
+    func configure(tool: CanvasSession.Tool, allowsFingerDrawing: Bool, showsGrid: Bool) {
         self.tool = tool
         let policy: PKCanvasViewDrawingPolicy = allowsFingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
         if backdrop.showsGrid != showsGrid { invalidateEdgeSnapshot() }
         backdrop.showsGrid = showsGrid
-        if self.infiniteCanvasEnabled != infiniteCanvasEnabled {
-            self.infiniteCanvasEnabled = infiniteCanvasEnabled
-            stopAnimations()
-            invalidateEdgeSnapshot()
-            if lastViewportSize != .zero {
-                let center = viewportCenter()
-                let bottom = canvas.drawing.bounds.isNull ? 0 : canvas.drawing.bounds.maxY
-                pageCount = NotebookPaging.inferredPageCount(drawingMaxY: bottom, savedCount: pageCount)
-                infiniteHeight = max(infiniteHeight, bottom + 1_500, NotebookPaging.documentHeight(count: pageCount))
-                pageIndex = min(max(0, Int(center.y / NotebookPaging.pageStride)), pageCount - 1)
-                resetCamera()
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.syncPageState()
-                    self.onPageChange?(self.pageCount, self.pageIndex)
-                }
-            }
-        }
         applyTool()
         updateViewport()
     }
@@ -210,9 +192,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func resetCamera() {
-        pageFitScale = infiniteCanvasEnabled ? PageGeometry.fitScale(for: bounds.size) : NotebookPaging.fitScale(viewport: bounds.size)
-        canvas.minimumZoomScale = infiniteCanvasEnabled
-            ? PageGeometry.minimumScale(viewport: bounds.size, document: documentSize) : pageFitScale * 0.3
+        pageFitScale = NotebookPaging.fitScale(viewport: bounds.size)
+        canvas.minimumZoomScale = pageFitScale * 0.3
         canvas.zoomScale = pageFitScale
         canvas.contentSize = CGSize(width: documentSize.width * canvas.zoomScale, height: documentSize.height * canvas.zoomScale)
         updateScrollInsets()
@@ -221,9 +202,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     private func updateScrollInsets() {
         let desired: UIEdgeInsets
-        if infiniteCanvasEnabled {
-            desired = .zero
-        } else {
+        do {
             let rect = boundaryRect
             let scale = canvas.zoomScale
             let horizontalMargin = max(0, (bounds.width - rect.width * scale) / 2)
@@ -246,6 +225,37 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         return NotebookPaging.signedPull(offset: canvas.contentOffset.y, minimum: minimum, maximum: maximum)
     }
 
+    private var maximumScrollOffset: CGFloat {
+        max(-canvas.contentInset.top, canvas.contentSize.height - bounds.height + canvas.contentInset.bottom)
+    }
+
+    /// Only genuine scroll callbacks classify pointer bursts; layout/SwiftUI
+    /// updates cannot manufacture an input session or inherit its momentum.
+    func didScroll() {
+        let offset = canvas.contentOffset.y
+        defer { previousScrollOffset = offset; updateViewport() }
+        guard !isUpdatingViewport, !isLayingOut, !isOverview, !isPinching, !isSnapping,
+              !isPullActive, !canvas.isTracking, !canvas.isDragging, !canvas.isDecelerating else {
+            lastWheelInput = CACurrentMediaTime()
+            wheelCanCreate = false
+            return
+        }
+        guard abs(offset - previousScrollOffset) > 0.1 else { return }
+        let now = CACurrentMediaTime()
+        if now - lastWheelInput > 0.35 {
+            wheelCanCreate = NotebookPaging.canBeginCreation(offset: previousScrollOffset, maximum: maximumScrollOffset)
+            lastPull = 0
+        }
+        lastWheelInput = now
+        guard wheelCanCreate, pullDistance > 0 else { return }
+        lastPull = max(lastPull, pullDistance)
+        pagePull.progress = min(1.35, lastPull / NotebookPaging.pullThreshold)
+        wheelEnd?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.finishPagePull() }
+        wheelEnd = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.36, execute: work)
+    }
+
     func updateViewport() {
         guard bounds.width > 0, bounds.height > 0, !isUpdatingViewport, !isLayingOut else { return }
         isUpdatingViewport = true
@@ -266,7 +276,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         // The dark Gaussian edge is a transition through the fit detent. A settled
         // overview always has crisp pages, including while panning around it.
         let departure = min(1, max(0, (1 - scale / pageFitScale) / 0.28))
-        let transitionStrength = (isPinching || isSnapping) ? sin(departure * .pi) : 0
+        let transitionStrength = (isPinching || isSnapping) && !UIAccessibility.isReduceMotionEnabled
+            ? sin(departure * .pi) : 0
         let blurStrength = isOverview ? transitionStrength : (isTurningPage ? 0 : pullStrength)
         let margin: CGFloat = 2 + blurStrength * 94
         let documentFrame = PageGeometry.screenRect(boundaryRect, scale: scale, offset: offset)
@@ -280,9 +291,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         CATransaction.setDisableActions(true)
         edgeMask.contentsScale = 96 / margin
         edgeMask.frame = documentFrame.insetBy(dx: -margin, dy: -margin)
-        if infiniteCanvasEnabled {
-            surface.layer.mask = blurStrength > 0 ? edgeMask : nil
-        } else {
+        do {
             let path = UIBezierPath()
             let first = max(0, Int(floor(offset.y / scale / NotebookPaging.pageStride)) - 1)
             let last = min(pageCount - 1, Int(ceil((offset.y + bounds.height) / scale / NotebookPaging.pageStride)) + 1)
@@ -296,14 +305,21 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             pageMask.frame = bounds
             pageMask.path = path.cgPath
             pageMask.fillColor = UIColor.white.cgColor
-            pageMask.mask = blurStrength > 0.01 ? edgeMask : nil
+            // Reveal the black host from the physical viewport perimeter inward,
+            // including top/bottom while looking at the middle of a long notebook.
+            let feather = 1 + transitionStrength * min(bounds.width, bounds.height) * 0.20
+            let intrusion = transitionStrength * min(bounds.width, bounds.height) * 0.085
+            bezelMask.contentsScale = 96 / feather
+            bezelMask.frame = bounds.insetBy(dx: intrusion - feather, dy: intrusion - feather)
+            pageMask.mask = transitionStrength > 0.01 ? bezelMask : (blurStrength > 0.01 ? edgeMask : nil)
             surface.layer.mask = pageMask
         }
         updateTransitionShade(strength: transitionStrength)
         CATransaction.commit()
         if blurStrength > 0.03 { prepareEdgeSnapshot() }
-        edgeBlur.update(scale: scale, offset: offset, boundary: boundaryRect, strength: blurStrength)
-        if !infiniteCanvasEnabled {
+        edgeBlur.update(scale: scale, offset: offset, boundary: boundaryRect, strength: blurStrength,
+                        viewportEdges: transitionStrength > 0.01)
+        do {
             let anchorIndex = isTurningPage && pagePull.didCreate ? pageCount - 2 : pageCount - 1
             let lastFrame = PageGeometry.screenRect(NotebookPaging.rect(for: max(0, anchorIndex)), scale: scale, offset: offset)
             pagePull.indicatorCenter = CGPoint(x: lastFrame.midX, y: lastFrame.maxY + 42)
@@ -323,27 +339,16 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
         if !guideRect.isEmpty {
             guides.update(rect: PageGeometry.screenRect(guideRect, scale: scale, offset: offset), snapProgress: snapProgress,
-                          cornerRadius: infiniteCanvasEnabled ? 0 : NotebookPaging.cornerRadius * scale)
+                          cornerRadius: NotebookPaging.cornerRadius * scale)
         }
-        if !infiniteCanvasEnabled, !isOverview, !isSnapping, !isPinching, !pageTurnPending,
-           isPullActive || canvas.isDragging {
-            lastPull = pull
-            pagePull.progress = min(1.35, max(0, pull) / NotebookPaging.pullThreshold)
-            let armed = NotebookPaging.action(pull: pull, index: pageIndex, count: pageCount) != .none
+        if !isOverview, !isSnapping, !isPinching, !pageTurnPending,
+           isPullActive {
+            lastPull = canCreateFromPull ? max(0, pull) : 0
+            pagePull.progress = min(1.35, lastPull / NotebookPaging.pullThreshold)
+            let armed = NotebookPaging.action(pull: lastPull, index: pageIndex, count: pageCount) != .none
             if armed && !wasArmed { UIImpactFeedbackGenerator(style: .soft).impactOccurred() }
             wasArmed = armed
             if armed { reserveAppend() }
-        }
-        // Simulator scroll-wheel forwarding can omit UIKit's drag lifecycle.
-        // Debounce those bursts separately; native touch momentum never arms a page.
-        if !infiniteCanvasEnabled, !isOverview, !isSnapping, !isPinching, !pageTurnPending,
-           !isPullActive, !canvas.isDragging, !canvas.isTracking, !canvas.isDecelerating, pull > 1 {
-            if abs(pull) > abs(lastPull) { lastPull = pull }
-            pagePull.progress = min(1.35, max(0, lastPull) / NotebookPaging.pullThreshold)
-            wheelEnd?.cancel()
-            let work = DispatchWorkItem { [weak self] in self?.finishPagePull() }
-            wheelEnd = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
         }
         let travel = max(0, canvas.contentSize.height - bounds.height)
         pagePull.scrollProgress = travel > 0 ? min(1, max(0, canvas.contentOffset.y / travel)) : 0
@@ -372,7 +377,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private func updateTransitionShade(strength: CGFloat) {
         transitionShade.frame = bounds
         transitionShade.opacity = Float(UIAccessibility.isReduceMotionEnabled ? 0 : strength)
-        let width = min(bounds.width, bounds.height) * 0.22
+        let width = min(bounds.width, bounds.height) * (0.025 + strength * 0.25)
         let frames = [CGRect(x: 0, y: 0, width: width, height: bounds.height),
                       CGRect(x: bounds.width - width, y: 0, width: width, height: bounds.height),
                       CGRect(x: 0, y: 0, width: bounds.width, height: width),
@@ -415,13 +420,16 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         wheelEnd?.cancel()
         isPullActive = true
         dragStartOffset = canvas.contentOffset.y
+        canCreateFromPull = NotebookPaging.canBeginCreation(offset: dragStartOffset, maximum: maximumScrollOffset)
+        wheelCanCreate = false
         lastPull = 0
         wasArmed = false
         invalidateEdgeSnapshot()
     }
 
     func targetOffsetForRelease(_ proposed: inout CGPoint) {
-        guard !infiniteCanvasEnabled, !isOverview, !isPinching, !isSnapping else { return }
+        guard !isOverview, !isPinching, !isSnapping else { return }
+        if !canCreateFromPull { proposed.y = min(proposed.y, maximumScrollOffset) }
         if NotebookPaging.action(pull: lastPull, index: pageIndex, count: pageCount) != .none {
             // Do not let native momentum aim back at the old page during our turn.
             proposed = canvas.contentOffset
@@ -431,7 +439,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     func finishPagePull() {
         isPullActive = false
         wheelEnd?.cancel()
-        guard !infiniteCanvasEnabled, !isOverview, !isPinching, !isSnapping, !pageTurnPending else { return }
+        guard !isOverview, !isPinching, !isSnapping, !pageTurnPending else { return }
         let action = NotebookPaging.action(pull: lastPull, index: pageIndex, count: pageCount)
         lastPull = 0
         if action == .none { pagePull.progress = 0; return }
@@ -480,7 +488,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     func navigate(to index: Int) {
-        guard !infiniteCanvasEnabled, index >= 0, index < pageCount else { return }
+        guard index >= 0, index < pageCount else { return }
         stopAnimations()
         let page = NotebookPaging.rect(for: index)
         let halfViewport = min(page.height, bounds.height / pageFitScale) / 2
@@ -488,13 +496,13 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func accessibleNextPage() -> Bool {
-        guard !infiniteCanvasEnabled, !isSnapping else { return false }
+        guard !isSnapping else { return false }
         turnPage(pageIndex + 1 < pageCount ? .next : .append)
         return true
     }
 
     @objc private func accessiblePreviousPage() -> Bool {
-        guard !infiniteCanvasEnabled, !isSnapping, pageIndex > 0 else { return false }
+        guard !isSnapping, pageIndex > 0 else { return false }
         turnPage(.previous)
         return true
     }
@@ -506,7 +514,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func updateAccessibilityValue() {
-        let position = infiniteCanvasEnabled ? "Infinite canvas" : "Page \(pageIndex + 1) of \(pageCount)"
+        let position = "Page \(pageIndex + 1) of \(pageCount)"
         let value = position + (isOverview ? ", overview" : "")
         if canvas.accessibilityValue != value { canvas.accessibilityValue = value }
     }
@@ -523,8 +531,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                 canvas.minimumZoomScale = pageFitScale * 0.96
             }
             invalidateEdgeSnapshot()
-            guideRect = infiniteCanvasEnabled
-                ? PageGeometry.pageRect(viewport: bounds.size, scale: canvas.zoomScale, offset: canvas.contentOffset) : currentPageRect
+            guideRect = currentPageRect
             guides.show()
             updateViewport()
         case .changed:
@@ -548,8 +555,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     private func releaseZoomDetent() {
         zoomDetentLatched = false
-        canvas.minimumZoomScale = infiniteCanvasEnabled
-            ? PageGeometry.minimumScale(viewport: bounds.size, document: documentSize) : pageFitScale * 0.3
+        canvas.minimumZoomScale = pageFitScale * 0.3
         canvas.bouncesZoom = true
     }
 
@@ -576,14 +582,12 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     private func focus(on center: CGPoint, from sourceCenter: CGPoint? = nil) {
         camera.cancel()
-        if !infiniteCanvasEnabled && !isTurningPage {
+        if !isTurningPage {
             pageIndex = min(pageCount - 1, max(0, Int(max(0, center.y) / NotebookPaging.pageStride)))
             syncPageState()
             onPageChange?(pageCount, pageIndex)
         }
-        guideRect = infiniteCanvasEnabled
-            ? PageGeometry.focusedRect(center: center, viewport: bounds.size, document: documentSize)
-            : NotebookPaging.focusedRect(center: center, viewport: bounds.size, index: pageIndex)
+        guideRect = NotebookPaging.focusedRect(center: center, viewport: bounds.size, index: pageIndex)
         let startScale = canvas.zoomScale
         let startCenter = sourceCenter ?? viewportCenter()
         let targetCenter = CGPoint(x: guideRect.midX, y: guideRect.midY)
@@ -633,6 +637,9 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         pageTurnPending = false
         isPullActive = false
         lastPull = 0
+        canCreateFromPull = false
+        wheelCanCreate = false
+        lastWheelInput = CACurrentMediaTime()
         camera.cancel()
         releaseZoomDetent()
         if !canvas.isScrollEnabled { canvas.isScrollEnabled = true }
@@ -647,16 +654,4 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    func extendIfNeeded() {
-        guard infiniteCanvasEnabled, lastViewportSize != .zero, !isUpdatingViewport, !isLayingOut,
-              !isOverview, !isPinching, !isSnapping, canvas.zoomScale > 0 else { return }
-        let visibleBottom = (canvas.contentOffset.y + canvas.bounds.height) / canvas.zoomScale
-        let drawingBottom = canvas.drawing.bounds.isNull ? 0 : canvas.drawing.bounds.maxY
-        let neededHeight = max(visibleBottom, drawingBottom) + 1_500
-        guard neededHeight > infiniteHeight else { return }
-        infiniteHeight = (neededHeight / 2_000).rounded(.up) * 2_000
-        canvas.contentSize = CGSize(width: documentSize.width * canvas.zoomScale, height: infiniteHeight * canvas.zoomScale)
-        canvas.minimumZoomScale = PageGeometry.minimumScale(viewport: bounds.size, document: documentSize)
-        updateViewport()
-    }
 }

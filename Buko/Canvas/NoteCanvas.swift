@@ -5,7 +5,6 @@ struct NoteCanvas: UIViewRepresentable {
     let note: Note
     let session: CanvasSession
     let showsGrid: Bool
-    let infiniteCanvasEnabled: Bool
     let onPageChange: (Int, Int) -> Void
     let onDrawingChange: (Data) -> Void
 
@@ -34,14 +33,14 @@ struct NoteCanvas: UIViewRepresentable {
             session.canvas = host.canvas
             session.host = host
         }
-        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid, infiniteCanvasEnabled: infiniteCanvasEnabled)
+        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid)
         return host
     }
 
     func updateUIView(_ host: CanvasHostView, context: Context) {
         context.coordinator.onDrawingChange = onDrawingChange
         host.onPageChange = context.coordinator.hasLoadedDrawing ? onPageChange : nil
-        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid, infiniteCanvasEnabled: infiniteCanvasEnabled)
+        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid)
     }
 
     static func dismantleUIView(_ host: CanvasHostView, coordinator: Coordinator) {
@@ -70,12 +69,10 @@ struct NoteCanvas: UIViewRepresentable {
             onDrawingChange(MonochromeInk.canonical(canvasView.drawing).dataRepresentation())
             session.refreshUndoState()
             host.invalidateEdgeSnapshot()
-            host.extendIfNeeded()
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            host?.updateViewport()
-            host?.extendIfNeeded()
+            host?.didScroll()
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {

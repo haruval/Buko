@@ -14,7 +14,6 @@ struct ContentView: View {
     private var trashedNotes: [Note]
     @Query(sort: \TrashedPage.deletedAt, order: .reverse) private var trashedPages: [TrashedPage]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
-    @AppStorage("infiniteCanvasEnabled") private var infiniteCanvasEnabled = false
     @State private var canvasRevision = UUID()
     @State private var pagesVisible = false
     @State private var renamingPage: NotebookPage?
@@ -33,6 +32,7 @@ struct ContentView: View {
     @State private var newTitle = ""
     @State private var persistenceError: String?
     @State private var saveTask: Task<Void, Never>?
+    @FocusState private var titleFocused: Bool
     @Namespace private var glassNamespace
 
     private var selectedNote: Note? {
@@ -41,6 +41,7 @@ struct ContentView: View {
 
     var body: some View {
         workspace
+        .ignoresSafeArea(.keyboard)
         .tint(.accentColor)
         .task {
             normalizeDuplicateTitles()
@@ -50,14 +51,15 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { saveNow() }
         }
+        .onChange(of: sidebarVisible) { _, _ in titleFocused = false }
+        .onChange(of: settingsVisible) { _, _ in titleFocused = false }
+        .onChange(of: pagesVisible) { _, _ in titleFocused = false }
+        .onChange(of: session.isDrawing) { _, drawing in if drawing { titleFocused = false } }
         .alert("Rename note", isPresented: $renamePresented, presenting: renamingNote) { note in
             TextField("Note name", text: $newTitle)
             Button("Cancel", role: .cancel) { renamingNote = nil }
             Button("Save") {
-                let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                note.title = availableTitle(trimmed.isEmpty ? "Untitled" : trimmed, excluding: note.id)
-                note.updatedAt = .now
-                saveNow()
+                renameNote(note, to: newTitle)
                 renamingNote = nil
             }
             .keyboardShortcut(.defaultAction)
@@ -121,17 +123,15 @@ struct ContentView: View {
                     }
                 }
 
-                if !infiniteCanvasEnabled {
-                    PagePullIndicator(state: session.pagePull)
-                        .ignoresSafeArea()
-                }
+                PagePullIndicator(state: session.pagePull)
+                    .ignoresSafeArea()
 
                 floatingPanels(in: geometry.size)
                     .environment(\.colorScheme, session.pagePull.topOverBlack ? .dark : colorScheme)
                     .padding(20)
             }
             .overlay(alignment: .trailing) {
-                if let note = selectedNote, !infiniteCanvasEnabled {
+                if let note = selectedNote {
                     pageNavigation(for: note, height: geometry.size.height)
                 }
             }
@@ -148,7 +148,6 @@ struct ContentView: View {
 
     private func drawingCanvas(for note: Note, revision: UUID) -> some View {
         NoteCanvas(note: note, session: session, showsGrid: showsGrid,
-                   infiniteCanvasEnabled: infiniteCanvasEnabled,
                    onPageChange: { (count: Int, index: Int) in
             recordPosition(note: note, count: count, index: index, revision: revision)
         }, onDrawingChange: { (data: Data) in
@@ -222,15 +221,11 @@ struct ContentView: View {
                 .glassEffectID("library", in: glassNamespace)
 
                 if !sidebarVisible, let note = selectedNote {
-                    Text(note.title)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .padding(.horizontal, 20)
-                        .frame(height: 52)
-                        .frame(width: min(280, max(100, size.width - 440)))
-                        .bukoGlass(cornerRadius: 26)
+                    NoteTitlePill(title: note.title, width: min(280, max(100, size.width - 440)), focus: $titleFocused) { title in
+                        renameNote(note, to: title)
+                    }
+                    .id(note.id)
                         .glassEffectID("note-title", in: glassNamespace)
-                        .accessibilityIdentifier("currentNoteTitle")
                         .transition(.scale(scale: 0.8, anchor: .leading).combined(with: .opacity))
                 }
 
@@ -239,11 +234,11 @@ struct ContentView: View {
                 ExpandingGlassPanel(
                     isExpanded: settingsVisible,
                     size: CGSize(width: min(300, size.width - 104),
-                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 316),
+                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 240),
                     alignment: .topTrailing, anchor: .topTrailing
                 ) {
                     SettingsPanel(
-                        trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash, showsGrid: $showsGrid, infiniteCanvasEnabled: $infiniteCanvasEnabled,
+                        trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash, showsGrid: $showsGrid,
                         close: toggleSettings, restore: restore, restorePage: restorePage,
                         emptyTrash: {
                             emptyNoteIDs = Set(trashedNotes.map(\.id))
@@ -360,6 +355,18 @@ struct ContentView: View {
             note.updatedAt = .now
         }) else { return }
         resetCanvas()
+    }
+
+    @discardableResult
+    private func renameNote(_ note: Note, to title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = availableTitle(trimmed.isEmpty ? "Untitled" : trimmed, excluding: note.id)
+        guard name != note.title else { return note.title }
+        performEdit(notes: [note]) {
+            note.title = name
+            note.updatedAt = .now
+        }
+        return note.title
     }
 
     private func availableTitle(_ title: String, excluding id: UUID? = nil) -> String {

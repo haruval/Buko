@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 BUKO_CHECK_DIR="$(mktemp -d /private/tmp/BukoChecks.XXXXXX)"
 trap 'rm -rf "$BUKO_CHECK_DIR"' EXIT
 xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
-    Buko/Canvas/PageGeometry.swift Tests/PageGeometryChecks.swift \
+    Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift Tests/PageGeometryChecks.swift \
     -o "$BUKO_CHECK_DIR/geometry"
 "$BUKO_CHECK_DIR/geometry"
 xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \

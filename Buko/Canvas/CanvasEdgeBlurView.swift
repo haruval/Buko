@@ -88,11 +88,11 @@ final class CanvasEdgeBlurView: UIView {
         }
     }
 
-    func update(scale: CGFloat, offset: CGPoint, boundary: CGRect, strength: CGFloat) {
+    func update(scale: CGFloat, offset: CGPoint, boundary: CGRect, strength: CGFloat, viewportEdges: Bool = false) {
         alpha = min(1, strength)
         guard strength > 0, !snapshotRect.isEmpty else { return }
         let imageFrame = PageGeometry.screenRect(snapshotRect, scale: scale, offset: offset)
-        let edgeFrame = PageGeometry.screenRect(boundary, scale: scale, offset: offset)
+        let edgeFrame = (viewportEdges ? bounds : PageGeometry.screenRect(boundary, scale: scale, offset: offset))
             .offsetBy(dx: -imageFrame.minX, dy: -imageFrame.minY)
         let band = 72 + min(1.5, strength) * 150
         CATransaction.begin()

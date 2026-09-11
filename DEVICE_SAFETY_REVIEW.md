@@ -2,6 +2,8 @@
 
 Reviewed September 10, 2026, against the current working tree, including page spacing, the page library, recoverable page deletion, and Empty Trash.
 
+The subsequent page-only update removes freeform growth and adds a fresh-pull creation gate and inline title editing. Its version-2 page-coverage migration preserves drawing bytes and existing page IDs while adding descriptors for older ink below the saved page count. Migration, deletion/rollback, and ink-preservation checks passed again, together with portrait/landscape simulator interaction tests. No new permissions, networking, or filesystem deletion were added.
+
 **Assessment:** reasonable to test on your iPad with disposable notes. No app-code behavior indicating device compromise, data exfiltration, or modification of other apps was found. This is a source/configuration review and simulator validation, not a guarantee of zero risk or a penetration test of iPadOS.
 
 ## Findings addressed

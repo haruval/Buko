@@ -61,7 +61,7 @@ final class NotebookInteractionTests: XCTestCase {
     }
 
     @MainActor
-    func testPagePullsPersistenceAndExperimentalMode() {
+    func testPagePullsPersistence() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--canvasGestureTestArea"]
@@ -102,9 +102,8 @@ final class NotebookInteractionTests: XCTestCase {
 
         app.buttons["Settings"].tap()
         Thread.sleep(forTimeInterval: 1)
-        app.switches["infiniteCanvas"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        expect("Infinite canvas", on: canvas)
-        app.switches["infiniteCanvas"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(app.switches["gridLines"].exists)
+        XCTAssertFalse(app.staticTexts["Enable infinite canvas (experimental)"].exists)
         expect("Page 2 of 2", on: canvas)
     }
 
@@ -162,9 +161,9 @@ final class NotebookInteractionTests: XCTestCase {
         let firstTitle = rows.element(boundBy: 0).label
         XCTAssertTrue(rows.element(boundBy: 0).isSelected)
         app.buttons["Hide notes"].tap()
-        let pill = app.staticTexts["currentNoteTitle"]
+        let pill = app.textFields["currentNoteTitle"]
         XCTAssertTrue(pill.waitForExistence(timeout: 3))
-        let oldTitle = pill.label
+        let oldTitle = pill.value as! String
         XCTAssertTrue(firstTitle.contains(oldTitle))
         app.buttons["Show notes"].tap()
         Thread.sleep(forTimeInterval: 0.6)
@@ -174,8 +173,8 @@ final class NotebookInteractionTests: XCTestCase {
         XCTAssertFalse(rows.element(boundBy: 0).label.contains(oldTitle + ","))
         app.buttons["Hide notes"].tap()
         XCTAssertTrue(pill.waitForExistence(timeout: 3))
-        XCTAssertNotEqual(pill.label, oldTitle)
-        XCTAssertTrue(pill.label.contains("Untitled ("))
+        XCTAssertNotEqual(pill.value as? String, oldTitle)
+        XCTAssertTrue((pill.value as? String ?? "").contains("Untitled ("))
         app.buttons["Show notes"].tap()
         Thread.sleep(forTimeInterval: 0.6)
         // Editing the older note promotes it above the more recently created note.
