@@ -50,3 +50,7 @@ xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
 xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
     Buko/AI/MatrixProductCheck.swift Tests/MatrixProductChecks.swift -o "$BUKO_CHECK_DIR/matrix"
 "$BUKO_CHECK_DIR/matrix"
+
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    Buko/AI/CirclePopupPlacement.swift Tests/CirclePopupPlacementChecks.swift -o "$BUKO_CHECK_DIR/popup"
+"$BUKO_CHECK_DIR/popup"

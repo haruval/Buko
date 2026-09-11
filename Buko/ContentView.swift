@@ -15,7 +15,7 @@ struct ContentView: View {
     @Query(sort: \TrashedPage.deletedAt, order: .reverse) private var trashedPages: [TrashedPage]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
     @AppStorage("pplTestNoteID") private var pplTestNoteID = ""
-    @AppStorage("testLectureTitleMigrated") private var testLectureTitleMigrated = false
+    @AppStorage("testPPLLectureTitleMigrated") private var testPPLLectureTitleMigrated = false
     @State private var showsDevelopment = false
     @State private var canvasRevision = UUID()
     @State private var pagesVisible = false
@@ -54,7 +54,7 @@ struct ContentView: View {
                 if notes.isEmpty && trashedNotes.isEmpty { createNote() }
                 else if let note = notes.first { select(note) }
             }
-            for lecture in [SampleLecture.operatingSystems, .linearAlgebra] {
+            for lecture in [SampleLecture.operatingSystems, .linearAlgebra, .biology101] {
                 if UserDefaults.standard.string(forKey: lecture.storageKey) == nil {
                     recreateTestNote(lecture, selectCreated: false)
                 }
@@ -95,7 +95,7 @@ struct ContentView: View {
                 }
             }
         } message: {
-            Text("Permanently delete \(emptyNoteIDs.count) notes and \(emptyPageIDs.count) pages from Buko’s Trash? This cannot be undone.")
+            Text("Permanently delete \(emptyNoteIDs.count) notes and \(emptyPageIDs.count) pages from Trash? This cannot be undone.")
         }
         .alert("Notes couldn’t be saved", isPresented: Binding(
             get: { persistenceError != nil },
@@ -329,14 +329,14 @@ struct ContentView: View {
     }
 
     private func migrateTestLectureTitle() {
-        guard !testLectureTitleMigrated else { return }
+        guard !testPPLLectureTitleMigrated else { return }
         do {
             let all = try modelContext.fetch(FetchDescriptor<Note>())
             if let note = all.first(where: { $0.id.uuidString == pplTestNoteID }) {
-                let title = Note.uniqueTitle("Test Lecture", occupied: Set(all.filter { $0.id != note.id }.map(\.title)))
+                let title = Note.uniqueTitle(SampleLecture.programmingLanguages.title, occupied: Set(all.filter { $0.id != note.id }.map(\.title)))
                 guard performEdit(notes: [note], { note.title = title }) else { return }
             }
-            testLectureTitleMigrated = true
+            testPPLLectureTitleMigrated = true
         } catch { persistenceError = error.localizedDescription }
     }
 

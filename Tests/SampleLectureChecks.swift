@@ -3,7 +3,7 @@ import PencilKit
 
 @main struct SampleLectureChecks {
     static func main() throws {
-        precondition(Set(SampleLecture.allCases.map(\.storageKey)).count == 3,
+        precondition(Set(SampleLecture.allCases.map(\.storageKey)).count == SampleLecture.allCases.count,
                      "Each fixture must reset independently")
         for lecture in SampleLecture.allCases {
             precondition(lecture.pages.count == 2)

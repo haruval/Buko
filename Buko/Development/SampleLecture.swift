@@ -2,13 +2,14 @@ import PencilKit
 
 /// UUID-scoped, independently resettable development notes.
 enum SampleLecture: String, CaseIterable, Identifiable {
-    case programmingLanguages, operatingSystems, linearAlgebra
+    case programmingLanguages, operatingSystems, linearAlgebra, biology101
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .programmingLanguages: "Test Lecture"
+        case .programmingLanguages: "Test PPL Lecture"
         case .operatingSystems: "Test Operating Systems Lecture"
         case .linearAlgebra: "Test Linear Algebra Lecture"
+        case .biology101: "Test Biology 101 Lecture"
         }
     }
     var storageKey: String {
@@ -16,6 +17,7 @@ enum SampleLecture: String, CaseIterable, Identifiable {
         case .programmingLanguages: "pplTestNoteID"
         case .operatingSystems: "osTestNoteID"
         case .linearAlgebra: "linearAlgebraTestNoteID"
+        case .biology101: "biology101TestNoteID"
         }
     }
     var resetIdentifier: String {
@@ -23,6 +25,7 @@ enum SampleLecture: String, CaseIterable, Identifiable {
         case .programmingLanguages: "recreateTestNote"
         case .operatingSystems: "recreateOperatingSystemsNote"
         case .linearAlgebra: "recreateLinearAlgebraNote"
+        case .biology101: "recreateBiologyNote"
         }
     }
     var pages: [[String]] {
@@ -30,6 +33,7 @@ enum SampleLecture: String, CaseIterable, Identifiable {
         case .programmingLanguages: PPLTestNote.pages
         case .operatingSystems: Self.operatingSystemsPages
         case .linearAlgebra: Self.linearAlgebraPages
+        case .biology101: Self.biologyPages
         }
     }
     func drawing() -> PKDrawing { LectureHandwriting.drawing(pages: pages) }
@@ -64,5 +68,21 @@ enum SampleLecture: String, CaseIterable, Identifiable {
          "Solve: x + 2y = 5, 3x + 4y = 11", "Subtract 3 times row 1 from row 2:", "", "",
          "For A = [1 2; 2 4], find its null space.", "Ax = 0 implies x1 + 2x2 = 0.", "A basis for the null space:", "", "",
          "Rank-nullity theorem:", "", ""]
+    ]
+    static let biologyPages: [[String]] = [
+        ["INTRO TO BIOLOGY 101", "Week 1 - what is life?", "",
+         "Biology is the scientific study of life.", "Living things are made of one or more cells.",
+         "A cell is the smallest unit of life.", "Characteristics shared by living things:", "", "",
+         "Organisms use energy and respond to stimuli.", "Homeostasis:", "", "",
+         "Example: sweating helps cool the body.", "How does this support homeostasis?", "", "",
+         "Prokaryotic vs eukaryotic cells:", "", "",
+         "Cell -> tissue -> organ -> organ system", "Organism:", ""],
+        ["INTRO TO BIOLOGY 101", "Week 1 - how biologists ask questions", "",
+         "An observation is information we gather.", "An inference is an interpretation of it.",
+         "A scientific hypothesis must be testable.", "Hypothesis vs prediction:", "", "",
+         "Question: does light affect plant growth?", "Prediction: plants with more light grow taller.",
+         "Independent variable:", "", "Dependent variable:", "", "",
+         "Keep water, soil, and plant type the same.", "Why do we need a control group?", "", "",
+         "Why repeat an experiment?", "", "Evidence can support or challenge a hypothesis."]
     ]
 }

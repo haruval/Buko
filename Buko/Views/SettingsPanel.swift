@@ -18,7 +18,7 @@ struct SettingsPanel: View {
                     ShelfButton(title: "Back to settings", symbol: "chevron.left") {
                         showsTrash = false; showsDevelopment = false
                     }
-                    Text(showsTrash ? "Trash" : "Development").font(.headline)
+                    Text(showsTrash ? "Trash" : "Dev").font(.headline)
                     Spacer()
                 }
             }
@@ -105,7 +105,7 @@ struct SettingsPanel: View {
                 .scrollBounceBehavior(.basedOnSize)
             } else {
                 Toggle(isOn: $showsGrid) {
-                    Label("Grid lines", systemImage: "square.grid.3x3")
+                    Label("Grid", systemImage: "square.grid.3x3")
                         .font(.subheadline)
                 }
                 .padding(.horizontal, 14)
@@ -128,7 +128,7 @@ struct SettingsPanel: View {
                 Button { showsDevelopment = true } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "hammer")
-                        Text("Development")
+                        Text("Dev")
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold))
                     }.font(.subheadline).padding(14).contentShape(.rect)

@@ -23,10 +23,7 @@ struct CircleIntentOverlay: View {
                                 GeometryReader { card in
                                     Color.clear.onAppear { positionPopup(card.size, viewport: geometry.size) }
                                         .onChange(of: card.size) { _, size in positionPopup(size, viewport: geometry.size) }
-                                        .onChange(of: state.projection) { _, _ in positionPopup(card.size, viewport: geometry.size) }
-                                        .onChange(of: state.textBounds) { _, _ in positionPopup(card.size, viewport: geometry.size) }
                                         .onChange(of: geometry.size) { _, _ in positionPopup(card.size, viewport: geometry.size) }
-                                        .onChange(of: state.selectionBounds) { _, _ in positionPopup(card.size, viewport: geometry.size) }
                                 }
                             }
                             .offset(x: state.popupBounds.minX, y: state.popupBounds.minY)
@@ -149,13 +146,11 @@ struct CircleIntentOverlay: View {
     }
 
     private func positionPopup(_ size: CGSize, viewport: CGSize) {
-        let region = state.textBounds.reduce(state.selectionBounds) { $0.union($1) }.applying(state.projection)
-        let rightFits = region.maxX + 16 + size.width < viewport.width - 16
-        let preferredX = rightFits ? region.maxX + 16 : region.minX
-        let x = max(16, min(viewport.width - size.width - 16, preferredX))
-        let preferredY = rightFits ? region.minY : region.maxY + 18
-        let y = min(max(100, preferredY), max(100, viewport.height - size.height - 96))
-        state.popupBounds = CGRect(origin: CGPoint(x: x, y: y), size: size)
+        // Capture the card's screen position once. Only window/card resizing
+        // can clamp it afterward; the jelly alone follows document scrolling.
+        state.popupBounds = CirclePopupPlacement.place(size: size, viewport: viewport,
+            region: state.selectionBounds,
+            pinned: state.popupBounds.isEmpty ? nil : state.popupBounds.origin)
     }
 }
 
