@@ -49,10 +49,15 @@ struct ContentView: View {
         .task {
             normalizeDuplicateTitles()
             migrateTestLectureTitle()
-            if pplTestNoteID.isEmpty { recreateTestNote() }
+            if pplTestNoteID.isEmpty { recreateTestNote(.programmingLanguages) }
             if selection == nil {
                 if notes.isEmpty && trashedNotes.isEmpty { createNote() }
                 else if let note = notes.first { select(note) }
+            }
+            for lecture in [SampleLecture.operatingSystems, .linearAlgebra] {
+                if UserDefaults.standard.string(forKey: lecture.storageKey) == nil {
+                    recreateTestNote(lecture, selectCreated: false)
+                }
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -254,15 +259,15 @@ struct ContentView: View {
 
                 ExpandingGlassPanel(
                     isExpanded: settingsVisible,
-                    size: CGSize(width: min(showsTrash ? 300 : showsDevelopment ? 280 : 224, size.width - 104),
-                                 height: showsTrash ? max(220, min(440, size.height - 120)) : showsDevelopment ? 280 : 208),
+                    size: CGSize(width: min(showsTrash ? 300 : showsDevelopment ? 320 : 224, size.width - 104),
+                                 height: showsTrash ? max(220, min(440, size.height - 120)) : showsDevelopment ? min(390, size.height - 120) : 208),
                     alignment: .topTrailing, anchor: .topTrailing
                 ) {
                     SettingsPanel(
                         trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash,
                         showsDevelopment: $showsDevelopment, showsGrid: $showsGrid,
-                        recreateTestNote: {
-                            recreateTestNote()
+                        recreateTestNote: { lecture in
+                            recreateTestNote(lecture)
                             if settingsVisible { toggleSettings() }
                         }, restore: restore, restorePage: restorePage,
                         emptyTrash: {
@@ -335,24 +340,29 @@ struct ContentView: View {
         } catch { persistenceError = error.localizedDescription }
     }
 
-    private func recreateTestNote() {
+    private func recreateTestNote(_ lecture: SampleLecture, selectCreated: Bool = true) {
         guard flushDrawing() else { return }
-        let all = (try? modelContext.fetch(FetchDescriptor<Note>())) ?? []
-        // Identity, never a title match, scopes reset to the generated fixture.
-        let previous = all.first { $0.id.uuidString == pplTestNoteID }
-        let note = Note(title: availableTitle("Test Lecture"))
-        note.drawingData = PPLTestNote.drawing().dataRepresentation()
-        note.pageLayoutVersion = 2
-        guard performEdit(notes: previous.map { [$0] } ?? [], {
-            if let previous, previous.deletedAt == nil { previous.deletedAt = .now }
-            try note.setPages([NotebookPage(), NotebookPage()])
-            modelContext.insert(note)
-            try NotebookEdits.prepare(note)
-        }) else { return }
-        pplTestNoteID = note.id.uuidString
-        resetCanvas()
-        selection = note
-        sidebarVisible = false
+        do {
+            let all = try modelContext.fetch(FetchDescriptor<Note>())
+            let previousID = UserDefaults.standard.string(forKey: lecture.storageKey)
+            // Identity, never a title match, scopes reset to this fixture only.
+            let previous = all.first { $0.id.uuidString == previousID }
+            let note = Note(title: Note.uniqueTitle(lecture.title, occupied: Set(all.map(\.title))))
+            note.drawingData = lecture.drawing().dataRepresentation()
+            note.pageLayoutVersion = 2
+            guard performEdit(notes: previous.map { [$0] } ?? [], {
+                if let previous, previous.deletedAt == nil { previous.deletedAt = .now }
+                try note.setPages(lecture.pages.map { _ in NotebookPage() })
+                modelContext.insert(note)
+                try NotebookEdits.prepare(note)
+            }) else { return }
+            UserDefaults.standard.set(note.id.uuidString, forKey: lecture.storageKey)
+            if selectCreated {
+                resetCanvas()
+                selection = note
+                sidebarVisible = false
+            }
+        } catch { persistenceError = error.localizedDescription }
     }
 
     private func createNote() {
