@@ -10,6 +10,7 @@ struct ContentView: View {
     private var notes: [Note]
     @Query(filter: #Predicate<Note> { $0.deletedAt != nil }, sort: \Note.deletedAt, order: .reverse)
     private var trashedNotes: [Note]
+    @AppStorage("canvasGridEnabled") private var showsGrid = false
     @State private var selectedID: UUID?
     @State private var sidebarVisible = true
     @State private var settingsVisible = false
@@ -30,7 +31,7 @@ struct ContentView: View {
             ZStack(alignment: .topLeading) {
                 Color("CanvasBackground").ignoresSafeArea()
                 if let note = selectedNote {
-                    NoteCanvas(note: note, session: session) { data in
+                    NoteCanvas(note: note, session: session, showsGrid: showsGrid) { data in
                         note.drawingData = data
                         note.updatedAt = .now
                         scheduleSave()
@@ -89,8 +90,13 @@ struct ContentView: View {
         }
     }
 
+    private func panelAnimation(opening: Bool) -> Animation? {
+        guard !reduceMotion else { return nil }
+        return .spring(response: opening ? 0.55 : 0.42, dampingFraction: opening ? 0.62 : 0.82)
+    }
+
     private func toggleSidebar() {
-        withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)) {
+        withAnimation(panelAnimation(opening: !sidebarVisible)) {
             sidebarVisible.toggle()
             if sidebarVisible && horizontalSizeClass == .compact { settingsVisible = false }
         }
@@ -123,11 +129,11 @@ struct ContentView: View {
                 ExpandingGlassPanel(
                     isExpanded: settingsVisible,
                     size: CGSize(width: min(300, size.width - 104),
-                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 168),
+                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 236),
                     alignment: .topTrailing, anchor: .topTrailing
                 ) {
                     SettingsPanel(
-                        trashedNotes: trashedNotes, showsTrash: $showsTrash,
+                        trashedNotes: trashedNotes, showsTrash: $showsTrash, showsGrid: $showsGrid,
                         close: toggleSettings, restore: restore
                     )
                 } compact: {
@@ -141,7 +147,7 @@ struct ContentView: View {
     }
 
     private func toggleSettings() {
-        withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)) {
+        withAnimation(panelAnimation(opening: !settingsVisible)) {
             settingsVisible.toggle()
             if settingsVisible {
                 showsTrash = false

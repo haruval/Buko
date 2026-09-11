@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsPanel: View {
     let trashedNotes: [Note]
     @Binding var showsTrash: Bool
+    @Binding var showsGrid: Bool
     let close: () -> Void
     let restore: (Note) -> Void
 
@@ -56,6 +57,12 @@ struct SettingsPanel: View {
                     .scrollIndicators(.hidden)
                 }
             } else {
+                Toggle(isOn: $showsGrid) {
+                    Label("Grid lines", systemImage: "square.grid.3x3")
+                        .font(.subheadline)
+                }
+                .padding(.horizontal, 14)
+                .accessibilityIdentifier("gridLines")
                 Button { showsTrash = true } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "trash")

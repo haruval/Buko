@@ -11,3 +11,7 @@ xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
     Buko/Models/Note.swift Tests/NoteStorageChecks.swift \
     -o "$BUKO_CHECK_DIR/storage"
 "$BUKO_CHECK_DIR/storage"
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    Buko/Canvas/MonochromeInk.swift Tests/MonochromeInkChecks.swift \
+    -o "$BUKO_CHECK_DIR/ink"
+"$BUKO_CHECK_DIR/ink"
