@@ -27,11 +27,11 @@ struct NotesSidebar: View {
                         Text("Uncategorized")
                             .font(.caption2.weight(.semibold))
                             .tracking(1.8)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary)
                         Spacer()
                         Text(notes.count, format: .number)
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.primary)
                     }
                     .padding(.horizontal, 10)
                     .padding(.bottom, 16)
@@ -49,7 +49,7 @@ struct NotesSidebar: View {
                                         .foregroundStyle(.primary)
                                     Text(note.updatedAt, format: .dateTime.month(.abbreviated).day())
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(.primary)
                                 }
                                 Spacer(minLength: 0)
                             }

@@ -35,7 +35,7 @@ import Foundation
         let filling = CircleJellyGeometry.inwardFill(boundary, age: 0.65, reduceMotion: false)
         precondition(filling.contains(nearEdge))
         precondition(!filling.contains(boundary.center))
-        let filled = CircleJellyGeometry.inwardFill(boundary, age: 1, reduceMotion: false)
+        let filled = CircleJellyGeometry.inwardFill(boundary, age: CircleJellyGeometry.closeDuration + CircleJellyGeometry.fillDuration, reduceMotion: false)
         precondition(filled.contains(boundary.center))
         precondition(CircleJellyGeometry.inwardFill(boundary, age: 0, reduceMotion: true).contains(boundary.center))
 
@@ -103,7 +103,7 @@ import Foundation
                 angle: CircleJellyGeometry.angle(at: i), radius: boundary.radii[i] + CircleJellyGeometry.brushRadius)
             precondition(CircleGeometry.distance(begin[i], expected) < 0.001)
         }
-        let final = CircleJellyGeometry.moldedContour(from: boundary, to: target, age: 1, reduceMotion: false)
+        let final = CircleJellyGeometry.moldedContour(from: boundary, to: target, age: CircleJellyGeometry.closeDuration + CircleJellyGeometry.fillDuration, reduceMotion: false)
         let reduced = CircleJellyGeometry.moldedContour(from: boundary, to: target, age: 0, reduceMotion: true)
         precondition(zip(final, reduced).allSatisfy { CircleGeometry.distance($0,$1) < 0.001 })
         for tick in 0...100 {

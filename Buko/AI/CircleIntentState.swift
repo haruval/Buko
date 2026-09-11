@@ -25,6 +25,7 @@ final class CircleIntentState {
     var textBounds: [CGRect] = []
     var selectionBounds = CGRect.zero
     var recognizedText = ""
+    var nearbyContext = ""
     var intent = ""
     var action = ""
     var proposedLines: [String] = []
@@ -46,7 +47,16 @@ final class CircleIntentState {
 
     var processing: Bool { phase == .recognizing || phase == .inferring || phase == .proposing }
 
-    /// Routine input/camera changes can cancel work, but only X dismisses a result.
+    var hasPreview: Bool { processing || phase == .finished }
+
+    /// Camera movement abandons only an unfinished drawn gesture. Once a request
+    /// owns a snapshot, it continues independently of the current viewport.
+    func cancelTracing() {
+        guard phase == .tracing else { return }
+        cancel()
+    }
+
+    /// Editing, tool changes and backgrounding may invalidate pending work.
     func cancelPending() {
         guard phase != .finished else { return }
         cancel()
@@ -81,6 +91,7 @@ final class CircleIntentState {
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
         arithmeticChecked = false
+        nearbyContext = ""
         modelStartedAt = nil
         action = ""; proposedLines = []; intentSeconds = 0; proposalSeconds = 0; recognitionSeconds = 0; elapsed = 0
         phase = .idle; textBounds = []; popupBounds = .zero; popupAnchor = nil
@@ -91,7 +102,7 @@ final class CircleIntentState {
     }
 
     func trace(_ points: [CGPoint]) {
-        guard phase != .finished else { return }
+        guard !hasPreview else { return }
         if phase != .tracing { cancel(); phase = .tracing; issue = nil; recognizedText = "" }
         tracedPoints = points
         let now = Date.timeIntervalSinceReferenceDate
@@ -105,7 +116,7 @@ final class CircleIntentState {
     }
 
     func analyze(drawing: PKDrawing, polygon: [CGPoint], screenPolygon: [CGPoint], scale: CGFloat, offset: CGPoint) {
-        guard phase != .finished else { return }
+        guard !hasPreview else { return }
         captureScale = scale; captureOffset = offset; projection = .identity
         selectionBounds = CircleGeometry.path(screenPolygon).boundingBoxOfPath
         closedAt = Date.timeIntervalSinceReferenceDate
@@ -161,7 +172,9 @@ final class CircleIntentState {
                 }
                 self.phase = .inferring
             }
-            let context = reading.context
+            // Retain exactly the capped text supplied to both model stages.
+            let context = String(reading.context.prefix(IntentPrompts.contextCharacterLimit))
+            nearbyContext = context
             let model = SystemLanguageModel.default
             guard case .available = model.availability else {
                 finishIssue(Self.unavailableMessage(model), id: id); return

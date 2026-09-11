@@ -18,7 +18,9 @@ struct CircleIntentOverlay: View {
                         .allowsHitTesting(false)
                     if state.phase == .finished || state.processing {
                         popup
-                            .frame(width: min(390, geometry.size.width - 32), height: min(600, geometry.size.height - 160))
+                            .frame(width: state.popupBounds.isEmpty
+                                   ? CirclePopupPlacement.preferredWidth(viewport: geometry.size, region: state.selectionBounds.applying(state.projection))
+                                   : min(state.popupBounds.width, geometry.size.width - 32), height: min(600, geometry.size.height - 160))
                             .background {
                                 GeometryReader { card in
                                     Color.clear.onAppear { positionPopup(card.size, viewport: geometry.size) }
@@ -111,6 +113,11 @@ struct CircleIntentOverlay: View {
                         if state.arithmeticChecked { Text("Matrix arithmetic checked locally").font(.caption.weight(.semibold)) }
                         Text("Evidence").font(.caption.weight(.semibold))
                         Text(state.evidence.isEmpty ? "Not available yet." : state.evidence).font(.caption)
+                        Text("Nearby handwriting used as context").font(.caption.weight(.semibold))
+                        Text(state.nearbyContext.isEmpty
+                             ? (state.phase == .recognizing ? "Reading nearby handwriting…" : "No nearby handwriting recognized.")
+                             : state.nearbyContext)
+                            .font(.caption).textSelection(.enabled).accessibilityIdentifier("nearbyHandwritingContext")
                         Text("Recognized handwriting · \(state.recognitionMethod)").font(.caption.weight(.semibold))
                         Text(state.recognizedText.isEmpty ? "Not available yet." : state.recognizedText)
                             .font(.subheadline).textSelection(.enabled).accessibilityIdentifier("recognizedHandwriting")

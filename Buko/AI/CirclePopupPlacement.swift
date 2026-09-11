@@ -9,6 +9,12 @@ nonisolated enum CirclePopupPlacement {
         CGRect(origin: anchor.applying(projection), size: size)
     }
 
+    static func preferredWidth(viewport: CGSize, region: CGRect) -> CGFloat {
+        let available = max(region.minX - 32, viewport.width - region.maxX - 32)
+        let ideal = min(390, viewport.width - 32)
+        return available >= 260 ? min(ideal, available) : ideal
+    }
+
     static func place(size: CGSize, viewport: CGSize, region: CGRect) -> CGRect {
         let minX: CGFloat = 16, minY: CGFloat = 100, gap: CGFloat = 16
         let maxX = max(minX, viewport.width - size.width - 16)
