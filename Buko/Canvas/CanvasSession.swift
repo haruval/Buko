@@ -8,6 +8,7 @@ final class CanvasSession {
         case pen, eraser
     }
 
+    let pagePull = PagePullState()
     var tool: Tool = .pen
     var allowsFingerDrawing = false
     var canUndo = false

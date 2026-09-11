@@ -51,9 +51,6 @@ struct NotesSidebar: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 0)
-                                if note.id == selectedID {
-                                    Circle().fill(Color.accentColor).frame(width: 5, height: 5)
-                                }
                             }
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -62,6 +59,7 @@ struct NotesSidebar: View {
                             .contentShape(.rect(cornerRadius: 18))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("noteRow")
                         .accessibilityAddTraits(note.id == selectedID ? [.isSelected] : [])
                         .contextMenu {
                             Button("Rename", systemImage: "pencil") { rename(note) }

@@ -30,12 +30,13 @@ final class CanvasGuidesView: UIView {
                        delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) { self.alpha = 0 }
     }
 
-    func update(rect: CGRect, snapProgress: CGFloat?) {
+    func update(rect: CGRect, snapProgress: CGFloat?, cornerRadius: CGFloat = 0) {
         let rect = rect.insetBy(dx: 3, dy: 3)
         let fill = min(1, (snapProgress ?? 0) / 0.45)
         let fade = max(0, ((snapProgress ?? 0) - 0.45) / 0.55)
-        let horizontal = 22 + (rect.width / 2 - 22) * fill
-        let vertical = 22 + (rect.height / 2 - 22) * fill
+        let radius = min(max(0, cornerRadius - 3), min(rect.width, rect.height) / 2)
+        let horizontal = 22 + (rect.width / 2 - radius - 22) * fill
+        let vertical = 22 + (rect.height / 2 - radius - 22) * fill
         let path = UIBezierPath()
         for (point, dx, dy) in [
             (CGPoint(x: rect.minX, y: rect.minY), CGFloat(1), CGFloat(1)),
@@ -43,9 +44,14 @@ final class CanvasGuidesView: UIView {
             (CGPoint(x: rect.minX, y: rect.maxY), CGFloat(1), CGFloat(-1)),
             (CGPoint(x: rect.maxX, y: rect.maxY), CGFloat(-1), CGFloat(-1))
         ] {
-            path.move(to: CGPoint(x: point.x + dx * horizontal, y: point.y))
-            path.addLine(to: point)
-            path.addLine(to: CGPoint(x: point.x, y: point.y + dy * vertical))
+            path.move(to: CGPoint(x: point.x + dx * (radius + horizontal), y: point.y))
+            path.addLine(to: CGPoint(x: point.x + dx * radius, y: point.y))
+            // Same circular corner as the page clipping path, inset by the guide margin.
+            let k: CGFloat = 0.5522847498
+            path.addCurve(to: CGPoint(x: point.x, y: point.y + dy * radius),
+                          controlPoint1: CGPoint(x: point.x + dx * radius * (1 - k), y: point.y),
+                          controlPoint2: CGPoint(x: point.x, y: point.y + dy * radius * (1 - k)))
+            path.addLine(to: CGPoint(x: point.x, y: point.y + dy * (radius + vertical)))
         }
         let color = (UIColor(named: "AccentColor") ?? .systemGreen).resolvedColor(with: traitCollection)
         CATransaction.begin()

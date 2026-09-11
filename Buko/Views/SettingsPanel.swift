@@ -4,6 +4,7 @@ struct SettingsPanel: View {
     let trashedNotes: [Note]
     @Binding var showsTrash: Bool
     @Binding var showsGrid: Bool
+    @Binding var infiniteCanvasEnabled: Bool
     let close: () -> Void
     let restore: (Note) -> Void
 
@@ -63,6 +64,13 @@ struct SettingsPanel: View {
                 }
                 .padding(.horizontal, 14)
                 .accessibilityIdentifier("gridLines")
+                Toggle(isOn: $infiniteCanvasEnabled) {
+                    Text("Enable infinite canvas (experimental)")
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 14)
+                .accessibilityIdentifier("infiniteCanvas")
                 Button { showsTrash = true } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "trash")

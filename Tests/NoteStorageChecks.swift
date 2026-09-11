@@ -4,6 +4,10 @@ import SwiftData
 @main
 struct NoteStorageChecks {
     @MainActor static func main() throws {
+        precondition(Note.uniqueTitle("Untitled", occupied: []) == "Untitled")
+        precondition(Note.uniqueTitle("Untitled", occupied: ["Untitled"]) == "Untitled (1)")
+        precondition(Note.uniqueTitle("Untitled", occupied: ["Untitled", "Untitled (1)"]) == "Untitled (2)")
+        precondition(Note.uniqueTitle("Lecture", occupied: ["Lecture", "Lecture (2)"]) == "Lecture (1)")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("BukoStorageCheck-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -23,6 +27,9 @@ struct NoteStorageChecks {
     @MainActor static func createNotes(at url: URL, drawing: Data) throws -> UUID {
         let storage = try container(at: url)
         let note = Note(title: "Preserve this drawing")
+        precondition(note.pageCount == 1 && note.currentPageIndex == 0)
+        note.pageCount = 3
+        note.currentPageIndex = 2
         note.drawingData = drawing
         storage.mainContext.insert(note)
         storage.mainContext.insert(Note(title: "Other note"))
@@ -46,6 +53,7 @@ struct NoteStorageChecks {
         let trash = try storage.mainContext.fetch(FetchDescriptor<Note>(predicate: #Predicate { $0.deletedAt != nil }))
         precondition(trash.count == 1 && trash[0].id == id)
         precondition(trash[0].drawingData == drawing)
+        precondition(trash[0].pageCount == 3 && trash[0].currentPageIndex == 2)
         trash[0].deletedAt = nil
         try storage.mainContext.save()
     }
@@ -55,6 +63,8 @@ struct NoteStorageChecks {
         let active = try storage.mainContext.fetch(FetchDescriptor<Note>(predicate: #Predicate { $0.deletedAt == nil }))
         precondition(active.count == 2)
         precondition(active.first { $0.id == id }?.drawingData == drawing)
+        precondition(active.first { $0.id == id }?.pageCount == 3)
+        precondition(active.first { $0.id == id }?.currentPageIndex == 2)
         let trash = try storage.mainContext.fetch(FetchDescriptor<Note>(predicate: #Predicate { $0.deletedAt != nil }))
         precondition(trash.isEmpty)
     }

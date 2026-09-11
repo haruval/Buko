@@ -5,6 +5,8 @@ struct NoteCanvas: UIViewRepresentable {
     let note: Note
     let session: CanvasSession
     let showsGrid: Bool
+    let infiniteCanvasEnabled: Bool
+    let onPageChange: (Int, Int) -> Void
     let onDrawingChange: (Data) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -12,26 +14,33 @@ struct NoteCanvas: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> CanvasHostView {
-        let host = CanvasHostView()
+        let host = CanvasHostView(pagePull: session.pagePull)
         do {
             let drawing = note.drawingData.isEmpty ? PKDrawing() : try PKDrawing(data: note.drawingData)
-            host.load(drawing)
+            context.coordinator.hasLoadedDrawing = true
+            host.onPageChange = onPageChange
+            host.load(drawing, savedPageCount: note.pageCount, pageIndex: note.currentPageIndex)
         } catch {
             host.canvas.isUserInteractionEnabled = false
             Task { @MainActor in
                 session.loadError = "This drawing couldn’t be opened. Its saved data has been preserved."
             }
         }
-        host.canvas.delegate = context.coordinator
         context.coordinator.host = host
-        session.canvas = host.canvas
-        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid)
+        // A failed decode must never attach a writer to the empty fallback canvas.
+        // Blocking touches alone does not block programmatic delegate callbacks.
+        if context.coordinator.hasLoadedDrawing {
+            host.canvas.delegate = context.coordinator
+            session.canvas = host.canvas
+        }
+        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid, infiniteCanvasEnabled: infiniteCanvasEnabled)
         return host
     }
 
     func updateUIView(_ host: CanvasHostView, context: Context) {
         context.coordinator.onDrawingChange = onDrawingChange
-        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid)
+        host.onPageChange = context.coordinator.hasLoadedDrawing ? onPageChange : nil
+        host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid, infiniteCanvasEnabled: infiniteCanvasEnabled)
     }
 
     static func dismantleUIView(_ host: CanvasHostView, coordinator: Coordinator) {
@@ -43,6 +52,7 @@ struct NoteCanvas: UIViewRepresentable {
         let session: CanvasSession
         var onDrawingChange: (Data) -> Void
         weak var host: CanvasHostView?
+        var hasLoadedDrawing = false
 
         init(session: CanvasSession, onDrawingChange: @escaping (Data) -> Void) {
             self.session = session
@@ -50,17 +60,31 @@ struct NoteCanvas: UIViewRepresentable {
         }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-            guard let host, !host.isUpdatingInk else { return }
+            guard hasLoadedDrawing, let host, !host.isUpdatingInk else { return }
             // Undo may restore strokes created under another appearance.
             host.normalizeDisplayedInk()
             onDrawingChange(MonochromeInk.canonical(canvasView.drawing).dataRepresentation())
             session.refreshUndoState()
+            host.invalidateEdgeSnapshot()
             host.extendIfNeeded()
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             host?.updateViewport()
             host?.extendIfNeeded()
+        }
+
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            host?.beginPagePull()
+        }
+
+        func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint,
+                                      targetContentOffset: UnsafeMutablePointer<CGPoint>) {
+            host?.targetOffsetForRelease(&targetContentOffset.pointee)
+        }
+
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            host?.finishPagePull()
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {

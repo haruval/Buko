@@ -6,6 +6,19 @@
 	objectVersion = 90;
 	objects = {
 
+
+/* Focused simulator interaction checks. */
+		B00000000000000000000001 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = BukoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; path = Tests/UI; sourceTree = "<group>"; };
+		B00000000000000000000003 = {isa = PBXNativeTarget; buildConfigurationList = B00000000000000000000004; buildPhases = (B00000000000000000000005, B00000000000000000000006,); buildRules = (); dependencies = (B00000000000000000000007,); fileSystemSynchronizedGroups = (B00000000000000000000002,); name = BukoUITests; productName = BukoUITests; productReference = B00000000000000000000001; productType = "com.apple.product-type.bundle.ui-testing"; };
+		B00000000000000000000004 = {isa = XCConfigurationList; buildConfigurations = (B00000000000000000000009, B0000000000000000000000A,); defaultConfigurationName = Release; };
+		B00000000000000000000005 = {isa = PBXSourcesBuildPhase; files = (); };
+		B00000000000000000000006 = {isa = PBXFrameworksBuildPhase; files = (); };
+		B00000000000000000000007 = {isa = PBXTargetDependency; target = 000000000000000100000000; targetProxy = B00000000000000000000008; };
+		B00000000000000000000008 = {isa = PBXContainerItemProxy; containerPortal = 000000000000000000000000; proxyType = 1; remoteGlobalIDString = 000000000000000100000000; remoteInfo = Buko; };
+		B00000000000000000000009 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Buko;}; name = Debug; };
+		B0000000000000000000000A = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Buko;}; name = Release; };
+
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Buko.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Buko.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -31,6 +44,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000010 /* Buko */,
+				B00000000000000000000002 /* Tests/UI */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -39,6 +53,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000120 /* Buko.app */,
+				B00000000000000000000001 /* BukoUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -94,6 +109,7 @@
 			projectRoot = "";
 			targets = (
 				000000000000000100000000 /* Buko */,
+				B00000000000000000000003 /* BukoUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -257,8 +273,9 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_FILE = Configuration/Info.plist;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = NO;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
@@ -295,8 +312,9 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_FILE = Configuration/Info.plist;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = NO;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;

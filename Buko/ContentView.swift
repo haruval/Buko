@@ -4,26 +4,29 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Query(filter: #Predicate<Note> { $0.deletedAt == nil }, sort: \Note.createdAt, order: .reverse)
+    @Query(filter: #Predicate<Note> { $0.deletedAt == nil }, sort: \Note.updatedAt, order: .reverse)
     private var notes: [Note]
     @Query(filter: #Predicate<Note> { $0.deletedAt != nil }, sort: \Note.deletedAt, order: .reverse)
     private var trashedNotes: [Note]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
-    @State private var selectedID: UUID?
+    @AppStorage("infiniteCanvasEnabled") private var infiniteCanvasEnabled = false
+    @State private var selection: Note?
     @State private var sidebarVisible = true
     @State private var settingsVisible = false
     @State private var showsTrash = false
     @State private var session = CanvasSession()
     @State private var renamingNote: Note?
+    @State private var renamePresented = false
     @State private var newTitle = ""
     @State private var persistenceError: String?
     @State private var saveTask: Task<Void, Never>?
     @Namespace private var glassNamespace
 
     private var selectedNote: Note? {
-        notes.first { $0.id == selectedID } ?? notes.first
+        selection.flatMap { $0.deletedAt == nil ? $0 : nil } ?? notes.first { $0.deletedAt == nil }
     }
 
     var body: some View {
@@ -31,7 +34,14 @@ struct ContentView: View {
             ZStack(alignment: .topLeading) {
                 Color("CanvasBackground").ignoresSafeArea()
                 if let note = selectedNote {
-                    NoteCanvas(note: note, session: session, showsGrid: showsGrid) { data in
+                    NoteCanvas(note: note, session: session, showsGrid: showsGrid,
+                               infiniteCanvasEnabled: infiniteCanvasEnabled,
+                               onPageChange: { count, index in
+                        if count > note.pageCount { note.updatedAt = .now }
+                        note.pageCount = count
+                        note.currentPageIndex = index
+                        scheduleSave()
+                    }) { data in
                         note.drawingData = data
                         note.updatedAt = .now
                         scheduleSave()
@@ -40,36 +50,44 @@ struct ContentView: View {
                     .ignoresSafeArea()
                 }
 
+                if !infiniteCanvasEnabled {
+                    PagePullIndicator(state: session.pagePull)
+                        .ignoresSafeArea()
+                }
+
                 floatingPanels(in: geometry.size)
+                    .environment(\.colorScheme, session.pagePull.topOverBlack ? .dark : colorScheme)
                     .padding(20)
             }
             .overlay(alignment: .bottom) {
-                ToolShelf(session: session)
-                    .disabled(selectedNote == nil)
-                    .padding(.bottom, 16)
+                VStack(spacing: 12) {
+                    ToolShelf(session: session)
+                        .disabled(selectedNote == nil)
+                }
+                .environment(\.colorScheme, session.pagePull.bottomOverBlack ? .dark : colorScheme)
+                .padding(.bottom, 16)
             }
         }
         .tint(.accentColor)
         .task {
+            normalizeDuplicateTitles()
             if notes.isEmpty && trashedNotes.isEmpty { createNote() }
-            else if selectedID == nil { selectedID = notes.first?.id }
+            else if selection == nil { selection = notes.first }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { saveNow() }
         }
-        .alert("Rename note", isPresented: Binding(
-            get: { renamingNote != nil },
-            set: { if !$0 { renamingNote = nil } }
-        )) {
+        .alert("Rename note", isPresented: $renamePresented, presenting: renamingNote) { note in
             TextField("Note name", text: $newTitle)
             Button("Cancel", role: .cancel) { renamingNote = nil }
             Button("Save") {
                 let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                renamingNote?.title = trimmed.isEmpty ? "Untitled" : trimmed
-                renamingNote?.updatedAt = .now
+                note.title = availableTitle(trimmed.isEmpty ? "Untitled" : trimmed, excluding: note.id)
+                note.updatedAt = .now
                 saveNow()
                 renamingNote = nil
             }
+            .keyboardShortcut(.defaultAction)
         }
         .alert("Notes couldn’t be saved", isPresented: Binding(
             get: { persistenceError != nil },
@@ -116,6 +134,7 @@ struct ContentView: View {
                         rename: { note in
                             newTitle = note.title
                             renamingNote = note
+                            renamePresented = true
                         }, trash: moveToTrash
                     )
                 } compact: {
@@ -124,16 +143,29 @@ struct ContentView: View {
                 }
                 .glassEffectID("library", in: glassNamespace)
 
+                if !sidebarVisible, let note = selectedNote {
+                    Text(note.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .padding(.horizontal, 20)
+                        .frame(height: 52)
+                        .frame(maxWidth: settingsVisible ? max(0, size.width - 440) : min(340, size.width - 176))
+                        .bukoGlass(cornerRadius: 26)
+                        .glassEffectID("note-title", in: glassNamespace)
+                        .accessibilityIdentifier("currentNoteTitle")
+                        .transition(.scale(scale: 0.8, anchor: .leading).combined(with: .opacity))
+                }
+
                 Spacer(minLength: 12)
 
                 ExpandingGlassPanel(
                     isExpanded: settingsVisible,
                     size: CGSize(width: min(300, size.width - 104),
-                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 236),
+                                 height: showsTrash ? max(220, min(440, size.height - 120)) : 316),
                     alignment: .topTrailing, anchor: .topTrailing
                 ) {
                     SettingsPanel(
-                        trashedNotes: trashedNotes, showsTrash: $showsTrash, showsGrid: $showsGrid,
+                        trashedNotes: trashedNotes, showsTrash: $showsTrash, showsGrid: $showsGrid, infiniteCanvasEnabled: $infiniteCanvasEnabled,
                         close: toggleSettings, restore: restore
                     )
                 } compact: {
@@ -160,7 +192,7 @@ struct ContentView: View {
         let wasSelected = selectedNote?.id == note.id
         note.deletedAt = .now
         if wasSelected {
-            selectedID = notes.first { $0.id != note.id && $0.deletedAt == nil }?.id
+            selection = notes.first { $0.id != note.id && $0.deletedAt == nil }
             session = CanvasSession()
         }
         saveNow()
@@ -171,22 +203,42 @@ struct ContentView: View {
         note.updatedAt = .now
         saveNow()
         session = CanvasSession()
-        selectedID = note.id
+        selection = note
     }
 
     private func select(_ note: Note) {
         guard note.id != selectedNote?.id else { return }
         saveNow()
         session = CanvasSession()
-        selectedID = note.id
+        selection = note
     }
 
     private func createNote() {
         saveNow()
-        let note = Note()
+        let note = Note(title: availableTitle("Untitled"))
         modelContext.insert(note)
         session = CanvasSession()
-        selectedID = note.id
+        selection = note
+        saveNow()
+    }
+
+    private func availableTitle(_ title: String, excluding id: UUID? = nil) -> String {
+        // Fetch includes pending inserts; @Query may still be delivering its update.
+        let all = (try? modelContext.fetch(FetchDescriptor<Note>())) ?? (notes + trashedNotes)
+        return Note.uniqueTitle(title, occupied: Set(all.filter { $0.id != id }.map(\.title)))
+    }
+
+    private func normalizeDuplicateTitles() {
+        let all = ((try? modelContext.fetch(FetchDescriptor<Note>())) ?? (notes + trashedNotes))
+            .sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
+        var occupied = Set(all.map(\.title))
+        var seen = Set<String>()
+        for note in all {
+            if !seen.insert(note.title).inserted {
+                note.title = Note.uniqueTitle(note.title, occupied: occupied)
+                occupied.insert(note.title)
+            }
+        }
         saveNow()
     }
 

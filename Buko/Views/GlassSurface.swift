@@ -7,13 +7,12 @@ extension View {
 }
 
 private struct BukoGlass: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
     let cornerRadius: CGFloat
     let interactive: Bool
 
     func body(content: Content) -> some View {
         content.glassEffect(
-            .clear.tint(Color("GlassTint").opacity(colorScheme == .dark ? 0.38 : 0.24)).interactive(interactive),
+            .clear.interactive(interactive),
             in: .rect(cornerRadius: cornerRadius)
         )
     }

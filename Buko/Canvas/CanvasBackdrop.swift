@@ -10,7 +10,7 @@ final class CanvasBackdrop: UIView {
         backgroundColor = UIColor(named: "CanvasBackground")
         isUserInteractionEnabled = false
         grid.fillColor = nil
-        grid.lineWidth = 0.5
+        grid.lineWidth = 0.65
         layer.addSublayer(grid)
     }
 
@@ -37,7 +37,7 @@ final class CanvasBackdrop: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         grid.path = path.cgPath
-        grid.strokeColor = (traitCollection.userInterfaceStyle == .dark ? UIColor.white : .black).withAlphaComponent(0.10).cgColor
+        grid.strokeColor = (traitCollection.userInterfaceStyle == .dark ? UIColor.white : .black).withAlphaComponent(0.14).cgColor
         CATransaction.commit()
     }
 }
@@ -48,19 +48,19 @@ enum CanvasEdgeMask {
     static let image: CGImage? = {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 128, height: 128), format: format).image { context in
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 384, height: 384), format: format).image { context in
             UIColor.white.setFill()
-            context.fill(CGRect(x: 32, y: 32, width: 64, height: 64))
+            context.fill(CGRect(x: 96, y: 96, width: 192, height: 192))
         }
         guard let input = CIImage(image: image) else { return nil }
-        let blurred = input.applyingGaussianBlur(sigma: 8).cropped(to: input.extent)
+        let blurred = input.applyingGaussianBlur(sigma: 24).cropped(to: input.extent)
         return CIContext().createCGImage(blurred, from: input.extent)
     }()
 
     static func makeLayer() -> CALayer {
         let mask = CALayer()
         mask.contents = image
-        mask.contentsCenter = CGRect(x: 0.5, y: 0.5, width: 1.0 / 128, height: 1.0 / 128)
+        mask.contentsCenter = CGRect(x: 0.5, y: 0.5, width: 1.0 / 384, height: 1.0 / 384)
         return mask
     }
 }
