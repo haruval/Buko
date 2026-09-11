@@ -1,9 +1,15 @@
 import Foundation
 import CoreGraphics
 
-/// The popup is screen-pinned; the source jelly continues to use document space.
+/// Choose placement once, then project the page anchor with the source jelly.
 nonisolated enum CirclePopupPlacement {
-    static func place(size: CGSize, viewport: CGSize, region: CGRect, pinned: CGPoint?) -> CGRect {
+    /// Keep the card readable at a fixed size while its origin follows the page.
+    /// Never clamp during scrolling: the popup must leave the viewport with its source.
+    static func projected(anchor: CGPoint, size: CGSize, projection: CGAffineTransform) -> CGRect {
+        CGRect(origin: anchor.applying(projection), size: size)
+    }
+
+    static func place(size: CGSize, viewport: CGSize, region: CGRect) -> CGRect {
         let minX: CGFloat = 16, minY: CGFloat = 100, gap: CGFloat = 16
         let maxX = max(minX, viewport.width - size.width - 16)
         let maxY = max(minY, viewport.height - size.height - 96)
@@ -11,7 +17,6 @@ nonisolated enum CirclePopupPlacement {
             CGRect(x: min(maxX, max(minX, origin.x)), y: min(maxY, max(minY, origin.y)),
                    width: size.width, height: size.height)
         }
-        if let pinned { return clamped(pinned) }
         // Prefer either side over placing a large card beneath the selection.
         if region.maxX + gap <= maxX {
             return clamped(CGPoint(x: region.maxX + gap, y: region.minY))

@@ -229,7 +229,8 @@ struct ContentView: View {
                 ExpandingGlassPanel(
                     isExpanded: sidebarVisible,
                     size: CGSize(width: min(272, size.width - 104), height: max(220, min(640, size.height - 120))),
-                    alignment: .topLeading, anchor: .topLeading
+                    alignment: .topLeading, anchor: .topLeading,
+                    expandedBackingOpacity: 0.5
                 ) {
                     NotesSidebar(
                         notes: notes, selectedID: selectedNote?.id,
@@ -247,7 +248,7 @@ struct ContentView: View {
                 .glassEffectID("library", in: glassNamespace)
 
                 if !sidebarVisible, let note = selectedNote {
-                    NoteTitlePill(title: note.title, width: min(280, max(100, size.width - 440)), focus: $titleFocused) { title in
+                    NoteTitlePill(title: note.title, width: min(420, max(100, size.width - 440)), focus: $titleFocused) { title in
                         renameNote(note, to: title)
                     }
                     .id(note.id)

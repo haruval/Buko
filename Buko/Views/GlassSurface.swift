@@ -31,6 +31,8 @@ struct ExpandingGlassPanel<Expanded: View, Compact: View>: View {
     let alignment: Alignment
     let anchor: UnitPoint
     var compactSize = CGSize(width: 52, height: 52)
+    // A local readability backing, not an override of the system glass slider.
+    var expandedBackingOpacity: Double = 0
     @ViewBuilder var expanded: () -> Expanded
     @ViewBuilder var compact: () -> Compact
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -60,6 +62,9 @@ struct ExpandingGlassPanel<Expanded: View, Compact: View>: View {
         .frame(width: isExpanded ? size.width : compactSize.width, height: isExpanded ? size.height : compactSize.height, alignment: alignment)
         .clipShape(.rect(cornerRadius: isExpanded ? 32 : 26))
         .bukoGlass(cornerRadius: isExpanded ? 32 : 26)
+        .background(Color(uiColor: .secondarySystemBackground)
+            .opacity(isExpanded ? expandedBackingOpacity : 0),
+                    in: .rect(cornerRadius: isExpanded ? 32 : 26))
     }
 }
 

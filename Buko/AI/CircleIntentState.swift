@@ -38,6 +38,7 @@ final class CircleIntentState {
     var issue: String?
     var elapsed: Double = 0
     var recognitionMethod = ""
+    private var popupAnchor: CGPoint?
     var popupBounds = CGRect.zero
     private var requestID = UUID()
     private var task: Task<Void, Never>?
@@ -56,7 +57,23 @@ final class CircleIntentState {
         let ratio = scale / captureScale
         let next = CGAffineTransform(a: ratio, b: 0, c: 0, d: ratio,
             tx: captureOffset.x * ratio - offset.x, ty: captureOffset.y * ratio - offset.y)
-        if next != projection { projection = next }
+        if next != projection {
+            projection = next
+            if let popupAnchor {
+                popupBounds = CirclePopupPlacement.projected(anchor: popupAnchor, size: popupBounds.size, projection: next)
+            }
+        }
+    }
+
+    func positionPopup(size: CGSize, viewport: CGSize) {
+        if popupAnchor == nil {
+            let initial = CirclePopupPlacement.place(size: size, viewport: viewport,
+                region: selectionBounds.applying(projection))
+            popupAnchor = initial.origin.applying(projection.inverted())
+        }
+        if let popupAnchor {
+            popupBounds = CirclePopupPlacement.projected(anchor: popupAnchor, size: size, projection: projection)
+        }
     }
 
     func cancel() {
@@ -66,7 +83,7 @@ final class CircleIntentState {
         arithmeticChecked = false
         modelStartedAt = nil
         action = ""; proposedLines = []; intentSeconds = 0; proposalSeconds = 0; recognitionSeconds = 0; elapsed = 0
-        phase = .idle; textBounds = []; popupBounds = .zero
+        phase = .idle; textBounds = []; popupBounds = .zero; popupAnchor = nil
         droplet = nil; tailAnchor = nil; paintedPath = CGMutablePath(); closedBoundary = nil; fittedRectangle = nil
         release = nil; tracedPoints = []; projection = .identity
         closedAt = nil; morphBegan = nil; motionActive = false

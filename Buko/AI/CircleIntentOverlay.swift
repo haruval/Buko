@@ -55,6 +55,8 @@ struct CircleIntentOverlay: View {
 
     private func glassSurface<S: Shape>(_ shape: S, wave: Double) -> some View {
         shape.fill(.clear)
+            // Clear is the most transparent public native-glass variant. The SDK
+            // does not expose a per-view override for the system opacity slider.
             .glassEffect(.clear.tint(CircleAIStyle.glassTint), in: shape)
             .overlay {
                 shape.fill(.white.opacity(state.processing ? 0.06 + 0.04 * wave : 0.025))
@@ -146,11 +148,7 @@ struct CircleIntentOverlay: View {
     }
 
     private func positionPopup(_ size: CGSize, viewport: CGSize) {
-        // Capture the card's screen position once. Only window/card resizing
-        // can clamp it afterward; the jelly alone follows document scrolling.
-        state.popupBounds = CirclePopupPlacement.place(size: size, viewport: viewport,
-            region: state.selectionBounds,
-            pinned: state.popupBounds.isEmpty ? nil : state.popupBounds.origin)
+        state.positionPopup(size: size, viewport: viewport)
     }
 }
 
