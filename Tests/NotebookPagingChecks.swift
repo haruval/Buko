@@ -5,10 +5,10 @@ import Foundation
 struct NotebookPagingChecks {
     static func main() {
         precondition(abs(NotebookPaging.pageHeight / PageGeometry.pageWidth - 1376 / 1032) < 0.0001)
-        precondition(NotebookPaging.rect(for: 1).minY == NotebookPaging.rect(for: 0).maxY)
+        precondition(NotebookPaging.rect(for: 1).minY == NotebookPaging.rect(for: 0).maxY + NotebookPaging.pageGap)
         precondition(NotebookPaging.inferredPageCount(drawingMaxY: 0, savedCount: 1) == 1)
         precondition(NotebookPaging.inferredPageCount(drawingMaxY: 0, savedCount: 4) == 4)
-        precondition(NotebookPaging.inferredPageCount(drawingMaxY: NotebookPaging.pageHeight + 1, savedCount: 1) == 2)
+        precondition(NotebookPaging.inferredPageCount(drawingMaxY: NotebookPaging.pageStride + 1, savedCount: 1) == 2)
         precondition(NotebookPaging.action(pull: 87, index: 0, count: 1) == .none)
         precondition(NotebookPaging.action(pull: 88, index: 0, count: 1) == .append)
         precondition(NotebookPaging.action(pull: 100, index: 0, count: 2) == .none)

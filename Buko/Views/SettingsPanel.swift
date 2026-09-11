@@ -2,11 +2,14 @@ import SwiftUI
 
 struct SettingsPanel: View {
     let trashedNotes: [Note]
+    let trashedPages: [TrashedPage]
     @Binding var showsTrash: Bool
     @Binding var showsGrid: Bool
     @Binding var infiniteCanvasEnabled: Bool
     let close: () -> Void
     let restore: (Note) -> Void
+    let restorePage: (TrashedPage) -> Void
+    let emptyTrash: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -22,12 +25,12 @@ struct SettingsPanel: View {
             }
 
             if showsTrash {
-                if trashedNotes.isEmpty {
+                if trashedNotes.isEmpty && trashedPages.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "trash")
                             .font(.system(size: 32, weight: .light))
                         Text("Trash is empty").font(.subheadline.weight(.medium))
-                        Text("Deleted notes will appear here.")
+                        Text("Deleted notes and pages will appear here.")
                             .font(.caption)
                     }
                     .foregroundStyle(.secondary)
@@ -53,9 +56,35 @@ struct SettingsPanel: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(12)
                             }
+                            ForEach(trashedPages) { page in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Label(page.label, systemImage: "doc")
+                                        .font(.subheadline.weight(.medium))
+                                        .lineLimit(2)
+                                    Button { restorePage(page) } label: {
+                                        Label("Restore", systemImage: "arrow.uturn.backward")
+                                            .font(.caption.weight(.medium))
+                                            .padding(.horizontal, 14).frame(minHeight: 44)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .bukoGlass(cornerRadius: 22, interactive: true)
+                                    .accessibilityLabel("Restore \(page.label)")
+                                    .accessibilityIdentifier("restorePage")
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                            }
                         }
                     }
                     .scrollIndicators(.hidden)
+                    Button(role: .destructive, action: emptyTrash) {
+                        Label("Empty Trash", systemImage: "trash.slash")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .bukoGlass(interactive: true)
+                    .accessibilityIdentifier("emptyTrash")
                 }
             } else {
                 Toggle(isOn: $showsGrid) {
@@ -76,7 +105,7 @@ struct SettingsPanel: View {
                         Image(systemName: "trash")
                         Text("Trash")
                         Spacer()
-                        Text(trashedNotes.count, format: .number).foregroundStyle(.secondary)
+                        Text(trashedNotes.count + trashedPages.count, format: .number).foregroundStyle(.secondary)
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold))
                     }
                     .font(.subheadline)

@@ -32,6 +32,7 @@ struct NoteCanvas: UIViewRepresentable {
         if context.coordinator.hasLoadedDrawing {
             host.canvas.delegate = context.coordinator
             session.canvas = host.canvas
+            session.host = host
         }
         host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid, infiniteCanvasEnabled: infiniteCanvasEnabled)
         return host
@@ -58,6 +59,9 @@ struct NoteCanvas: UIViewRepresentable {
             self.session = session
             self.onDrawingChange = onDrawingChange
         }
+
+        func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) { session.isDrawing = true }
+        func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) { session.isDrawing = false }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             guard hasLoadedDrawing, let host, !host.isUpdatingInk else { return }

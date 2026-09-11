@@ -14,7 +14,11 @@ final class CanvasSession {
     var canUndo = false
     var canRedo = false
     var loadError: String?
+    var isDrawing = false
     weak var canvas: PKCanvasView?
+    weak var host: CanvasHostView?
+
+    func navigate(to index: Int) { host?.navigate(to: index) }
 
     func undo() {
         canvas?.undoManager?.undo()

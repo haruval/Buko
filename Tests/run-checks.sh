@@ -8,7 +8,7 @@ xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
     -o "$BUKO_CHECK_DIR/geometry"
 "$BUKO_CHECK_DIR/geometry"
 xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
-    Buko/Models/Note.swift Tests/NoteStorageChecks.swift \
+    Buko/Models/Note.swift Buko/Models/TrashedPage.swift Tests/NoteStorageChecks.swift \
     -o "$BUKO_CHECK_DIR/storage"
 "$BUKO_CHECK_DIR/storage"
 mkdir -p "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS"
@@ -25,3 +25,12 @@ xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
     Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift Tests/NotebookPagingChecks.swift \
     -o "$BUKO_CHECK_DIR/paging"
 "$BUKO_CHECK_DIR/paging"
+
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    -parse-as-library Tests/Fixtures/LegacyNotebook.swift -o "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
+"$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink" "$BUKO_CHECK_DIR/legacy.store"
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    Buko/Models/Note.swift Buko/Models/TrashedPage.swift Buko/Models/NotebookEdits.swift \
+    Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift Tests/NotebookSafetyChecks.swift \
+    -o "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
+"$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink" "$BUKO_CHECK_DIR/legacy.store"

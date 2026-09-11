@@ -25,6 +25,7 @@ struct ExpandingGlassPanel<Expanded: View, Compact: View>: View {
     let size: CGSize
     let alignment: Alignment
     let anchor: UnitPoint
+    var compactSize = CGSize(width: 52, height: 52)
     @ViewBuilder var expanded: () -> Expanded
     @ViewBuilder var compact: () -> Compact
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -37,11 +38,11 @@ struct ExpandingGlassPanel<Expanded: View, Compact: View>: View {
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.15, anchor: anchor).combined(with: .opacity))
             } else {
                 compact()
-                    .frame(width: 52, height: 52)
+                    .frame(width: compactSize.width, height: compactSize.height)
                     .transition(.opacity)
             }
         }
-        .frame(width: isExpanded ? size.width : 52, height: isExpanded ? size.height : 52, alignment: alignment)
+        .frame(width: isExpanded ? size.width : compactSize.width, height: isExpanded ? size.height : compactSize.height, alignment: alignment)
         .clipShape(.rect(cornerRadius: isExpanded ? 32 : 26))
         .bukoGlass(cornerRadius: isExpanded ? 32 : 26)
     }

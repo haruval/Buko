@@ -10,6 +10,8 @@ final class PagePullState {
     var didCreate = false
     var bottomOverBlack = false
     var topOverBlack = false
+    var rightOverBlack = false
+    var scrollProgress: CGFloat = 0
     var indicatorCenter = CGPoint.zero
     var indicatorVisible = false
     var birthFrame = CGRect.zero

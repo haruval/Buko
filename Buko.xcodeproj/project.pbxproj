@@ -6,21 +6,19 @@
 	objectVersion = 90;
 	objects = {
 
-
-/* Focused simulator interaction checks. */
-		B00000000000000000000001 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = BukoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		B00000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; path = Tests/UI; sourceTree = "<group>"; };
-		B00000000000000000000003 = {isa = PBXNativeTarget; buildConfigurationList = B00000000000000000000004; buildPhases = (B00000000000000000000005, B00000000000000000000006,); buildRules = (); dependencies = (B00000000000000000000007,); fileSystemSynchronizedGroups = (B00000000000000000000002,); name = BukoUITests; productName = BukoUITests; productReference = B00000000000000000000001; productType = "com.apple.product-type.bundle.ui-testing"; };
-		B00000000000000000000004 = {isa = XCConfigurationList; buildConfigurations = (B00000000000000000000009, B0000000000000000000000A,); defaultConfigurationName = Release; };
-		B00000000000000000000005 = {isa = PBXSourcesBuildPhase; files = (); };
-		B00000000000000000000006 = {isa = PBXFrameworksBuildPhase; files = (); };
-		B00000000000000000000007 = {isa = PBXTargetDependency; target = 000000000000000100000000; targetProxy = B00000000000000000000008; };
-		B00000000000000000000008 = {isa = PBXContainerItemProxy; containerPortal = 000000000000000000000000; proxyType = 1; remoteGlobalIDString = 000000000000000100000000; remoteInfo = Buko; };
-		B00000000000000000000009 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Buko;}; name = Debug; };
-		B0000000000000000000000A = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Buko;}; name = Release; };
+/* Begin PBXContainerItemProxy section */
+		B00000000000000000000008 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000100000000;
+			remoteInfo = Buko;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Buko.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Buko.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00000000000000000000001 /* BukoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = BukoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -29,10 +27,20 @@
 			path = Buko;
 			sourceTree = "<group>";
 		};
+		B00000000000000000000002 /* Tests/UI */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tests/UI;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		000000000000000130000000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		B00000000000000000000006 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
 			);
@@ -78,6 +86,26 @@
 			productName = Buko;
 			productReference = 000000000000000000000120 /* Buko.app */;
 			productType = "com.apple.product-type.application";
+		};
+		B00000000000000000000003 /* BukoUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B00000000000000000000004 /* Build configuration list for PBXNativeTarget "BukoUITests" */;
+			buildPhases = (
+				B00000000000000000000005 /* Sources */,
+				B00000000000000000000006 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B00000000000000000000007 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B00000000000000000000002 /* Tests/UI */,
+			);
+			name = BukoUITests;
+			productName = BukoUITests;
+			productReference = B00000000000000000000001 /* BukoUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
@@ -128,7 +156,20 @@
 			files = (
 			);
 		};
+		B00000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B00000000000000000000007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 000000000000000100000000 /* Buko */;
+			targetProxy = B00000000000000000000008 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		000000000000000011000000 /* Debug configuration for PBXProject "Buko" */ = {
@@ -341,6 +382,36 @@
 			};
 			name = Release;
 		};
+		B00000000000000000000009 /* Debug configuration for PBXNativeTarget "BukoUITests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Buko;
+			};
+			name = Debug;
+		};
+		B0000000000000000000000A /* Release configuration for PBXNativeTarget "BukoUITests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Buko;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -357,6 +428,14 @@
 			buildConfigurations = (
 				000000000000000111000000 /* Debug configuration for PBXNativeTarget "Buko" */,
 				000000000000000112000000 /* Release configuration for PBXNativeTarget "Buko" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		B00000000000000000000004 /* Build configuration list for PBXNativeTarget "BukoUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B00000000000000000000009 /* Debug configuration for PBXNativeTarget "BukoUITests" */,
+				B0000000000000000000000A /* Release configuration for PBXNativeTarget "BukoUITests" */,
 			);
 			defaultConfigurationName = Release;
 		};

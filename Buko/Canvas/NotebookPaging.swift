@@ -8,12 +8,19 @@ enum NotebookPaging {
     // Public UIKit exposes no physical display corner radius. This reference
     // radius is tuned for the 13-inch display and scales with the paper.
     static let cornerRadius: CGFloat = 24 * 1_000 / 1032
+    static let pageGap: CGFloat = 24
+    static let pageStride = pageHeight + pageGap
+
+    static func documentHeight(count: Int) -> CGFloat {
+        max(0, CGFloat(count) * pageStride - (count > 0 ? pageGap : 0))
+    }
+
     static let pullThreshold: CGFloat = 88
 
     enum Action: Equatable { case none, previous, next, append }
 
     static func rect(for index: Int) -> CGRect {
-        CGRect(x: PageGeometry.pageOriginX, y: CGFloat(max(0, index)) * pageHeight,
+        CGRect(x: PageGeometry.pageOriginX, y: CGFloat(max(0, index)) * pageStride,
                width: PageGeometry.pageWidth, height: pageHeight)
     }
 
@@ -29,7 +36,7 @@ enum NotebookPaging {
     }
 
     static func inferredPageCount(drawingMaxY: CGFloat, savedCount: Int) -> Int {
-        max(1, savedCount, Int(ceil(max(0, drawingMaxY) / pageHeight)))
+        max(1, savedCount, Int(ceil((max(0, drawingMaxY) + pageGap) / pageStride)))
     }
 
     static func signedPull(offset: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {

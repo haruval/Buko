@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct BukoApp: App {
     private let storage: Result<ModelContainer, Error> = Result {
-        try ModelContainer(for: Note.self)
+        try ModelContainer(for: Note.self, TrashedPage.self)
     }
 
     var body: some Scene {

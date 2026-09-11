@@ -1,3 +1,4 @@
+import PencilKit
 import SwiftData
 import SwiftUI
 
@@ -11,8 +12,17 @@ struct ContentView: View {
     private var notes: [Note]
     @Query(filter: #Predicate<Note> { $0.deletedAt != nil }, sort: \Note.deletedAt, order: .reverse)
     private var trashedNotes: [Note]
+    @Query(sort: \TrashedPage.deletedAt, order: .reverse) private var trashedPages: [TrashedPage]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
     @AppStorage("infiniteCanvasEnabled") private var infiniteCanvasEnabled = false
+    @State private var canvasRevision = UUID()
+    @State private var pagesVisible = false
+    @State private var renamingPage: NotebookPage?
+    @State private var renamePagePresented = false
+    @State private var pageTitle = ""
+    @State private var emptyTrashPresented = false
+    @State private var emptyNoteIDs = Set<UUID>()
+    @State private var emptyPageIDs = Set<UUID>()
     @State private var selection: Note?
     @State private var sidebarVisible = true
     @State private var settingsVisible = false
@@ -26,53 +36,16 @@ struct ContentView: View {
     @Namespace private var glassNamespace
 
     private var selectedNote: Note? {
-        selection.flatMap { $0.deletedAt == nil ? $0 : nil } ?? notes.first { $0.deletedAt == nil }
+        selection.flatMap { $0.deletedAt == nil ? $0 : nil }
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
-                Color("CanvasBackground").ignoresSafeArea()
-                if let note = selectedNote {
-                    NoteCanvas(note: note, session: session, showsGrid: showsGrid,
-                               infiniteCanvasEnabled: infiniteCanvasEnabled,
-                               onPageChange: { count, index in
-                        if count > note.pageCount { note.updatedAt = .now }
-                        note.pageCount = count
-                        note.currentPageIndex = index
-                        scheduleSave()
-                    }) { data in
-                        note.drawingData = data
-                        note.updatedAt = .now
-                        scheduleSave()
-                    }
-                    .id(note.id)
-                    .ignoresSafeArea()
-                }
-
-                if !infiniteCanvasEnabled {
-                    PagePullIndicator(state: session.pagePull)
-                        .ignoresSafeArea()
-                }
-
-                floatingPanels(in: geometry.size)
-                    .environment(\.colorScheme, session.pagePull.topOverBlack ? .dark : colorScheme)
-                    .padding(20)
-            }
-            .overlay(alignment: .bottom) {
-                VStack(spacing: 12) {
-                    ToolShelf(session: session)
-                        .disabled(selectedNote == nil)
-                }
-                .environment(\.colorScheme, session.pagePull.bottomOverBlack ? .dark : colorScheme)
-                .padding(.bottom, 16)
-            }
-        }
+        workspace
         .tint(.accentColor)
         .task {
             normalizeDuplicateTitles()
             if notes.isEmpty && trashedNotes.isEmpty { createNote() }
-            else if selection == nil { selection = notes.first }
+            else if selection == nil, let note = notes.first { select(note) }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { saveNow() }
@@ -88,6 +61,27 @@ struct ContentView: View {
                 renamingNote = nil
             }
             .keyboardShortcut(.defaultAction)
+        }
+        .alert("Rename page", isPresented: $renamePagePresented, presenting: renamingPage) { page in
+            TextField("Page name", text: $pageTitle)
+            Button("Cancel", role: .cancel) { renamingPage = nil }
+            Button("Save") {
+                guard let note = selectedNote else { return }
+                performEdit(notes: [note]) { try NotebookEdits.rename(page.id, in: note, to: pageTitle) }
+                renamingPage = nil
+            }
+            .keyboardShortcut(.defaultAction)
+        }
+        .alert("Empty Trash?", isPresented: $emptyTrashPresented) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete permanently", role: .destructive) {
+                let owners = Set(trashedPages.filter { emptyPageIDs.contains($0.id) }.map(\.noteID))
+                performEdit(notes: (notes + trashedNotes).filter { owners.contains($0.id) }) {
+                    try NotebookEdits.emptyTrash(noteIDs: emptyNoteIDs, pageIDs: emptyPageIDs, context: modelContext)
+                }
+            }
+        } message: {
+            Text("Permanently delete \(emptyNoteIDs.count) notes and \(emptyPageIDs.count) pages from Buko’s Trash? This cannot be undone.")
         }
         .alert("Notes couldn’t be saved", isPresented: Binding(
             get: { persistenceError != nil },
@@ -106,6 +100,90 @@ struct ContentView: View {
         } message: {
             Text(session.loadError ?? "")
         }
+    }
+
+    private var workspace: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                Color("CanvasBackground").ignoresSafeArea()
+                if let note = selectedNote, note.pageCount > 0 {
+                    drawingCanvas(for: note, revision: canvasRevision)
+                }
+
+                if let note = selectedNote, note.pageCount == 0 {
+                    ContentUnavailableView {
+                        Label("No pages", systemImage: "doc")
+                    } description: {
+                        Text("Restore a page from Trash or start a new one.")
+                    } actions: {
+                        Button("Add page") { addBlankPage(to: note) }
+                            .buttonStyle(.glass)
+                    }
+                }
+
+                if !infiniteCanvasEnabled {
+                    PagePullIndicator(state: session.pagePull)
+                        .ignoresSafeArea()
+                }
+
+                floatingPanels(in: geometry.size)
+                    .environment(\.colorScheme, session.pagePull.topOverBlack ? .dark : colorScheme)
+                    .padding(20)
+            }
+            .overlay(alignment: .trailing) {
+                if let note = selectedNote, !infiniteCanvasEnabled {
+                    pageNavigation(for: note, height: geometry.size.height)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                VStack(spacing: 12) {
+                    ToolShelf(session: session)
+                        .disabled(selectedNote == nil || selectedNote?.pageCount == 0)
+                }
+                .environment(\.colorScheme, session.pagePull.bottomOverBlack ? .dark : colorScheme)
+                .padding(.bottom, 16)
+            }
+        }
+    }
+
+    private func drawingCanvas(for note: Note, revision: UUID) -> some View {
+        NoteCanvas(note: note, session: session, showsGrid: showsGrid,
+                   infiniteCanvasEnabled: infiniteCanvasEnabled,
+                   onPageChange: { (count: Int, index: Int) in
+            recordPosition(note: note, count: count, index: index, revision: revision)
+        }, onDrawingChange: { (data: Data) in
+            guard revision == canvasRevision else { return }
+            note.drawingData = data
+            note.updatedAt = .now
+            scheduleSave()
+        })
+        .id("\(note.id)-\(revision)")
+        .ignoresSafeArea()
+    }
+
+    private func recordPosition(note: Note, count: Int, index: Int, revision: UUID) {
+        guard revision == canvasRevision else { return }
+        if count > note.pageCount {
+            do { try NotebookEdits.appendMetadata(to: note, count: count) }
+            catch { persistenceError = error.localizedDescription; return }
+            note.updatedAt = .now
+        }
+        note.currentPageIndex = index
+        scheduleSave()
+    }
+
+    private func pageNavigation(for note: Note, height: CGFloat) -> some View {
+        PageNavigator(note: note, session: session, availableHeight: height,
+                      isExpanded: $pagesVisible,
+                      rename: { (page: NotebookPage, _: Int) in
+            renamingPage = page
+            pageTitle = page.title
+            renamePagePresented = true
+        }, trash: { (page: NotebookPage) in
+            trashPage(page, from: note)
+        }, opening: { settingsVisible = false })
+        .environment(\.colorScheme, session.pagePull.rightOverBlack ? .dark : colorScheme)
+        .padding(.trailing, 20)
     }
 
     private func panelAnimation(opening: Bool) -> Animation? {
@@ -149,7 +227,7 @@ struct ContentView: View {
                         .lineLimit(1)
                         .padding(.horizontal, 20)
                         .frame(height: 52)
-                        .frame(maxWidth: settingsVisible ? max(0, size.width - 440) : min(340, size.width - 176))
+                        .frame(width: min(280, max(100, size.width - 440)))
                         .bukoGlass(cornerRadius: 26)
                         .glassEffectID("note-title", in: glassNamespace)
                         .accessibilityIdentifier("currentNoteTitle")
@@ -165,8 +243,13 @@ struct ContentView: View {
                     alignment: .topTrailing, anchor: .topTrailing
                 ) {
                     SettingsPanel(
-                        trashedNotes: trashedNotes, showsTrash: $showsTrash, showsGrid: $showsGrid, infiniteCanvasEnabled: $infiniteCanvasEnabled,
-                        close: toggleSettings, restore: restore
+                        trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash, showsGrid: $showsGrid, infiniteCanvasEnabled: $infiniteCanvasEnabled,
+                        close: toggleSettings, restore: restore, restorePage: restorePage,
+                        emptyTrash: {
+                            emptyNoteIDs = Set(trashedNotes.map(\.id))
+                            emptyPageIDs = Set(trashedPages.map(\.id))
+                            emptyTrashPresented = true
+                        }
                     )
                 } compact: {
                     ShelfButton(title: "Settings", symbol: "gearshape", action: toggleSettings)
@@ -183,43 +266,100 @@ struct ContentView: View {
             settingsVisible.toggle()
             if settingsVisible {
                 showsTrash = false
+                pagesVisible = false
                 if horizontalSizeClass == .compact { sidebarVisible = false }
             }
         }
     }
 
     private func moveToTrash(_ note: Note) {
+        guard flushDrawing() else { return }
         let wasSelected = selectedNote?.id == note.id
-        note.deletedAt = .now
+        guard performEdit(notes: [note], { note.deletedAt = .now }) else { return }
         if wasSelected {
-            selection = notes.first { $0.id != note.id && $0.deletedAt == nil }
-            session = CanvasSession()
+            selection = nil
+            resetCanvas()
+            if let next = notes.first(where: { $0.id != note.id && $0.deletedAt == nil }) { select(next) }
         }
-        saveNow()
     }
 
     private func restore(_ note: Note) {
-        note.deletedAt = nil
-        note.updatedAt = .now
-        saveNow()
-        session = CanvasSession()
+        guard performEdit(notes: [note], {
+            try NotebookEdits.prepare(note)
+            note.deletedAt = nil
+            note.updatedAt = .now
+        }) else { return }
+        resetCanvas()
         selection = note
     }
 
     private func select(_ note: Note) {
-        guard note.id != selectedNote?.id else { return }
-        saveNow()
-        session = CanvasSession()
+        guard note.id != selectedNote?.id, flushDrawing() else { return }
+        guard performEdit(notes: [note], { try NotebookEdits.prepare(note) }) else { return }
+        resetCanvas()
         selection = note
     }
 
     private func createNote() {
-        saveNow()
+        guard flushDrawing() else { return }
         let note = Note(title: availableTitle("Untitled"))
-        modelContext.insert(note)
-        session = CanvasSession()
+        guard performEdit({
+            modelContext.insert(note)
+            try NotebookEdits.prepare(note)
+        }) else { return }
+        resetCanvas()
         selection = note
-        saveNow()
+    }
+
+    private func resetCanvas() {
+        canvasRevision = UUID() // Invalidate writers before stopping UIKit animations.
+        session.host?.stopAnimations()
+        session = CanvasSession()
+    }
+
+    private func flushDrawing() -> Bool {
+        guard !session.isDrawing else {
+            persistenceError = "Finish the current Pencil stroke before changing pages or notes."
+            return false
+        }
+        if let canvas = session.canvas, let note = selectedNote {
+            note.drawingData = MonochromeInk.canonical(canvas.drawing).dataRepresentation()
+        }
+        return saveNow()
+    }
+
+    @discardableResult
+    private func performEdit(notes affectedNotes: [Note] = [], _ action: () throws -> Void) -> Bool {
+        guard saveNow() else { return false }
+        do {
+            try NotebookEdits.commit(in: modelContext, notes: affectedNotes, action)
+            return true
+        } catch {
+            persistenceError = error.localizedDescription
+            return false
+        }
+    }
+
+    private func trashPage(_ page: NotebookPage, from note: Note) {
+        guard flushDrawing(), performEdit(notes: [note], { try NotebookEdits.trash(page.id, in: note, context: modelContext) }) else { return }
+        resetCanvas()
+    }
+
+    private func restorePage(_ page: TrashedPage) {
+        guard flushDrawing() else { return }
+        var restored: Note?
+        guard performEdit(notes: (notes + trashedNotes).filter { $0.id == page.noteID }, { restored = try NotebookEdits.restore(page, context: modelContext) }) else { return }
+        resetCanvas()
+        selection = restored
+    }
+
+    private func addBlankPage(to note: Note) {
+        guard performEdit(notes: [note], {
+            try NotebookEdits.appendMetadata(to: note, count: note.pageCount + 1)
+            note.currentPageIndex = note.pageCount - 1
+            note.updatedAt = .now
+        }) else { return }
+        resetCanvas()
     }
 
     private func availableTitle(_ title: String, excluding id: UUID? = nil) -> String {
@@ -251,19 +391,22 @@ struct ContentView: View {
         }
     }
 
-    private func saveNow() {
+    @discardableResult
+    private func saveNow() -> Bool {
         saveTask?.cancel()
         saveTask = nil
         do {
             try modelContext.save()
             persistenceError = nil
+            return true
         } catch {
             persistenceError = error.localizedDescription
+            return false
         }
     }
 }
 
 #Preview("Blank canvas") {
     ContentView()
-        .modelContainer(for: Note.self, inMemory: true)
+        .modelContainer(for: [Note.self, TrashedPage.self], inMemory: true)
 }

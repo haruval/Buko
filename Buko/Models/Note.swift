@@ -10,7 +10,21 @@ final class Note {
     var deletedAt: Date? = nil
     var pageCount: Int = 1
     var currentPageIndex: Int = 0
+    var pageLayoutVersion: Int = 0
+    var pageMetadata: Data = Data()
     @Attribute(.externalStorage) var drawingData: Data
+
+    var activePages: [NotebookPage] { (try? pages().filter { !$0.isTrashed }) ?? [] }
+
+    func pages() throws -> [NotebookPage] {
+        guard !pageMetadata.isEmpty else { return [] }
+        return try JSONDecoder().decode([NotebookPage].self, from: pageMetadata)
+    }
+
+    func setPages(_ pages: [NotebookPage]) throws {
+        pageMetadata = try JSONEncoder().encode(pages)
+        pageCount = pages.filter { !$0.isTrashed }.count
+    }
 
     static func uniqueTitle(_ requested: String, occupied: Set<String>) -> String {
         guard occupied.contains(requested) else { return requested }
