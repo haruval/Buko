@@ -169,7 +169,22 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     private func syncCubeTool() {
         guard tool == .cube, !cube.active, window != nil, bounds.width > 0, canvas.isUserInteractionEnabled else { return }
-        cube.spawn(page: currentPageRect, at: viewportCenter(), scale: canvas.zoomScale, offset: canvas.contentOffset)
+        cube.scrollWhileDragging = { [weak self] delta in self?.scrollForCube(by: delta) }
+        cube.updateNotebook(bounds: boundaryRect, viewportHeight: bounds.height)
+        cube.spawn(bounds: boundaryRect, at: viewportCenter(), scale: canvas.zoomScale, offset: canvas.contentOffset)
+    }
+
+    private func scrollForCube(by delta: CGFloat) {
+        guard tool == .cube, !isOverview, !isPinching, !isSnapping, !pageTurnPending else { return }
+        let minimum = -canvas.contentInset.top
+        let maximum = max(minimum, boundaryRect.maxY * canvas.zoomScale - bounds.height)
+        let y = min(maximum, max(minimum, canvas.contentOffset.y + delta))
+        guard abs(y - canvas.contentOffset.y) > 0.01 else { return }
+        // This is viewport travel only. It must never arm pull-to-create pages.
+        isUpdatingViewport = true
+        canvas.setContentOffset(CGPoint(x: canvas.contentOffset.x, y: y), animated: false)
+        isUpdatingViewport = false
+        updateViewport()
     }
 
     override func didMoveToWindow() {
@@ -334,7 +349,10 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let scale = canvas.zoomScale
         let offset = canvas.contentOffset
         circleIntent.updateProjection(scale: scale, offset: offset)
-        if cube.visible { cube.updateProjection(scale: scale, offset: offset) }
+        if cube.visible {
+            cube.updateNotebook(bounds: boundaryRect, viewportHeight: bounds.height)
+            cube.updateProjection(scale: scale, offset: offset)
+        }
         backdrop.update(scale: scale, offset: offset, document: documentSize)
         let pull: CGFloat
         if isPullActive && !isPinching {

@@ -17,11 +17,11 @@ nonisolated struct CubeDynamics {
     private var faceVelocity = CGVector.zero
     private var voiceVelocity: CGFloat = 0
 
-    mutating func step(seconds: CGFloat, page: CGRect, level: CGFloat, reduceMotion: Bool) {
+    mutating func step(seconds: CGFloat, bounds: CGRect, level: CGFloat, reduceMotion: Bool) {
         let duration = min(1.0 / 15, max(0, seconds))
         let steps = max(1, Int(ceil(duration * 120)))
         let dt = duration / CGFloat(steps)
-        let limits = page.insetBy(dx: Self.edgeInset, dy: Self.edgeInset)
+        let limits = bounds.insetBy(dx: Self.edgeInset, dy: Self.edgeInset)
         for _ in 0..<steps {
             if let target {
                 let goal = Self.clamp(target, to: limits)
@@ -77,6 +77,20 @@ nonisolated struct CubeDynamics {
             voice = min(1, max(0, voice + voiceVelocity * dt))
         }
         if target == nil, hypot(velocity.dx, velocity.dy) < 0.5 { velocity = .zero }
+    }
+
+    /// Screen-space speed; the host clamps travel to existing notebook content.
+    static func edgeScrollSpeed(pointerY: CGFloat, viewportHeight: CGFloat) -> CGFloat {
+        guard viewportHeight > 300 else { return 0 }
+        let band: CGFloat = 110
+        let top: CGFloat = 110, bottom = viewportHeight - 90
+        if pointerY < top + band {
+            return -480 * pow(min(1, max(0, (top + band - pointerY) / band)), 2)
+        }
+        if pointerY > bottom - band {
+            return 480 * pow(min(1, max(0, (pointerY - bottom + band) / band)), 2)
+        }
+        return 0
     }
 
     static func microphoneLevel(rms: Float) -> CGFloat {
