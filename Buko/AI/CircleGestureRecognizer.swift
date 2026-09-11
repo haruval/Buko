@@ -50,7 +50,18 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
                 else if travel > 140 { state = .failed; return }
             }
         } else { state = .changed }
-        if state == .began || state == .changed { preview?(points) }
+        if state == .began || state == .changed {
+            preview?(points)
+            completeIfReady()
+        }
+    }
+
+    /// Reserve a single completion as soon as the loop threshold is crossed.
+    /// The gesture wins arbitration, so remaining touches cannot paint or scroll.
+    private func completeIfReady() {
+        guard let completed = CircleGeometry.completedLoop(points) else { return }
+        points = completed
+        state = .ended
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -58,7 +69,6 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
         if state == .began || state == .changed {
             if let completed = CircleGeometry.completedLoop(points) {
                 points = completed
-                preview?(points)
                 state = .ended
             } else { state = .cancelled }
         } else { state = .failed }

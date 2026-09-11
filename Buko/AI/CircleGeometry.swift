@@ -113,23 +113,5 @@ nonisolated enum CircleGeometry {
         }
     }
 
-    static func flowOrigin(_ points: [CGPoint]) -> CGPoint? {
-        guard let ellipse = fittedEllipse(points) else { return nil }
-        let travel = angularTravel(points, around: ellipse)
-        guard abs(travel.signed) > 0.85, abs(travel.signed) > travel.absolute * 0.85 else { return nil }
-        return ellipse.center
-    }
-
-    /// Damped spring step response; each part of the contour grows from the
-    /// origin after the touch reaches it, creating a directional liquid front.
-    static func springGrowth(age: TimeInterval) -> CGFloat {
-        guard age > 0 else { return 0 }
-        let omega = 16.0, damping = 0.62
-        let root = sqrt(1 - damping * damping)
-        let response = 1 - exp(-damping * omega * age) *
-            (cos(omega * root * age) + damping / root * sin(omega * root * age))
-        return min(1.055, max(0, response))
-    }
-
     static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
 }

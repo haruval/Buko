@@ -7,11 +7,15 @@ import SwiftUI
 final class CircleIntentState {
     enum Phase { case idle, tracing, recognizing, inferring, finished }
     var phase = Phase.idle
-    var outline: [CGPoint] = []
-    var flowOrigin: CGPoint?
-    var flowBegan: TimeInterval = 0
-    var pointTimes: [TimeInterval] = []
-    var releasedAt: TimeInterval?
+    var droplet: CircleDropletDynamics?
+    var tailAnchor: CGPoint?
+    var paintedPath = CGMutablePath() as CGPath
+    var closedBoundary: CircleJellyGeometry.Boundary?
+    var fittedRectangle: CircleJellyGeometry.Boundary?
+    var closedAt: TimeInterval?
+    var morphBegan: TimeInterval?
+    var motionActive = false
+    private var motionTask: Task<Void, Never>?
 
     var textBounds: [CGRect] = []
     var selectionBounds = CGRect.zero
@@ -33,32 +37,38 @@ final class CircleIntentState {
         requestID = UUID()
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
-        phase = .idle; outline = []; textBounds = []; popupBounds = .zero
-        flowOrigin = nil; pointTimes = []; releasedAt = nil; flowBegan = 0
+        phase = .idle; textBounds = []; popupBounds = .zero
+        droplet = nil; tailAnchor = nil; paintedPath = CGMutablePath(); closedBoundary = nil; fittedRectangle = nil
+        closedAt = nil; morphBegan = nil; motionActive = false
+        motionTask?.cancel(); motionTask = nil
     }
 
     func trace(_ points: [CGPoint]) {
         if phase != .tracing { cancel(); phase = .tracing; issue = nil; recognizedText = "" }
         let now = Date.timeIntervalSinceReferenceDate
-        if points.count > pointTimes.count {
-            pointTimes.append(contentsOf: repeatElement(now, count: points.count - pointTimes.count))
-        }
-        if flowOrigin == nil, let origin = CircleGeometry.flowOrigin(points) {
-            flowOrigin = origin
-            flowBegan = now
-            // The initial accumulated arc starts as a seed and unfurls in touch order.
-            pointTimes = points.indices.map { now + Double($0) / Double(max(1, points.count - 1)) * 0.16 }
-        }
-        outline = points
+        guard let touch = points.last else { return }
+        if droplet == nil { droplet = CircleDropletDynamics(at: touch, time: now) }
+        else { droplet?.follow(touch, at: now) }
+        tailAnchor = points.dropLast().last
+        paintedPath = CircleJellyGeometry.paint(Array(points.dropLast()))
+        motionActive = true
         selectionBounds = CircleGeometry.path(points).boundingBoxOfPath
     }
 
-    func analyze(drawing: PKDrawing, polygon: [CGPoint], scale: CGFloat, offset: CGPoint) {
+    func analyze(drawing: PKDrawing, polygon: [CGPoint], screenPolygon: [CGPoint], scale: CGFloat, offset: CGPoint) {
+        selectionBounds = CircleGeometry.path(screenPolygon).boundingBoxOfPath
+        closedAt = Date.timeIntervalSinceReferenceDate
+        closedBoundary = CircleJellyGeometry.boundary(screenPolygon)
+        // An unusually concave circle can put its centroid outside the region.
+        // Keep the user's completed selection visible even in that case.
+        if closedBoundary == nil {
+            let bounds = CircleGeometry.path(screenPolygon).boundingBoxOfPath
+            closedBoundary = CircleJellyGeometry.roundedRectangle(bounds)
+        }
+        settleMotion(after: CircleJellyGeometry.closeDuration + CircleJellyGeometry.fillDuration)
         guard #available(iOS 27, *) else {
             issue = "Handwriting intent requires iPadOS 27."; phase = .finished; return
         }
-        releasedAt = Date.timeIntervalSinceReferenceDate
-        if flowOrigin == nil { flowOrigin = CGPoint(x: selectionBounds.midX, y: selectionBounds.midY); flowBegan = releasedAt! }
         task?.cancel(); timeout?.cancel()
         let id = UUID(); requestID = id
         phase = .recognizing; issue = nil; intent = ""; evidence = ""; clarification = ""
@@ -73,6 +83,12 @@ final class CircleIntentState {
                 finishIssue(error.localizedDescription, id: id); return
             }
             guard requestID == id, !Task.isCancelled else { return }
+            if !UIAccessibility.isReduceMotionEnabled {
+                let remaining = max(0, (closedAt ?? Date.timeIntervalSinceReferenceDate)
+                    + CircleJellyGeometry.closeDuration + CircleJellyGeometry.fillDuration - Date.timeIntervalSinceReferenceDate)
+                do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+                guard requestID == id, !Task.isCancelled else { return }
+            }
             recognizedText = reading.text
             recognitionMethod = reading.method
             var placement = Transaction(animation: nil)
@@ -80,6 +96,12 @@ final class CircleIntentState {
             withTransaction(placement) {
                 self.textBounds = reading.boxes.map {
                     PageGeometry.screenRect($0, scale: scale, offset: offset).insetBy(dx: -14, dy: -12)
+                }
+                if let first = self.textBounds.first {
+                    let fitted = self.textBounds.dropFirst().reduce(first) { $0.union($1) }
+                    self.fittedRectangle = CircleJellyGeometry.roundedRectangle(fitted)
+                    self.morphBegan = Date.timeIntervalSinceReferenceDate
+                    self.settleMotion(after: CircleJellyGeometry.morphDuration)
                 }
                 self.phase = .inferring
             }
@@ -111,6 +133,16 @@ final class CircleIntentState {
             self.task?.cancel()
             self.finishIssue("Recognition or the model took too long. Circle the text again to retry.", id: id)
             self.requestID = UUID() // A late framework response cannot replace this message.
+        }
+    }
+
+    private func settleMotion(after duration: TimeInterval) {
+        motionTask?.cancel()
+        motionActive = !UIAccessibility.isReduceMotionEnabled
+        guard motionActive else { return }
+        motionTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(duration)) } catch { return }
+            self?.motionActive = false
         }
     }
 

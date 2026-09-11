@@ -658,7 +658,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             let polygon = recognizer.points.map {
                 PageGeometry.documentPoint($0, scale: canvas.zoomScale, offset: canvas.contentOffset)
             }
-            circleIntent.analyze(drawing: canvas.drawing, polygon: polygon,
+            circleIntent.analyze(drawing: canvas.drawing, polygon: polygon, screenPolygon: recognizer.points,
                                  scale: canvas.zoomScale, offset: canvas.contentOffset)
         case .cancelled, .failed: circleIntent.cancel()
         default: break
