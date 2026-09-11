@@ -285,8 +285,9 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let shelfPoint = CGPoint(x: bounds.midX, y: bounds.height - 66)
         let bottomOverBlack = !documentFrame.insetBy(dx: margin / 2, dy: margin / 2).contains(shelfPoint)
         if pagePull.bottomOverBlack != bottomOverBlack { pagePull.bottomOverBlack = bottomOverBlack }
-        let topOverBlack = !documentFrame.contains(CGPoint(x: 46, y: 64))
-            || !documentFrame.contains(CGPoint(x: bounds.width - 46, y: 64))
+        let topControlY = safeAreaInsets.top + WorkspaceChrome.topPadding + 26
+        let topOverBlack = !documentFrame.contains(CGPoint(x: 46, y: topControlY))
+            || !documentFrame.contains(CGPoint(x: bounds.width - 46, y: topControlY))
         if pagePull.topOverBlack != topOverBlack { pagePull.topOverBlack = topOverBlack }
         CATransaction.begin()
         CATransaction.setDisableActions(true)

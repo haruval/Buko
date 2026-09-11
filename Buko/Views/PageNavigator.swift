@@ -117,7 +117,6 @@ struct PageNavigator: View {
                     }
                 }
                 .padding(16)
-                .transition(.opacity)
             } compact: {
                 Button(action: toggle) {
                     VStack(spacing: 14) {

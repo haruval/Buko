@@ -1,5 +1,10 @@
 import SwiftUI
 
+enum WorkspaceChrome {
+    // Additional room below the safe area for iPadOS window controls.
+    static let topPadding: CGFloat = 44
+}
+
 extension View {
     func bukoGlass(cornerRadius: CGFloat = 28, interactive: Bool = false) -> some View {
         modifier(BukoGlass(cornerRadius: cornerRadius, interactive: interactive))
@@ -31,15 +36,25 @@ struct ExpandingGlassPanel<Expanded: View, Compact: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        // Fade content independently of the surface spring: spring opacity can
+        // briefly reveal outgoing labels again while the panel settles.
         ZStack(alignment: alignment) {
             if isExpanded {
                 expanded()
                     .frame(width: size.width, height: size.height)
-                    .transition(reduceMotion ? .opacity : .scale(scale: 0.15, anchor: anchor).combined(with: .opacity))
+                    .transition(.asymmetric(
+                        insertion: (reduceMotion ? AnyTransition.opacity
+                            : .scale(scale: 0.15, anchor: anchor).combined(with: .opacity))
+                            .animation(.easeOut(duration: 0.18).delay(reduceMotion ? 0 : 0.06)),
+                        removal: .opacity.animation(.linear(duration: 0.06))
+                    ))
             } else {
                 compact()
                     .frame(width: compactSize.width, height: compactSize.height)
-                    .transition(.opacity)
+                    .transition(.asymmetric(
+                        insertion: .opacity.animation(.easeOut(duration: 0.12).delay(reduceMotion ? 0 : 0.10)),
+                        removal: .opacity.animation(.linear(duration: 0.05))
+                    ))
             }
         }
         .frame(width: isExpanded ? size.width : compactSize.width, height: isExpanded ? size.height : compactSize.height, alignment: alignment)

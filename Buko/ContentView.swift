@@ -128,7 +128,9 @@ struct ContentView: View {
 
                 floatingPanels(in: geometry.size)
                     .environment(\.colorScheme, session.pagePull.topOverBlack ? .dark : colorScheme)
-                    .padding(20)
+                    .padding(.horizontal, 20)
+                    .padding(.top, WorkspaceChrome.topPadding)
+                    .padding(.bottom, 20)
             }
             .overlay(alignment: .trailing) {
                 if let note = selectedNote {
