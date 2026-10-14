@@ -5,7 +5,7 @@ import SwiftUI
 
 @Observable @MainActor
 final class CircleIntentState {
-    enum Phase { case idle, tracing, recognizing, inferring, finished }
+    enum Phase { case idle, tracing, recognizing, inferring, proposing, finished }
     var phase = Phase.idle
     var droplet: CircleDropletDynamics?
     var tailAnchor: CGPoint?
@@ -25,20 +25,38 @@ final class CircleIntentState {
     var textBounds: [CGRect] = []
     var selectionBounds = CGRect.zero
     var recognizedText = ""
+    var nearbyContext = ""
     var intent = ""
+    var action = ""
+    var proposedLines: [String] = []
+    var arithmeticChecked = false
+    var intentSeconds: Double = 0
+    var proposalSeconds: Double = 0
+    var recognitionSeconds: Double = 0
+    private var modelStartedAt: Double?
     var evidence = ""
     var clarification = ""
     var issue: String?
     var elapsed: Double = 0
     var recognitionMethod = ""
+    private var popupAnchor: CGPoint?
     var popupBounds = CGRect.zero
     private var requestID = UUID()
     private var task: Task<Void, Never>?
     private var timeout: Task<Void, Never>?
 
-    var processing: Bool { phase == .recognizing || phase == .inferring }
+    var processing: Bool { phase == .recognizing || phase == .inferring || phase == .proposing }
 
-    /// Routine input/camera changes can cancel work, but only X dismisses a result.
+    var hasPreview: Bool { processing || phase == .finished }
+
+    /// Camera movement abandons only an unfinished drawn gesture. Once a request
+    /// owns a snapshot, it continues independently of the current viewport.
+    func cancelTracing() {
+        guard phase == .tracing else { return }
+        cancel()
+    }
+
+    /// Editing, tool changes and backgrounding may invalidate pending work.
     func cancelPending() {
         guard phase != .finished else { return }
         cancel()
@@ -49,14 +67,34 @@ final class CircleIntentState {
         let ratio = scale / captureScale
         let next = CGAffineTransform(a: ratio, b: 0, c: 0, d: ratio,
             tx: captureOffset.x * ratio - offset.x, ty: captureOffset.y * ratio - offset.y)
-        if next != projection { projection = next }
+        if next != projection {
+            projection = next
+            if let popupAnchor {
+                popupBounds = CirclePopupPlacement.projected(anchor: popupAnchor, size: popupBounds.size, projection: next)
+            }
+        }
+    }
+
+    func positionPopup(size: CGSize, viewport: CGSize) {
+        if popupAnchor == nil {
+            let initial = CirclePopupPlacement.place(size: size, viewport: viewport,
+                region: selectionBounds.applying(projection))
+            popupAnchor = initial.origin.applying(projection.inverted())
+        }
+        if let popupAnchor {
+            popupBounds = CirclePopupPlacement.projected(anchor: popupAnchor, size: size, projection: projection)
+        }
     }
 
     func cancel() {
         requestID = UUID()
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
-        phase = .idle; textBounds = []; popupBounds = .zero
+        arithmeticChecked = false
+        nearbyContext = ""
+        modelStartedAt = nil
+        action = ""; proposedLines = []; intentSeconds = 0; proposalSeconds = 0; recognitionSeconds = 0; elapsed = 0
+        phase = .idle; textBounds = []; popupBounds = .zero; popupAnchor = nil
         droplet = nil; tailAnchor = nil; paintedPath = CGMutablePath(); closedBoundary = nil; fittedRectangle = nil
         release = nil; tracedPoints = []; projection = .identity
         closedAt = nil; morphBegan = nil; motionActive = false
@@ -64,7 +102,7 @@ final class CircleIntentState {
     }
 
     func trace(_ points: [CGPoint]) {
-        guard phase != .finished else { return }
+        guard !hasPreview else { return }
         if phase != .tracing { cancel(); phase = .tracing; issue = nil; recognizedText = "" }
         tracedPoints = points
         let now = Date.timeIntervalSinceReferenceDate
@@ -78,7 +116,7 @@ final class CircleIntentState {
     }
 
     func analyze(drawing: PKDrawing, polygon: [CGPoint], screenPolygon: [CGPoint], scale: CGFloat, offset: CGPoint) {
-        guard phase != .finished else { return }
+        guard !hasPreview else { return }
         captureScale = scale; captureOffset = offset; projection = .identity
         selectionBounds = CircleGeometry.path(screenPolygon).boundingBoxOfPath
         closedAt = Date.timeIntervalSinceReferenceDate
@@ -100,7 +138,7 @@ final class CircleIntentState {
         task?.cancel(); timeout?.cancel()
         let id = UUID(); requestID = id
         phase = .recognizing; issue = nil; intent = ""; evidence = ""; clarification = ""
-        let started = Date()
+        let started = ProcessInfo.processInfo.systemUptime
         task = Task { [weak self] in
             guard let self else { return }
             let reading: CircleInkReader.Result
@@ -111,6 +149,7 @@ final class CircleIntentState {
                 finishIssue(error.localizedDescription, id: id); return
             }
             guard requestID == id, !Task.isCancelled else { return }
+            recognitionSeconds = ProcessInfo.processInfo.systemUptime - started
             if !UIAccessibility.isReduceMotionEnabled {
                 let remaining = max(0, (closedAt ?? Date.timeIntervalSinceReferenceDate)
                     + CircleJellyGeometry.closeDuration + CircleJellyGeometry.fillDuration - Date.timeIntervalSinceReferenceDate)
@@ -133,33 +172,67 @@ final class CircleIntentState {
                 }
                 self.phase = .inferring
             }
-            let context = reading.context
+            // Retain exactly the capped text supplied to both model stages.
+            let context = String(reading.context.prefix(IntentPrompts.contextCharacterLimit))
+            nearbyContext = context
             let model = SystemLanguageModel.default
             guard case .available = model.availability else {
                 finishIssue(Self.unavailableMessage(model), id: id); return
             }
+            let modelStarted = ProcessInfo.processInfo.systemUptime
+            modelStartedAt = modelStarted
+            var proposalStarted: Double?
             do {
                 let session = LanguageModelSession(model: model, instructions: IntentPrompts.instructions)
                 let response = try await session.respond(
                     to: IntentPrompts.request(selected: recognizedText, context: context),
                     generating: InferredCircleIntent.self,
-                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 320))
+                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: IntentPrompts.intentTokenLimit))
                 guard requestID == id, !Task.isCancelled else { return }
                 intent = response.content.intent
+                action = response.content.action
+                intentSeconds = ProcessInfo.processInfo.systemUptime - modelStarted
+                elapsed = intentSeconds
                 evidence = response.content.evidence
                 clarification = response.content.clarification
-                elapsed = Date().timeIntervalSince(started)
+                let checked = MatrixProductCheck.evaluate(recognizedText)
+                if let checked, !checked.clarification.isEmpty { clarification = checked.clarification }
+                if clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let checked, checked.clarification.isEmpty {
+                    proposedLines = checked.lines
+                    arithmeticChecked = true
+                } else if clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    phase = .proposing
+                    proposalStarted = ProcessInfo.processInfo.systemUptime
+                    let writer = LanguageModelSession(model: model, instructions: IntentPrompts.proposalInstructions)
+                    let proposal = try await writer.respond(
+                        to: IntentPrompts.proposalRequest(selected: recognizedText, context: context, plan: response.content),
+                        generating: ProposedCircleAction.self,
+                        options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: IntentPrompts.proposalTokenLimit))
+                    guard requestID == id, !Task.isCancelled else { return }
+                    proposalSeconds = ProcessInfo.processInfo.systemUptime - (proposalStarted ?? modelStarted)
+                    clarification = proposal.content.clarification.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Never offer an apparently ready answer alongside a request
+                    // to clarify its operands or meaning.
+                    if clarification.isEmpty {
+                        proposedLines = proposal.content.lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+                        if proposedLines.isEmpty { issue = "The model returned no proposed content. Try a clearer selection." }
+                    }
+                }
+                elapsed = intentSeconds + proposalSeconds
                 phase = .finished; timeout?.cancel()
             } catch {
                 guard requestID == id, !Task.isCancelled else { return }
-                finishIssue("Foundation Models couldn’t infer intent: \(error.localizedDescription)", id: id)
+                if let proposalStarted { proposalSeconds = ProcessInfo.processInfo.systemUptime - proposalStarted }
+                else { intentSeconds = ProcessInfo.processInfo.systemUptime - modelStarted }
+                elapsed = intentSeconds + proposalSeconds
+                finishIssue("Foundation Models couldn’t finish the \(phase == .proposing ? "proposal" : "intent") stage: \(error.localizedDescription)", id: id)
             }
         }
         timeout = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(45)) } catch { return }
+            do { try await Task.sleep(for: .seconds(IntentPrompts.timeoutSeconds)) } catch { return }
             guard let self, self.requestID == id, self.processing else { return }
             self.task?.cancel()
-            self.finishIssue("Recognition or the model took too long. Circle the text again to retry.", id: id)
+            self.finishIssue("Recognition or the model took too long. Close this preview and circle the text again to retry.", id: id)
             self.requestID = UUID() // A late framework response cannot replace this message.
         }
     }
@@ -176,6 +249,11 @@ final class CircleIntentState {
 
     private func finishIssue(_ message: String, id: UUID) {
         guard requestID == id else { return }
+        if let modelStartedAt, phase == .inferring || phase == .proposing {
+            elapsed = ProcessInfo.processInfo.systemUptime - modelStartedAt
+            if phase == .inferring { intentSeconds = elapsed }
+            else { proposalSeconds = max(0, elapsed - intentSeconds) }
+        }
         issue = message; phase = .finished; timeout?.cancel()
     }
 

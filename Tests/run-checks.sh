@@ -39,3 +39,30 @@ xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
     Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift Buko/AI/CircleGeometry.swift Buko/AI/CircleJellyGeometry.swift Tests/CircleGeometryChecks.swift \
     -o "$BUKO_CHECK_DIR/circle"
 "$BUKO_CHECK_DIR/circle"
+
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift \
+    Buko/Development/PPLTestNote.swift Buko/Development/LectureHandwriting.swift \
+    Buko/Development/SampleLecture.swift Tests/SampleLectureChecks.swift \
+    -o "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
+"$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
+
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    Buko/AI/MatrixProductCheck.swift Tests/MatrixProductChecks.swift -o "$BUKO_CHECK_DIR/matrix"
+"$BUKO_CHECK_DIR/matrix"
+
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    Buko/AI/CirclePopupPlacement.swift Tests/CirclePopupPlacementChecks.swift -o "$BUKO_CHECK_DIR/popup"
+"$BUKO_CHECK_DIR/popup"
+
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift Buko/Canvas/MonochromeInk.swift \
+    Buko/AI/CircleGeometry.swift Buko/AI/CircleInkReader.swift \
+    Buko/Development/PPLTestNote.swift Buko/Development/LectureHandwriting.swift \
+    Buko/Development/SampleLecture.swift Tests/CircleContextChecks.swift \
+    -o "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
+"$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
+
+xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
+    Buko/Cube/CubeDynamics.swift Tests/CubeDynamicsChecks.swift -o "$BUKO_CHECK_DIR/cube"
+"$BUKO_CHECK_DIR/cube"

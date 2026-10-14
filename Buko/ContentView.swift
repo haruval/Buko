@@ -15,7 +15,7 @@ struct ContentView: View {
     @Query(sort: \TrashedPage.deletedAt, order: .reverse) private var trashedPages: [TrashedPage]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
     @AppStorage("pplTestNoteID") private var pplTestNoteID = ""
-    @AppStorage("testLectureTitleMigrated") private var testLectureTitleMigrated = false
+    @AppStorage("testPPLLectureTitleMigrated") private var testPPLLectureTitleMigrated = false
     @State private var showsDevelopment = false
     @State private var canvasRevision = UUID()
     @State private var pagesVisible = false
@@ -49,10 +49,15 @@ struct ContentView: View {
         .task {
             normalizeDuplicateTitles()
             migrateTestLectureTitle()
-            if pplTestNoteID.isEmpty { recreateTestNote() }
+            if pplTestNoteID.isEmpty { recreateTestNote(.programmingLanguages) }
             if selection == nil {
                 if notes.isEmpty && trashedNotes.isEmpty { createNote() }
                 else if let note = notes.first { select(note) }
+            }
+            for lecture in [SampleLecture.operatingSystems, .linearAlgebra, .biology101] {
+                if UserDefaults.standard.string(forKey: lecture.storageKey) == nil {
+                    recreateTestNote(lecture, selectCreated: false)
+                }
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -90,7 +95,7 @@ struct ContentView: View {
                 }
             }
         } message: {
-            Text("Permanently delete \(emptyNoteIDs.count) notes and \(emptyPageIDs.count) pages from Buko’s Trash? This cannot be undone.")
+            Text("Permanently delete \(emptyNoteIDs.count) notes and \(emptyPageIDs.count) pages from Trash? This cannot be undone.")
         }
         .alert("Notes couldn’t be saved", isPresented: Binding(
             get: { persistenceError != nil },
@@ -224,7 +229,8 @@ struct ContentView: View {
                 ExpandingGlassPanel(
                     isExpanded: sidebarVisible,
                     size: CGSize(width: min(272, size.width - 104), height: max(220, min(640, size.height - 120))),
-                    alignment: .topLeading, anchor: .topLeading
+                    alignment: .topLeading, anchor: .topLeading,
+                    expandedBackingOpacity: 0.5
                 ) {
                     NotesSidebar(
                         notes: notes, selectedID: selectedNote?.id,
@@ -242,7 +248,7 @@ struct ContentView: View {
                 .glassEffectID("library", in: glassNamespace)
 
                 if !sidebarVisible, let note = selectedNote {
-                    NoteTitlePill(title: note.title, width: min(280, max(100, size.width - 440)), focus: $titleFocused) { title in
+                    NoteTitlePill(title: note.title, width: min(420, max(100, size.width - 440)), focus: $titleFocused) { title in
                         renameNote(note, to: title)
                     }
                     .id(note.id)
@@ -254,15 +260,15 @@ struct ContentView: View {
 
                 ExpandingGlassPanel(
                     isExpanded: settingsVisible,
-                    size: CGSize(width: min(showsTrash ? 300 : showsDevelopment ? 280 : 224, size.width - 104),
-                                 height: showsTrash ? max(220, min(440, size.height - 120)) : showsDevelopment ? 280 : 208),
+                    size: CGSize(width: min(showsTrash ? 300 : showsDevelopment ? 320 : 224, size.width - 104),
+                                 height: showsTrash ? max(220, min(440, size.height - 120)) : showsDevelopment ? min(390, size.height - 120) : 208),
                     alignment: .topTrailing, anchor: .topTrailing
                 ) {
                     SettingsPanel(
                         trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash,
                         showsDevelopment: $showsDevelopment, showsGrid: $showsGrid,
-                        recreateTestNote: {
-                            recreateTestNote()
+                        recreateTestNote: { lecture in
+                            recreateTestNote(lecture)
                             if settingsVisible { toggleSettings() }
                         }, restore: restore, restorePage: restorePage,
                         emptyTrash: {
@@ -324,35 +330,40 @@ struct ContentView: View {
     }
 
     private func migrateTestLectureTitle() {
-        guard !testLectureTitleMigrated else { return }
+        guard !testPPLLectureTitleMigrated else { return }
         do {
             let all = try modelContext.fetch(FetchDescriptor<Note>())
             if let note = all.first(where: { $0.id.uuidString == pplTestNoteID }) {
-                let title = Note.uniqueTitle("Test Lecture", occupied: Set(all.filter { $0.id != note.id }.map(\.title)))
+                let title = Note.uniqueTitle(SampleLecture.programmingLanguages.title, occupied: Set(all.filter { $0.id != note.id }.map(\.title)))
                 guard performEdit(notes: [note], { note.title = title }) else { return }
             }
-            testLectureTitleMigrated = true
+            testPPLLectureTitleMigrated = true
         } catch { persistenceError = error.localizedDescription }
     }
 
-    private func recreateTestNote() {
+    private func recreateTestNote(_ lecture: SampleLecture, selectCreated: Bool = true) {
         guard flushDrawing() else { return }
-        let all = (try? modelContext.fetch(FetchDescriptor<Note>())) ?? []
-        // Identity, never a title match, scopes reset to the generated fixture.
-        let previous = all.first { $0.id.uuidString == pplTestNoteID }
-        let note = Note(title: availableTitle("Test Lecture"))
-        note.drawingData = PPLTestNote.drawing().dataRepresentation()
-        note.pageLayoutVersion = 2
-        guard performEdit(notes: previous.map { [$0] } ?? [], {
-            if let previous, previous.deletedAt == nil { previous.deletedAt = .now }
-            try note.setPages([NotebookPage(), NotebookPage()])
-            modelContext.insert(note)
-            try NotebookEdits.prepare(note)
-        }) else { return }
-        pplTestNoteID = note.id.uuidString
-        resetCanvas()
-        selection = note
-        sidebarVisible = false
+        do {
+            let all = try modelContext.fetch(FetchDescriptor<Note>())
+            let previousID = UserDefaults.standard.string(forKey: lecture.storageKey)
+            // Identity, never a title match, scopes reset to this fixture only.
+            let previous = all.first { $0.id.uuidString == previousID }
+            let note = Note(title: Note.uniqueTitle(lecture.title, occupied: Set(all.map(\.title))))
+            note.drawingData = lecture.drawing().dataRepresentation()
+            note.pageLayoutVersion = 2
+            guard performEdit(notes: previous.map { [$0] } ?? [], {
+                if let previous, previous.deletedAt == nil { previous.deletedAt = .now }
+                try note.setPages(lecture.pages.map { _ in NotebookPage() })
+                modelContext.insert(note)
+                try NotebookEdits.prepare(note)
+            }) else { return }
+            UserDefaults.standard.set(note.id.uuidString, forKey: lecture.storageKey)
+            if selectCreated {
+                resetCanvas()
+                selection = note
+                sidebarVisible = false
+            }
+        } catch { persistenceError = error.localizedDescription }
     }
 
     private func createNote() {

@@ -6,7 +6,7 @@ struct SettingsPanel: View {
     @Binding var showsTrash: Bool
     @Binding var showsDevelopment: Bool
     @Binding var showsGrid: Bool
-    let recreateTestNote: () -> Void
+    let recreateTestNote: (SampleLecture) -> Void
     let restore: (Note) -> Void
     let restorePage: (TrashedPage) -> Void
     let emptyTrash: () -> Void
@@ -18,7 +18,7 @@ struct SettingsPanel: View {
                     ShelfButton(title: "Back to settings", symbol: "chevron.left") {
                         showsTrash = false; showsDevelopment = false
                     }
-                    Text(showsTrash ? "Trash" : "Development").font(.headline)
+                    Text(showsTrash ? "Trash" : "Dev").font(.headline)
                     Spacer()
                 }
             }
@@ -86,19 +86,26 @@ struct SettingsPanel: View {
                     .accessibilityIdentifier("emptyTrash")
                 }
             } else if showsDevelopment {
-                Button(action: recreateTestNote) {
-                    Label("Recreate Test Lecture", systemImage: "arrow.counterclockwise")
-                        .font(.subheadline.weight(.medium))
-                        .frame(maxWidth: .infinity, minHeight: 48)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(SampleLecture.allCases) { lecture in
+                            Button { recreateTestNote(lecture) } label: {
+                                Label("Recreate \(lecture.title)", systemImage: "arrow.counterclockwise")
+                                    .font(.subheadline.weight(.medium))
+                                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                                    .padding(.horizontal, 8)
+                            }
+                            .buttonStyle(.glass)
+                            .accessibilityIdentifier(lecture.resetIdentifier)
+                        }
+                        Text("Each example has two pages of editable handwriting. Resetting moves only that example’s previous note to Trash.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
-                .buttonStyle(.glass)
-                .accessibilityIdentifier("recreateTestNote")
-                Text("Two pages of editable handwriting with complete and unfinished lecture notes. The previous Test Lecture moves to Trash.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
+                .scrollBounceBehavior(.basedOnSize)
             } else {
                 Toggle(isOn: $showsGrid) {
-                    Label("Grid lines", systemImage: "square.grid.3x3")
+                    Label("Grid", systemImage: "square.grid.3x3")
                         .font(.subheadline)
                 }
                 .padding(.horizontal, 14)
@@ -121,7 +128,7 @@ struct SettingsPanel: View {
                 Button { showsDevelopment = true } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "hammer")
-                        Text("Development")
+                        Text("Dev")
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold))
                     }.font(.subheadline).padding(14).contentShape(.rect)

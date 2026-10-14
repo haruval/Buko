@@ -44,9 +44,9 @@ nonisolated enum CircleJellyGeometry {
         return Boundary(center: center, radii: radii)
     }
 
-    static let brushRadius: CGFloat = 6
-    static let closeDuration: TimeInterval = 0.30
-    static let fillDuration: TimeInterval = 0.64
+    static let brushRadius: CGFloat = 12
+    static let closeDuration: TimeInterval = 0.42
+    static let fillDuration: TimeInterval = 0.82
     static let morphDuration: TimeInterval = 0.9
 
     /// Release continues the exact live brush, sweeps only the missing arc,
@@ -110,7 +110,7 @@ nonisolated enum CircleJellyGeometry {
                 }
                 return basePaint.union(paint((tail.map { [$0] } ?? []) + swept)).union(smoothPath(blob))
             }
-            let progress = reduceMotion ? 1 : smoothstep(CGFloat((age - closeDuration) / fillDuration))
+            let progress = reduceMotion ? 1 : fillProgress(CGFloat((age - closeDuration) / fillDuration))
             guard progress > 0 else { return finalPaint }
             let fill = CGMutablePath()
             fill.addPath(CircleGeometry.path(completed))
@@ -119,10 +119,12 @@ nonisolated enum CircleJellyGeometry {
                 let inner = completed.reversed().map { p in
                     let theta = atan2(p.y - center.y, p.x - center.x)
                     let ripple = 1 + 0.035 * sin(theta * 3 + CGFloat(age) * 9) * sin(.pi * progress)
-                    return CGPoint(x: center.x + (p.x - center.x) * hole * ripple,
-                                   y: center.y + (p.y - center.y) * hole * ripple)
+                    let radius = hypot(p.x - center.x, p.y - center.y)
+                    let inset = max(0, radius - brushRadius) / max(1, radius)
+                    return CGPoint(x: center.x + (p.x - center.x) * inset * hole * ripple,
+                                   y: center.y + (p.y - center.y) * inset * hole * ripple)
                 }
-                fill.addPath(CircleGeometry.path(inner))
+                fill.addPath(smoothPath(inner))
             }
             return finalPaint.union(fill)
         }
@@ -225,6 +227,13 @@ nonisolated enum CircleJellyGeometry {
         CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
     }
     static func angle(at index: Int) -> CGFloat { CGFloat(index) * 2 * .pi / CGFloat(sampleCount) }
+    // A normalized critically damped response closes the hole without reversal
+    // or a pause hidden beneath the thick painted boundary.
+    private static func fillProgress(_ value: CGFloat) -> CGFloat {
+        let t = min(1, max(0, value))
+        return (1 - (1 + 6 * t) * exp(-6 * t)) / (1 - 7 * exp(-6))
+    }
+
     private static func smoothstep(_ value: CGFloat) -> CGFloat {
         let t = min(1, max(0, value)); return t * t * (3 - 2 * t)
     }
@@ -275,7 +284,7 @@ nonisolated struct CircleDropletDynamics {
                             value.velocity.x + (target.x - center.x) * 12)
         return (0..<48).map { i in
             let angle = CGFloat(i) * 2 * .pi / 48
-            let r = 12 * (1 + stretch * cos(2 * (angle - heading)) + 0.12 * stretch * sin(3 * (angle - heading)))
+            let r = 24 * (1 + stretch * cos(2 * (angle - heading)) + 0.12 * stretch * sin(3 * (angle - heading)))
             return CircleJellyGeometry.point(center: center, angle: angle, radius: r)
         }
     }

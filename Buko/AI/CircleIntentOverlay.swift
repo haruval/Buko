@@ -18,17 +18,14 @@ struct CircleIntentOverlay: View {
                         .allowsHitTesting(false)
                     if state.phase == .finished || state.processing {
                         popup
-                            .frame(width: min(340, geometry.size.width - 32))
-                            .frame(maxHeight: min(360, geometry.size.height - 160))
-                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(width: state.popupBounds.isEmpty
+                                   ? CirclePopupPlacement.preferredWidth(viewport: geometry.size, region: state.selectionBounds.applying(state.projection))
+                                   : min(state.popupBounds.width, geometry.size.width - 32), height: min(600, geometry.size.height - 160))
                             .background {
                                 GeometryReader { card in
                                     Color.clear.onAppear { positionPopup(card.size, viewport: geometry.size) }
                                         .onChange(of: card.size) { _, size in positionPopup(size, viewport: geometry.size) }
-                                        .onChange(of: state.projection) { _, _ in positionPopup(card.size, viewport: geometry.size) }
-                                        .onChange(of: state.textBounds) { _, _ in positionPopup(card.size, viewport: geometry.size) }
                                         .onChange(of: geometry.size) { _, _ in positionPopup(card.size, viewport: geometry.size) }
-                                        .onChange(of: state.selectionBounds) { _, _ in positionPopup(card.size, viewport: geometry.size) }
                                 }
                             }
                             .offset(x: state.popupBounds.minX, y: state.popupBounds.minY)
@@ -60,6 +57,8 @@ struct CircleIntentOverlay: View {
 
     private func glassSurface<S: Shape>(_ shape: S, wave: Double) -> some View {
         shape.fill(.clear)
+            // Clear is the most transparent public native-glass variant. The SDK
+            // does not expose a per-view override for the system opacity slider.
             .glassEffect(.clear.tint(CircleAIStyle.glassTint), in: shape)
             .overlay {
                 shape.fill(.white.opacity(state.processing ? 0.06 + 0.04 * wave : 0.025))
@@ -72,43 +71,91 @@ struct CircleIntentOverlay: View {
     private var popup: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                if state.processing { ProgressView().controlSize(.small) }
-                Text(state.phase == .recognizing ? "Reading handwriting…" : state.phase == .inferring ? "Interpreting intent…" : "Intent guess")
-                    .font(.headline)
+                Text("Autofill preview").font(.headline)
                 Spacer(minLength: 8)
-                Button(action: state.cancel) { Image(systemName: "xmark").frame(width: 44, height: 44) }
-                    .buttonStyle(.plain).accessibilityLabel("Dismiss intent")
+                Button(action: state.cancel) {
+                    Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(.rect)
+                }
+                .buttonStyle(.plain).accessibilityLabel("Dismiss intent")
             }
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    if let issue = state.issue { Text(issue).font(.subheadline).accessibilityIdentifier("intentIssue") }
-                    if !state.intent.isEmpty { Text(state.intent).font(.body).accessibilityIdentifier("intentGuess") }
-                    if !state.clarification.isEmpty { Text(state.clarification).font(.subheadline).foregroundStyle(.secondary) }
-                    if !state.recognizedText.isEmpty {
-                        Text("Recognized handwriting · \(state.recognitionMethod)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        Text(state.recognizedText).font(.subheadline).textSelection(.enabled)
-                            .accessibilityIdentifier("recognizedHandwriting")
+                VStack(alignment: .leading, spacing: 16) {
+                    if state.processing {
+                        HStack(spacing: 10) {
+                            ProgressView().controlSize(.small)
+                            Text(state.phase == .recognizing ? "Reading handwriting…" : state.phase == .proposing ? "Drafting proposed action…" : "Inferring intent and action…")
+                                .font(.subheadline)
+                        }
                     }
-                    if !state.evidence.isEmpty { Text("Evidence: \(state.evidence)").font(.caption).foregroundStyle(.secondary) }
-                    if !state.intent.isEmpty { Text("On-device · \(state.elapsed, specifier: "%.1f") s").font(.caption2).foregroundStyle(.secondary) }
+                    pipelineSection("1. Intent Guess", text: state.intent, identifier: "intentGuess")
+                    pipelineSection("2. Action that should be taken", text: state.action, identifier: "intentAction")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("3. Proposed action").font(.subheadline.weight(.semibold))
+                        if state.proposedLines.isEmpty {
+                            Text(state.processing ? "Waiting for the proposed content…" : "No proposal available.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(state.proposedLines.enumerated()), id: \.offset) { _, line in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("•")
+                                    Text(line).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                                }
+                            }
+                            .accessibilityIdentifier("proposedContent")
+                        }
+                    }
+                    if !state.clarification.isEmpty {
+                        Text(state.clarification).font(.subheadline).accessibilityIdentifier("intentClarification")
+                    }
+                    if let issue = state.issue { Text(issue).font(.subheadline).accessibilityIdentifier("intentIssue") }
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        if state.arithmeticChecked { Text("Matrix arithmetic checked locally").font(.caption.weight(.semibold)) }
+                        Text("Evidence").font(.caption.weight(.semibold))
+                        Text(state.evidence.isEmpty ? "Not available yet." : state.evidence).font(.caption)
+                        Text("Nearby handwriting used as context").font(.caption.weight(.semibold))
+                        Text(state.nearbyContext.isEmpty
+                             ? (state.phase == .recognizing ? "Reading nearby handwriting…" : "No nearby handwriting recognized.")
+                             : state.nearbyContext)
+                            .font(.caption).textSelection(.enabled).accessibilityIdentifier("nearbyHandwritingContext")
+                        Text("Recognized handwriting · \(state.recognitionMethod)").font(.caption.weight(.semibold))
+                        Text(state.recognizedText.isEmpty ? "Not available yet." : state.recognizedText)
+                            .font(.subheadline).textSelection(.enabled).accessibilityIdentifier("recognizedHandwriting")
+                        Text("On-device model · \(state.elapsed, specifier: "%.1f") s")
+                            .font(.caption).accessibilityIdentifier("modelTiming")
+                        Text("Intent \(state.intentSeconds, specifier: "%.1f") s · Proposal \(state.proposalSeconds, specifier: "%.1f") s · Recognition \(state.recognitionSeconds, specifier: "%.1f") s")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollBounceBehavior(.basedOnSize)
+            Button(action: state.cancel) {
+                Text("okay")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+            }
+            .buttonStyle(.plain)
+            .bukoGlass(interactive: true)
+            .accessibilityIdentifier("acknowledgeAutofill")
+            .accessibilityHint("Closes the preview. Your note is unchanged.")
         }
         .padding(16)
-        // Regular native glass keeps diagnostic text readable over dense handwriting.
         .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.28)), in: .rect(cornerRadius: 26))
         .accessibilityIdentifier("intentPopup")
     }
 
+    private func pipelineSection(_ title: String, text: String, identifier: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.subheadline.weight(.semibold))
+            Text(text.isEmpty ? (state.processing ? "Waiting…" : "Not available.") : text)
+                .font(.body).textSelection(.enabled).accessibilityIdentifier(identifier)
+        }
+    }
+
     private func positionPopup(_ size: CGSize, viewport: CGSize) {
-        let region = state.textBounds.reduce(state.selectionBounds) { $0.union($1) }.applying(state.projection)
-        let rightFits = region.maxX + 16 + size.width < viewport.width - 16
-        let preferredX = rightFits ? region.maxX + 16 : region.minX
-        let x = max(16, min(viewport.width - size.width - 16, preferredX))
-        let preferredY = rightFits ? region.minY : region.maxY + 18
-        let y = min(max(100, preferredY), max(100, viewport.height - size.height - 96))
-        state.popupBounds = CGRect(origin: CGPoint(x: x, y: y), size: size)
+        state.positionPopup(size: size, viewport: viewport)
     }
 }
 

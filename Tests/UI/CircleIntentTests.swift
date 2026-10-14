@@ -22,7 +22,7 @@ final class CircleIntentTests: XCTestCase {
         app.buttons["recreateTestNote"].tap()
         expectation(for: NSPredicate(format: "value == 'Page 1 of 2'"), evaluatedWith: canvas)
         waitForExpectations(timeout: 10)
-        XCTAssertTrue((app.textFields["currentNoteTitle"].value as? String)?.contains("Test Lecture") == true)
+        XCTAssertTrue((app.textFields["currentNoteTitle"].value as? String)?.contains("Test PPL Lecture") == true)
         app.buttons["circleIntentTool"].tap()
         XCTAssertTrue(app.buttons["circleIntentTool"].isSelected)
         // A straight one-finger drag in the circle tool cancels, leaves no ink,
