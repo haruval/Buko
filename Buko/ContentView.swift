@@ -17,6 +17,7 @@ struct ContentView: View {
     @AppStorage("pplTestNoteID") private var pplTestNoteID = ""
     @AppStorage("testPPLLectureTitleMigrated") private var testPPLLectureTitleMigrated = false
     @State private var showsDevelopment = false
+    @State private var lectureSourceNote: Note?
     @State private var canvasRevision = UUID()
     @State private var pagesVisible = false
     @State private var renamingPage: NotebookPage?
@@ -59,6 +60,9 @@ struct ContentView: View {
                     recreateTestNote(lecture, selectCreated: false)
                 }
             }
+        }
+        .sheet(item: $lectureSourceNote) { note in
+            LectureSourcesView(noteID: note.id, noteTitle: note.title)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { session.host?.circleIntent.cancelPending(); saveNow() }
@@ -158,7 +162,10 @@ struct ContentView: View {
             }
             .overlay(alignment: .bottom) {
                 VStack(spacing: 12) {
-                    ToolShelf(session: session)
+                    ToolShelf(session: session) {
+                        session.host?.circleIntent.cancel()
+                        lectureSourceNote = selectedNote
+                    }
                         .simultaneousGesture(TapGesture().onEnded {
                             if settingsVisible { toggleSettings() }
                         })

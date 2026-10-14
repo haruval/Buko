@@ -1,0 +1,188 @@
+import Foundation
+import PDFKit
+import Vision
+import NaturalLanguage
+import CryptoKit
+
+/// PDF decoding, OCR, embeddings and disk access never run on the PencilKit input actor.
+/// One actor serializes the non-thread-safe NLEmbedding instance.
+actor LectureLibrary {
+    static let shared = LectureLibrary()
+    private let root: URL
+    private var embedding: NLEmbedding?
+    private var attemptedEmbedding = false
+    private var cache: [UUID: [LectureDocument]] = [:]
+    static let maxBytes = 40 * 1024 * 1024
+    static let maxPages = 150
+    static let maxDocuments = 12
+
+    init(root: URL = URL.applicationSupportDirectory.appendingPathComponent("BukoLectureLibrary", isDirectory: true)) {
+        self.root = root
+    }
+
+    private func sentenceEmbedding() -> NLEmbedding? {
+        if !attemptedEmbedding { embedding = NLEmbedding.sentenceEmbedding(for: .english); attemptedEmbedding = true }
+        return embedding
+    }
+
+    private func sentenceVectors(_ text: String, embedding: NLEmbedding?) -> [[Double]]? {
+        guard let embedding else { return nil }
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        return tokenizer.tokens(for: text.startIndex..<text.endIndex).prefix(16)
+            .compactMap { embedding.vector(for: String(text[$0])) }
+    }
+
+    private func directory(_ noteID: UUID) -> URL { root.appendingPathComponent(noteID.uuidString, isDirectory: true) }
+    private func validID(_ id: String) -> Bool { id.count == 64 && id.allSatisfy { $0.isHexDigit && !$0.isUppercase } }
+
+    func documents(noteID: UUID) throws -> [LectureDocument] {
+        if let cached = cache[noteID] { return cached }
+        let folder = directory(noteID)
+        guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
+        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        var documents: [LectureDocument] = []
+        for file in files where validID(file.lastPathComponent) {
+            let data = try Data(contentsOf: file.appendingPathComponent("index.json"))
+            let document = try JSONDecoder().decode(LectureDocument.self, from: data)
+            guard document.indexVersion == 1, document.id == file.lastPathComponent,
+                  document.passages.allSatisfy({ $0.documentID == document.id && $0.page > 0 && $0.page <= document.pageCount }),
+                  FileManager.default.fileExists(atPath: file.appendingPathComponent("source.pdf").path) else {
+                throw LibraryError.invalidIndex
+            }
+            documents.append(document)
+        }
+        documents.sort { $0.importedAt < $1.importedAt }
+        cache[noteID] = documents
+        return documents
+    }
+
+    func pdfURL(noteID: UUID, documentID: String) throws -> URL {
+        guard validID(documentID), try documents(noteID: noteID).contains(where: { $0.id == documentID }) else {
+            throw LibraryError.missingDocument
+        }
+        return directory(noteID).appendingPathComponent(documentID).appendingPathComponent("source.pdf")
+    }
+
+    func revision(noteID: UUID) throws -> String {
+        try documents(noteID: noteID).map { $0.id }.sorted().joined(separator: ":")
+    }
+
+    func search(noteID: UUID, selected: String, intent: String, method: LectureRetrieval.Method = .hybrid) throws -> LectureSearch {
+        let start = ProcessInfo.processInfo.systemUptime
+        let documents = try documents(noteID: noteID)
+        let embedding = sentenceEmbedding()
+        let vector = embedding?.vector(for: String(selected.prefix(1000)))
+        var passages = documents.flatMap(\.passages)
+        // An OS embedding revision must never be compared with older cached vectors.
+        for index in passages.indices {
+            if let document = documents.first(where: { $0.id == passages[index].documentID }),
+               document.embeddingRevision != embedding?.revision || passages[index].sentenceVectors == nil {
+                passages[index].vector = embedding?.vector(for: passages[index].text)
+                passages[index].sentenceVectors = sentenceVectors(passages[index].text, embedding: embedding)
+            }
+        }
+        let hits = LectureRetrieval.search(passages: passages, selected: selected, intent: intent, queryVector: vector, method: method)
+        return LectureSearch(hits: hits, documentCount: documents.count, revision: try revision(noteID: noteID),
+                             semanticAvailable: vector != nil, seconds: ProcessInfo.processInfo.systemUptime - start)
+    }
+
+    /// Stages the PDF and complete index together, then atomically renames the directory.
+    /// Cancellation or failed extraction leaves both the notebook and prior library intact.
+    @discardableResult
+    func importPDF(from url: URL, noteID: UUID) throws -> LectureDocument {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size > 0, size <= Self.maxBytes else { throw LibraryError.fileSize }
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard data.count <= Self.maxBytes else { throw LibraryError.fileSize }
+        try Task.checkCancellation()
+        let id = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        var documents = try documents(noteID: noteID)
+        if let duplicate = documents.first(where: { $0.id == id }) { return duplicate }
+        guard documents.count < Self.maxDocuments else { throw LibraryError.tooManyDocuments }
+        guard let pdf = PDFDocument(data: data), !pdf.isLocked else { throw LibraryError.unreadablePDF }
+        guard (1...Self.maxPages).contains(pdf.pageCount) else { throw LibraryError.pageLimit }
+        let metadataTitle = (pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = String((metadataTitle?.isEmpty == false ? metadataTitle! : url.deletingPathExtension().lastPathComponent).prefix(150))
+        let embedding = sentenceEmbedding()
+        var passages: [LecturePassage] = [], skipped: [Int] = []
+        for number in 0..<pdf.pageCount {
+            try Task.checkCancellation()
+            guard let page = pdf.page(at: number) else { skipped.append(number + 1); continue }
+            let extracted = try autoreleasepool { () -> (String, Bool) in
+                let text = page.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if text.filter({ $0.isLetter }).count >= 30 { return (text, false) }
+                return (try Self.ocr(page), true)
+            }
+            guard !extracted.0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { skipped.append(number + 1); continue }
+            // Bound pathological PDFs as well as ordinary lecture decks.
+            guard extracted.0.count <= 80_000 else { throw LibraryError.pageTextLimit }
+            for (index, text) in LectureRetrieval.chunks(extracted.0).enumerated() {
+                passages.append(LecturePassage(id: "\(id):\(number + 1):\(index)", documentID: id,
+                                               title: title, page: number + 1, text: text,
+                                               usedOCR: extracted.1, vector: embedding?.vector(for: text),
+                                               sentenceVectors: sentenceVectors(text, embedding: embedding)))
+            }
+            guard passages.count <= 2400 else { throw LibraryError.pageTextLimit }
+        }
+        guard !passages.isEmpty else { throw LibraryError.noText }
+        let document = LectureDocument(id: id, title: title, pageCount: pdf.pageCount, importedAt: .now,
+                                       skippedPages: skipped, embeddingRevision: embedding?.revision, passages: passages)
+        let folder = directory(noteID)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let staging = folder.appendingPathComponent(".import-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try data.write(to: staging.appendingPathComponent("source.pdf"), options: .atomic)
+        try JSONEncoder().encode(document).write(to: staging.appendingPathComponent("index.json"), options: .atomic)
+        try Task.checkCancellation()
+        try FileManager.default.moveItem(at: staging, to: folder.appendingPathComponent(id, isDirectory: true))
+        documents.append(document); cache[noteID] = documents
+        return document
+    }
+
+    func remove(documentID: String, noteID: UUID) throws {
+        guard validID(documentID) else { throw LibraryError.missingDocument }
+        var documents = try documents(noteID: noteID)
+        guard documents.contains(where: { $0.id == documentID }) else { return }
+        try FileManager.default.removeItem(at: directory(noteID).appendingPathComponent(documentID))
+        documents.removeAll { $0.id == documentID }; cache[noteID] = documents
+    }
+
+    private static func ocr(_ page: PDFPage) throws -> String {
+        let bounds = page.bounds(for: .mediaBox)
+        guard bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else { return "" }
+        let scale = min(2, 1800 / max(bounds.width, bounds.height))
+        let width = max(1, Int(bounds.width * scale)), height = max(1, Int(bounds.height * scale))
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return "" }
+        context.setFillColor(CGColor(gray: 1, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: -bounds.minX, y: -bounds.minY)
+        page.draw(with: .mediaBox, to: context)
+        guard let image = context.makeImage() else { return "" }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
+        request.usesLanguageCorrection = true
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+    }
+
+    enum LibraryError: LocalizedError {
+        case fileSize, tooManyDocuments, unreadablePDF, pageLimit, noText, pageTextLimit, invalidIndex, missingDocument
+        var errorDescription: String? {
+            switch self {
+            case .fileSize: "Choose a PDF smaller than 40 MB."
+            case .tooManyDocuments: "This notebook already has 12 PDFs. Remove one before adding another."
+            case .unreadablePDF: "This PDF is damaged or password-protected. Export an unlocked copy and try again."
+            case .pageLimit: "Choose a PDF with 1–150 pages. Split larger lecture packs first."
+            case .noText: "No readable text was found, including after on-device OCR."
+            case .pageTextLimit: "This PDF contains too much text to index. Split it into smaller lectures."
+            case .invalidIndex: "A lecture index could not be read. Original PDF copies and handwritten notes are unchanged."
+            case .missingDocument: "This lecture PDF is no longer attached to this notebook."
+            }
+        }
+    }
+}

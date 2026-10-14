@@ -9,6 +9,8 @@ enum CircleAIStyle {
 struct CircleIntentOverlay: View {
     let state: CircleIntentState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sourcePreview: LecturePDFDestination?
+    @State private var sourceError: String?
 
     var body: some View {
         GeometryReader { geometry in
@@ -36,6 +38,7 @@ struct CircleIntentOverlay: View {
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .ignoresSafeArea()
+        .sheet(item: $sourcePreview) { LecturePDFView(destination: $0) }
     }
 
     private func jelly(in viewport: CGSize) -> some View {
@@ -83,21 +86,26 @@ struct CircleIntentOverlay: View {
                     if state.processing {
                         HStack(spacing: 10) {
                             ProgressView().controlSize(.small)
-                            Text(state.phase == .recognizing ? "Reading handwriting…" : state.phase == .proposing ? "Drafting proposed action…" : "Inferring intent and action…")
+                            Text(state.phase == .recognizing ? "Reading handwriting…" : state.phase == .retrieving ? "Searching lecture PDFs…" : state.phase == .proposing ? "Drafting proposed action…" : "Inferring intent and action…")
                                 .font(.subheadline)
                         }
                     }
                     pipelineSection("1. Intent Guess", text: state.intent, identifier: "intentGuess")
                     pipelineSection("2. Action that should be taken", text: state.action, identifier: "intentAction")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(state.sourceLabel, systemImage: state.citations.isEmpty ? "info.circle" : "doc.text.magnifyingglass")
+                            .font(.subheadline.weight(.semibold)).accessibilityIdentifier("autofillSource")
+                        if !state.sourceDetail.isEmpty { Text(state.sourceDetail).font(.caption).foregroundStyle(.secondary) }
+                    }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("3. Proposed action").font(.subheadline.weight(.semibold))
                         if state.proposedLines.isEmpty {
                             Text(state.processing ? "Waiting for the proposed content…" : "No proposal available.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         } else {
-                            ForEach(Array(state.proposedLines.enumerated()), id: \.offset) { _, line in
+                            ForEach(Array(state.proposedLines.enumerated()), id: \.offset) { index, line in
                                 HStack(alignment: .top, spacing: 8) {
-                                    Text("•")
+                                    Text(state.citations.indices.contains(index) ? "[\(index + 1)]" : "•")
                                     Text(line).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
                                 }
                             }
@@ -108,6 +116,30 @@ struct CircleIntentOverlay: View {
                         Text(state.clarification).font(.subheadline).accessibilityIdentifier("intentClarification")
                     }
                     if let issue = state.issue { Text(issue).font(.subheadline).accessibilityIdentifier("intentIssue") }
+                    if !state.citations.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Lecture sources").font(.subheadline.weight(.semibold))
+                            ForEach(Array(state.citations.enumerated()), id: \.offset) { index, citation in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Button {
+                                        Task {
+                                            guard let noteID = state.noteID else { return }
+                                            do {
+                                                let url = try await LectureLibrary.shared.pdfURL(noteID: noteID, documentID: citation.passage.documentID)
+                                                sourcePreview = LecturePDFDestination(url: url, page: citation.passage.page, quote: citation.quote)
+                                            } catch { sourceError = error.localizedDescription }
+                                        }
+                                    } label: {
+                                        Label("[\(index + 1)] \(citation.passage.title) · p. \(citation.passage.page)", systemImage: "arrow.up.right.square")
+                                            .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
+                                    }
+                                    Text("“\(citation.quote)”").font(.caption).textSelection(.enabled)
+                                    if citation.passage.usedOCR { Text("Scanned page · OCR quotation").font(.caption2).foregroundStyle(.secondary) }
+                                }
+                            }
+                            if let sourceError { Text(sourceError).font(.caption).foregroundStyle(.red) }
+                        }
+                    }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
                         if state.arithmeticChecked { Text("Matrix arithmetic checked locally").font(.caption.weight(.semibold)) }
@@ -125,6 +157,10 @@ struct CircleIntentOverlay: View {
                             .font(.caption).accessibilityIdentifier("modelTiming")
                         Text("Intent \(state.intentSeconds, specifier: "%.1f") s · Proposal \(state.proposalSeconds, specifier: "%.1f") s · Recognition \(state.recognitionSeconds, specifier: "%.1f") s")
                             .font(.caption2)
+                        if !state.retrievalMethod.isEmpty {
+                            Text("Retrieval \(state.retrievalSeconds, specifier: "%.2f") s · \(state.retrievedPassageCount) passages · \(state.retrievalMethod)")
+                                .font(.caption2).accessibilityIdentifier("retrievalTiming")
+                        }
                     }
                     .foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)

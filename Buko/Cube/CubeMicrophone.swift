@@ -18,6 +18,7 @@ final class CubeMicrophone {
     private var foreground = true
     private var permissionTask: Task<Void, Never>?
     private var engine: AVAudioEngine?
+    private var ownsAudioSession = false
     private let envelope = CubeAudioEnvelope()
     var level: CGFloat { status == .listening ? envelope.read() : 0 }
 
@@ -61,6 +62,7 @@ final class CubeMicrophone {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .defaultToSpeaker])
             try session.setActive(true)
+            ownsAudioSession = true
             let audio = AVAudioEngine()
             let input = audio.inputNode
             let format = input.outputFormat(forBus: 0)
@@ -90,7 +92,11 @@ final class CubeMicrophone {
         }
         envelope.write(0)
         if status == .listening { status = .off }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        // The hidden cube's ordinary teardown must not touch the audio session.
+        if ownsAudioSession {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            ownsAudioSession = false
+        }
     }
 
     private enum MicError: Error { case noInput }

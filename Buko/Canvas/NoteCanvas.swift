@@ -15,6 +15,7 @@ struct NoteCanvas: UIViewRepresentable {
 
     func makeUIView(context: Context) -> CanvasHostView {
         let host = CanvasHostView(pagePull: session.pagePull)
+        host.circleIntent.noteID = note.id
         do {
             let drawing = note.drawingData.isEmpty ? PKDrawing() : try PKDrawing(data: note.drawingData)
             context.coordinator.hasLoadedDrawing = true
