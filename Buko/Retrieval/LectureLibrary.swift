@@ -1,6 +1,5 @@
 import Foundation
 import PDFKit
-import Vision
 import NaturalLanguage
 import CryptoKit
 
@@ -37,18 +36,35 @@ actor LectureLibrary {
     private func validID(_ id: String) -> Bool { id.count == 64 && id.allSatisfy { $0.isHexDigit && !$0.isUppercase } }
 
     func documents(noteID: UUID) throws -> [LectureDocument] {
+        try Task.checkCancellation()
         if let cached = cache[noteID] { return cached }
         let folder = directory(noteID)
         guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
         let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
         var documents: [LectureDocument] = []
         for file in files where validID(file.lastPathComponent) {
+            try Task.checkCancellation()
             let data = try Data(contentsOf: file.appendingPathComponent("index.json"))
-            let document = try JSONDecoder().decode(LectureDocument.self, from: data)
+            var document = try JSONDecoder().decode(LectureDocument.self, from: data)
             guard document.indexVersion == 1, document.id == file.lastPathComponent,
+                  (document.extractionVersion ?? 1) <= LecturePageExtractor.version,
                   document.passages.allSatisfy({ $0.documentID == document.id && $0.page > 0 && $0.page <= document.pageCount }),
                   FileManager.default.fileExists(atPath: file.appendingPathComponent("source.pdf").path) else {
                 throw LibraryError.invalidIndex
+            }
+            if document.extractionVersion != LecturePageExtractor.version {
+                // Repair derived data only. Keep the original bytes, identity, title
+                // and import date; publish a complete replacement index atomically.
+                let source = try Data(contentsOf: file.appendingPathComponent("source.pdf"), options: .mappedIfSafe)
+                guard source.count <= Self.maxBytes,
+                      SHA256.hash(data: source).map({ String(format: "%02x", $0) }).joined() == document.id,
+                      let pdf = PDFDocument(data: source), !pdf.isLocked, pdf.pageCount == document.pageCount else {
+                    throw LibraryError.invalidIndex
+                }
+                document = try index(pdf, id: document.id, title: document.title, importedAt: document.importedAt)
+                let replacement = try JSONEncoder().encode(document)
+                try Task.checkCancellation()
+                try replacement.write(to: file.appendingPathComponent("index.json"), options: .atomic)
             }
             documents.append(document)
         }
@@ -65,7 +81,7 @@ actor LectureLibrary {
     }
 
     func revision(noteID: UUID) throws -> String {
-        try documents(noteID: noteID).map { $0.id }.sorted().joined(separator: ":")
+        try documents(noteID: noteID).map { "\($0.id):extraction-\($0.extractionVersion ?? 1)" }.sorted().joined(separator: ":")
     }
 
     func search(noteID: UUID, selected: String, intent: String, method: LectureRetrieval.Method = .hybrid) throws -> LectureSearch {
@@ -106,30 +122,7 @@ actor LectureLibrary {
         guard (1...Self.maxPages).contains(pdf.pageCount) else { throw LibraryError.pageLimit }
         let metadataTitle = (pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = String((metadataTitle?.isEmpty == false ? metadataTitle! : url.deletingPathExtension().lastPathComponent).prefix(150))
-        let embedding = sentenceEmbedding()
-        var passages: [LecturePassage] = [], skipped: [Int] = []
-        for number in 0..<pdf.pageCount {
-            try Task.checkCancellation()
-            guard let page = pdf.page(at: number) else { skipped.append(number + 1); continue }
-            let extracted = try autoreleasepool { () -> (String, Bool) in
-                let text = page.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                if text.filter({ $0.isLetter }).count >= 30 { return (text, false) }
-                return (try Self.ocr(page), true)
-            }
-            guard !extracted.0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { skipped.append(number + 1); continue }
-            // Bound pathological PDFs as well as ordinary lecture decks.
-            guard extracted.0.count <= 80_000 else { throw LibraryError.pageTextLimit }
-            for (index, text) in LectureRetrieval.chunks(extracted.0).enumerated() {
-                passages.append(LecturePassage(id: "\(id):\(number + 1):\(index)", documentID: id,
-                                               title: title, page: number + 1, text: text,
-                                               usedOCR: extracted.1, vector: embedding?.vector(for: text),
-                                               sentenceVectors: sentenceVectors(text, embedding: embedding)))
-            }
-            guard passages.count <= 2400 else { throw LibraryError.pageTextLimit }
-        }
-        guard !passages.isEmpty else { throw LibraryError.noText }
-        let document = LectureDocument(id: id, title: title, pageCount: pdf.pageCount, importedAt: .now,
-                                       skippedPages: skipped, embeddingRevision: embedding?.revision, passages: passages)
+        let document = try index(pdf, id: id, title: title, importedAt: .now)
         let folder = directory(noteID)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let staging = folder.appendingPathComponent(".import-\(UUID().uuidString)", isDirectory: true)
@@ -143,31 +136,38 @@ actor LectureLibrary {
         return document
     }
 
+    private func index(_ pdf: PDFDocument, id: String, title: String, importedAt: Date) throws -> LectureDocument {
+        guard (1...Self.maxPages).contains(pdf.pageCount) else { throw LibraryError.pageLimit }
+        let embedding = sentenceEmbedding()
+        var passages: [LecturePassage] = [], skipped: [Int] = []
+        for number in 0..<pdf.pageCount {
+            try Task.checkCancellation()
+            guard let page = pdf.page(at: number) else { skipped.append(number + 1); continue }
+            let extracted = try autoreleasepool { try LecturePageExtractor.extract(page) }
+            guard !extracted.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { skipped.append(number + 1); continue }
+            // Bound pathological PDFs as well as ordinary lecture decks.
+            guard extracted.text.count <= 80_000 else { throw LibraryError.pageTextLimit }
+            for (index, text) in LectureRetrieval.chunks(extracted.text).enumerated() {
+                try Task.checkCancellation()
+                passages.append(LecturePassage(id: "\(id):\(number + 1):\(index)", documentID: id,
+                                               title: title, page: number + 1, text: text,
+                                               usedOCR: extracted.usedOCR, vector: embedding?.vector(for: text),
+                                               sentenceVectors: sentenceVectors(text, embedding: embedding)))
+            }
+            guard passages.count <= 2400 else { throw LibraryError.pageTextLimit }
+        }
+        guard !passages.isEmpty else { throw LibraryError.noText }
+        return LectureDocument(id: id, title: title, pageCount: pdf.pageCount, importedAt: importedAt,
+                               skippedPages: skipped, embeddingRevision: embedding?.revision, passages: passages,
+                               extractionVersion: LecturePageExtractor.version)
+    }
+
     func remove(documentID: String, noteID: UUID) throws {
         guard validID(documentID) else { throw LibraryError.missingDocument }
         var documents = try documents(noteID: noteID)
         guard documents.contains(where: { $0.id == documentID }) else { return }
         try FileManager.default.removeItem(at: directory(noteID).appendingPathComponent(documentID))
         documents.removeAll { $0.id == documentID }; cache[noteID] = documents
-    }
-
-    private static func ocr(_ page: PDFPage) throws -> String {
-        let bounds = page.bounds(for: .mediaBox)
-        guard bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else { return "" }
-        let scale = min(2, 1800 / max(bounds.width, bounds.height))
-        let width = max(1, Int(bounds.width * scale)), height = max(1, Int(bounds.height * scale))
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return "" }
-        context.setFillColor(CGColor(gray: 1, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        context.scaleBy(x: scale, y: scale)
-        context.translateBy(x: -bounds.minX, y: -bounds.minY)
-        page.draw(with: .mediaBox, to: context)
-        guard let image = context.makeImage() else { return "" }
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate; request.recognitionLanguages = ["en-US"]
-        request.usesLanguageCorrection = true
-        try VNImageRequestHandler(cgImage: image).perform([request])
-        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
     }
 
     enum LibraryError: LocalizedError {

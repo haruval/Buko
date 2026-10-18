@@ -3,6 +3,8 @@ import Foundation
 /// Conservative arithmetic support for an explicit unfinished product such as
 /// C = [2 1; 0 3], D = [1 4; 2 0]. CD = . No OCR/layout guessing.
 nonisolated enum MatrixProductCheck {
+    private static let unfinishedProduct = #"\b([A-Za-z])\s*([A-Za-z])\s*=\s*$"#
+
     struct Result {
         let lines: [String]
         let clarification: String
@@ -10,7 +12,7 @@ nonisolated enum MatrixProductCheck {
 
     static func evaluate(_ selected: String) -> Result? {
         let text = selected.replacingOccurrences(of: "−", with: "-")
-        guard let target = matches(#"\b([A-Za-z])\s*([A-Za-z])\s*=\s*$"#, in: text).last else { return nil }
+        guard let target = matches(unfinishedProduct, in: text).last else { return nil }
         var matrices: [String: [[Double]]] = [:]
         for assignment in matches(#"\b([A-Za-z])\s*=\s*\[([^\[\]]+)\]"#, in: text) {
             let name = assignment[1].lowercased()
@@ -50,6 +52,13 @@ nonisolated enum MatrixProductCheck {
         let name = target[1] + target[2]
         lines.append(name + " = [" + result.map { $0.map(number).joined(separator: " ") }.joined(separator: "; ") + "].")
         return Result(lines: lines, clarification: "")
+    }
+
+    static func isUnfinishedRequest(_ selected: String) -> Bool {
+        // A recognizable matrix request with missing/ambiguous operands must not
+        // fall through to a model that can substitute a retrieved example.
+        !matches(unfinishedProduct, in: selected).isEmpty
+            && !matches(#"\b[A-Za-z]\s*=\s*\["#, in: selected).isEmpty
     }
 
     private static func number(_ value: Double) -> String {

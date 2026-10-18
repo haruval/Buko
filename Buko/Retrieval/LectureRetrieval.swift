@@ -21,6 +21,8 @@ nonisolated struct LectureDocument: Codable, Sendable, Identifiable {
     var embeddingRevision: Int?
     var passages: [LecturePassage]
     var indexVersion = 1
+    // Missing in legacy indexes; extraction can be repaired without changing PDF identity.
+    var extractionVersion: Int? = nil
 }
 
 nonisolated struct LectureHit: Sendable, Identifiable {

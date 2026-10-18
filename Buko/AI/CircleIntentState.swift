@@ -184,6 +184,12 @@ final class CircleIntentState {
             // Retain exactly the capped text supplied to both model stages.
             let context = String(reading.context.prefix(IntentPrompts.contextCharacterLimit))
             nearbyContext = context
+            if [recognizedText, context].contains(where: LectureGroundingPolicy.containsInstructionOverride) {
+                sourceLabel = "Completion withheld"
+                sourceDetail = LectureGroundingPolicy.Refusal.instructionRisk.explanation
+                phase = .finished; timeout?.cancel()
+                return
+            }
             let model = SystemLanguageModel.default
             guard case .available = model.availability else {
                 finishIssue(Self.unavailableMessage(model), id: id); return
@@ -214,8 +220,19 @@ final class CircleIntentState {
                     retrievalMethod = search.semanticAvailable ? "BM25 + semantic rank fusion" : "BM25 · sentence embedding unavailable"
                     phase = .proposing
                     proposalStarted = ProcessInfo.processInfo.systemUptime
-                    if !search.hits.isEmpty {
-                        sourceLabel = "Lecture PDFs · RAG"
+                    switch CircleCompletionRoute.select(for: recognizedText, hasLectureEvidence: !search.hits.isEmpty) {
+                    case .arithmetic(let checked):
+                        guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
+                        proposedLines = checked.lines
+                        clarification = checked.clarification
+                        arithmeticChecked = checked.clarification.isEmpty
+                        citations = []
+                        sourceLabel = "Local arithmetic"
+                        sourceDetail = checked.clarification.isEmpty
+                            ? "Computed from the recognized matrix operands on this device."
+                            : "Confirm the recognized matrices before calculating."
+                    case .lecture:
+                        sourceLabel = "Assessing lecture evidence…"
                         let completion = try await LectureComposer.complete(selected: recognizedText, context: context,
                             intent: intent, action: action, search: search, model: model)
                         guard requestID == id, !Task.isCancelled else { return }
@@ -223,32 +240,14 @@ final class CircleIntentState {
                         proposedLines = completion.lines
                         citations = completion.citations
                         retrievedPassageCount = completion.evidenceCount
-                        sourceLabel = completion.extractive ? "Lecture PDFs · original excerpts" : "Lecture PDFs · RAG"
+                        sourceLabel = completion.extractive ? "Lecture PDFs · original excerpts" : "Lecture PDFs · no completion"
                         sourceDetail = completion.explanation
-                    } else if let checked = MatrixProductCheck.evaluate(recognizedText) {
+                    case .noEvidence:
                         guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
-                        proposedLines = checked.lines
-                        clarification = checked.clarification
-                        arithmeticChecked = checked.clarification.isEmpty
-                        sourceLabel = "Local arithmetic"
-                        sourceDetail = "No matching lecture passage. Computed from the recognized matrix operands on this device."
-                    } else {
-                        sourceLabel = "AI generated · Foundation Models"
-                        sourceDetail = search.documentCount == 0
-                            ? "No lecture PDFs are attached to this notebook. This answer is not backed by lecture sources."
-                            : "No sufficiently relevant lecture passage was retrieved. This answer is not backed by lecture sources."
-                        let writer = LanguageModelSession(model: model, instructions: IntentPrompts.proposalInstructions)
-                        let proposal = try await writer.respond(
-                            to: IntentPrompts.proposalRequest(selected: recognizedText, context: context, plan: response.content),
-                            generating: ProposedCircleAction.self,
-                            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: IntentPrompts.proposalTokenLimit))
-                        guard requestID == id, !Task.isCancelled else { return }
-                        guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
-                        clarification = proposal.content.clarification.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if clarification.isEmpty {
-                            proposedLines = proposal.content.lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-                            if proposedLines.isEmpty { issue = "The model returned no proposed content. Try a clearer selection." }
-                        }
+                        sourceLabel = search.documentCount == 0 ? "Lecture PDFs · none attached" : "Lecture PDFs · no match"
+                        sourceDetail = LectureGroundingPolicy.abstain(
+                            search.documentCount == 0 ? .noDocuments : .noMatch, evidenceCount: 0).explanation
+                        proposedLines = []; citations = []
                     }
                     proposalSeconds = ProcessInfo.processInfo.systemUptime - (proposalStarted ?? modelStarted)
                 } else {

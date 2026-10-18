@@ -86,7 +86,7 @@ struct CircleIntentOverlay: View {
                     if state.processing {
                         HStack(spacing: 10) {
                             ProgressView().controlSize(.small)
-                            Text(state.phase == .recognizing ? "Reading handwriting…" : state.phase == .retrieving ? "Searching lecture PDFs…" : state.phase == .proposing ? "Drafting proposed action…" : "Inferring intent and action…")
+                            Text(state.phase == .recognizing ? "Reading handwriting…" : state.phase == .retrieving ? "Searching lecture PDFs…" : state.phase == .proposing ? "Checking completion evidence…" : "Inferring intent and action…")
                                 .font(.subheadline)
                         }
                     }
@@ -98,7 +98,7 @@ struct CircleIntentOverlay: View {
                         if !state.sourceDetail.isEmpty { Text(state.sourceDetail).font(.caption).foregroundStyle(.secondary) }
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("3. Proposed action").font(.subheadline.weight(.semibold))
+                        Text(state.citations.isEmpty ? "3. Proposed action" : "3. Original lecture excerpts").font(.subheadline.weight(.semibold))
                         if state.proposedLines.isEmpty {
                             Text(state.processing ? "Waiting for the proposed content…" : "No proposal available.")
                                 .font(.subheadline).foregroundStyle(.secondary)

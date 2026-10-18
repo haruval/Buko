@@ -26,6 +26,34 @@ import CoreText
         let saved = try await reopened.documents(noteID: noteID)
         precondition(saved.map(\.id) == documents.map(\.id), "Index and source provenance survive reopening")
 
+        // A genuine matching worked example must not route new operands into the
+        // model. Exercise the same route decision used by CircleIntentState.
+        let changedOperands = "C = [9 9; 9 9], D = [1 4; 2 0]. CD ="
+        let workedExample = try await library.search(noteID: noteID, selected: changedOperands, intent: "Compute CD")
+        precondition(workedExample.hits.contains { $0.passage.text.contains("CD = [4 8; 6 0]") })
+        for hasEvidence in [true, false] {
+            guard case .arithmetic(let product) = CircleCompletionRoute.select(for: changedOperands, hasLectureEvidence: hasEvidence) else {
+                preconditionFailure("A worked example displaced arithmetic on the selected operands")
+            }
+            precondition(product.lines.last == "CD = [27 36; 27 36]." && product.clarification.isEmpty)
+        }
+        guard case .arithmetic(let mismatch) = CircleCompletionRoute.select(
+            for: "A = [1 2 3]. B = [1 2]. AB =", hasLectureEvidence: true) else {
+            preconditionFailure("Dimension clarification must take precedence over retrieved examples")
+        }
+        precondition(mismatch.lines.isEmpty && !mismatch.clarification.isEmpty)
+        for ambiguous in ["A = [1 ?; 3 4]. B = [1 0; 0 1]. AB =", "A = [1]. A = [2]. B = [3]. AB =",
+                          "A = [1 2; 3]. B = [1 0; 0 1]. AB =", "A = [1]. AB ="] {
+            guard case .arithmetic(let refusal) = CircleCompletionRoute.select(for: ambiguous, hasLectureEvidence: true) else {
+                preconditionFailure("Ambiguous matrix operands fell through to retrieved example composition")
+            }
+            precondition(refusal.lines.isEmpty && !refusal.clarification.isEmpty)
+        }
+        guard case .lecture = CircleCompletionRoute.select(for: "Static scope:", hasLectureEvidence: true),
+              case .noEvidence = CircleCompletionRoute.select(for: "Static scope:", hasLectureEvidence: false) else {
+            preconditionFailure("Non-arithmetic requests must retain their evidence routing")
+        }
+
         // Curated synthetic cases from the handwritten fixtures. This is a reproducible
         // smoke evaluation, not a held-out benchmark or a claim of novel RAG algorithms.
         let cases: [(String, String, Int)] = [
@@ -140,12 +168,13 @@ import CoreText
         let chunks = LectureRetrieval.chunks(long)
         precondition(chunks.count == 3 && chunks.allSatisfy { $0.split(separator: " ").count <= 140 })
         precondition(chunks[0].contains("word139") && chunks[1].contains("word112"))
+        try await LectureExtractionChecks.run(in: scratch.appendingPathComponent("extraction-checks"))
         if CommandLine.arguments.count > 3 {
             let report: [String: Any] = ["corpus": "4 original mock PDFs / 8 physical pages", "evaluation": "24 synthetic fixture-aligned questions; not held out",
                 "platform": ProcessInfo.processInfo.operatingSystemVersionString, "results": metrics]
             try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
                 .write(to: URL(fileURLWithPath: CommandLine.arguments[3]), options: .atomic)
         }
-        print("Lecture retrieval checks passed: real PDF indexing, notebook isolation, duplicate detection, durable reopen, ranking, abstention, citation rejection, removal, corruption and cancellation.")
+        print("Lecture retrieval checks passed: real PDF indexing, arithmetic precedence over retrieved examples, notebook isolation, duplicate detection, durable reopen, ranking, abstention, citation rejection, removal, corruption and cancellation.")
     }
 }
