@@ -63,7 +63,8 @@ struct LectureSourcesView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Button {
                                 operation = Task {
-                                    do { preview = LecturePDFDestination(url: try await library.pdfURL(noteID: noteID, documentID: document.id), page: 1) }
+                                    do { preview = LecturePDFDestination(url: try await library.pdfURL(noteID: noteID, documentID: document.id),
+                                                                        page: document.textDisagreementPages?.first ?? 1) }
                                     catch { self.error = error.localizedDescription }
                                 }
                             } label: {
@@ -78,6 +79,11 @@ struct LectureSourcesView: View {
                             }
                             if !document.skippedPages.isEmpty {
                                 Text("No readable text on pages: \(document.skippedPages.map(String.init).joined(separator: ", "))").font(.caption)
+                            }
+                            if let pages = document.textDisagreementPages, !pages.isEmpty {
+                                Label("Searchable text and visible OCR disagree on pages: \(pages.map(String.init).joined(separator: ", ")). Lecture answers are paused for this notebook. Inspect the PDF, then replace or remove this source. OCR may be mistaken.",
+                                      systemImage: "exclamationmark.triangle")
+                                    .font(.caption).accessibilityIdentifier("lectureTextDisagreement")
                             }
                             Button("Remove source", role: .destructive) { removing = document }
                                 .buttonStyle(.borderless).font(.caption).disabled(busy)

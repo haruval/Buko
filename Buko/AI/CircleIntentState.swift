@@ -217,7 +217,8 @@ final class CircleIntentState {
                     guard requestID == id, !Task.isCancelled else { return }
                     retrievalSeconds = search.seconds
                     retrievedPassageCount = search.hits.count
-                    retrievalMethod = search.semanticAvailable ? "BM25 + semantic rank fusion" : "BM25 · sentence embedding unavailable"
+                    retrievalMethod = search.hasUnverifiedText ? "Paused · source text needs review"
+                        : search.semanticAvailable ? "BM25 + semantic rank fusion" : "BM25 · sentence embedding unavailable"
                     phase = .proposing
                     proposalStarted = ProcessInfo.processInfo.systemUptime
                     switch CircleCompletionRoute.select(for: recognizedText, hasLectureEvidence: !search.hits.isEmpty) {
@@ -244,9 +245,11 @@ final class CircleIntentState {
                         sourceDetail = completion.explanation
                     case .noEvidence:
                         guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
-                        sourceLabel = search.documentCount == 0 ? "Lecture PDFs · none attached" : "Lecture PDFs · no match"
+                        sourceLabel = search.hasUnverifiedText ? "Lecture PDFs · check source text"
+                            : search.documentCount == 0 ? "Lecture PDFs · none attached" : "Lecture PDFs · no match"
                         sourceDetail = LectureGroundingPolicy.abstain(
-                            search.documentCount == 0 ? .noDocuments : .noMatch, evidenceCount: 0).explanation
+                            search.hasUnverifiedText ? .unverifiedText : search.documentCount == 0 ? .noDocuments : .noMatch,
+                            evidenceCount: 0).explanation
                         proposedLines = []; citations = []
                     }
                     proposalSeconds = ProcessInfo.processInfo.systemUptime - (proposalStarted ?? modelStarted)

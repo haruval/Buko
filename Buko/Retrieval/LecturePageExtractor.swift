@@ -2,34 +2,52 @@ import Foundation
 import PDFKit
 import Vision
 
-/// Native text stays authoritative. OCR adds visible text outside native text regions,
-/// including scanned bodies on pages with searchable headings or footers.
+/// Native text is preserved when covered OCR agrees. A detected disagreement
+/// quarantines the page instead of choosing a potentially wrong transcription.
+/// OCR also adds visible text outside native regions, including mixed pages.
 nonisolated enum LecturePageExtractor {
-    static let version = 2
+    static let version = 3
 
     struct Result {
         let text: String
         let usedOCR: Bool
+        var hasTextDisagreement = false
     }
 
     static func extract(_ page: PDFPage) throws -> Result {
         try Task.checkCancellation()
         let native = page.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard native.count <= 80_000 else { throw LectureLibrary.LibraryError.pageTextLimit }
-        let nativeBounds = page.selection(for: NSRange(location: 0, length: page.numberOfCharacters))?
+        let nativeLines = page.selection(for: NSRange(location: 0, length: page.numberOfCharacters))?
             .selectionsByLine().filter { !($0.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { $0.bounds(for: page) } ?? []
+            .map { Line(text: $0.string ?? "", bounds: $0.bounds(for: page)) } ?? []
         let normalizedNative = normalized(native)
         let recognized = try recognize(page)
         var additions: [String] = []
         for line in recognized {
-            // Geometry also suppresses OCR misspellings of an existing text layer.
-            let covered = nativeBounds.contains { bounds in
-                let intersection = bounds.insetBy(dx: -1, dy: -1).intersection(line.bounds)
+            let coveringLines = nativeLines.filter { nativeLine in
+                let intersection = nativeLine.bounds.insetBy(dx: -1, dy: -1).intersection(line.bounds)
                 return !intersection.isNull && intersection.width * intersection.height >= line.bounds.width * line.bounds.height * 0.6
             }
             let text = normalized(line.text)
-            guard !covered, !text.isEmpty, !normalizedNative.contains(text) else { continue }
+            guard !text.isEmpty else { continue }
+            if !coveringLines.isEmpty {
+                // Compare only the covering native line, not matching text elsewhere
+                // on the page. OCR may split a native line into shorter observations.
+                // Compare words and signed/decimal numbers in prose. Single-letter
+                // math symbols and punctuation are unreliable OCR comparisons; this
+                // is a bounded disagreement detector, not full layout verification.
+                let tokens = comparisonTokens(line.text)
+                let visible = " " + tokens.joined(separator: " ") + " "
+                if tokens.contains(where: { $0.filter(\.isLetter).count > 1 }),
+                   !coveringLines.contains(where: {
+                       (" " + comparisonTokens($0.text).joined(separator: " ") + " ").contains(visible)
+                   }) {
+                    return Result(text: "", usedOCR: true, hasTextDisagreement: true)
+                }
+                continue
+            }
+            guard !normalizedNative.contains(text) else { continue }
             additions.append(line.text)
         }
         // Preserve PDFKit's text and order exactly; supplementary OCR follows it.
@@ -41,6 +59,17 @@ nonisolated enum LecturePageExtractor {
     private static func normalized(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US"))
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private static func comparisonTokens(_ text: String) -> [String] {
+        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US"))
+            .replacingOccurrences(of: "’", with: "'").replacingOccurrences(of: "−", with: "-")
+        let regex = try! NSRegularExpression(pattern: #"[-+]?\d+(?:[.,]\d+)*|[\p{L}]+(?:'[\p{L}]+)*"#)
+        return regex.matches(in: folded, range: NSRange(folded.startIndex..., in: folded)).compactMap {
+            guard let range = Range($0.range, in: folded) else { return nil }
+            let token = String(folded[range])
+            return token.contains(where: \.isNumber) || token.filter(\.isLetter).count > 1 ? token : nil
+        }
     }
 
     private struct Line {

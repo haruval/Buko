@@ -87,6 +87,13 @@ actor LectureLibrary {
     func search(noteID: UUID, selected: String, intent: String, method: LectureRetrieval.Method = .hybrid) throws -> LectureSearch {
         let start = ProcessInfo.processInfo.systemUptime
         let documents = try documents(noteID: noteID)
+        // A discarded page could contain a correction/conflict. Do not answer from
+        // an apparently complete subset while any attached page is quarantined.
+        if documents.contains(where: { !($0.textDisagreementPages ?? []).isEmpty }) {
+            return LectureSearch(hits: [], documentCount: documents.count, revision: try revision(noteID: noteID),
+                                 semanticAvailable: false, seconds: ProcessInfo.processInfo.systemUptime - start,
+                                 hasUnverifiedText: true)
+        }
         let embedding = sentenceEmbedding()
         let vector = embedding?.vector(for: String(selected.prefix(1000)))
         var passages = documents.flatMap(\.passages)
@@ -139,11 +146,12 @@ actor LectureLibrary {
     private func index(_ pdf: PDFDocument, id: String, title: String, importedAt: Date) throws -> LectureDocument {
         guard (1...Self.maxPages).contains(pdf.pageCount) else { throw LibraryError.pageLimit }
         let embedding = sentenceEmbedding()
-        var passages: [LecturePassage] = [], skipped: [Int] = []
+        var passages: [LecturePassage] = [], skipped: [Int] = [], disagreements: [Int] = []
         for number in 0..<pdf.pageCount {
             try Task.checkCancellation()
             guard let page = pdf.page(at: number) else { skipped.append(number + 1); continue }
             let extracted = try autoreleasepool { try LecturePageExtractor.extract(page) }
+            if extracted.hasTextDisagreement { disagreements.append(number + 1); continue }
             guard !extracted.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { skipped.append(number + 1); continue }
             // Bound pathological PDFs as well as ordinary lecture decks.
             guard extracted.text.count <= 80_000 else { throw LibraryError.pageTextLimit }
@@ -156,10 +164,10 @@ actor LectureLibrary {
             }
             guard passages.count <= 2400 else { throw LibraryError.pageTextLimit }
         }
-        guard !passages.isEmpty else { throw LibraryError.noText }
+        guard !passages.isEmpty || !disagreements.isEmpty else { throw LibraryError.noText }
         return LectureDocument(id: id, title: title, pageCount: pdf.pageCount, importedAt: importedAt,
                                skippedPages: skipped, embeddingRevision: embedding?.revision, passages: passages,
-                               extractionVersion: LecturePageExtractor.version)
+                               extractionVersion: LecturePageExtractor.version, textDisagreementPages: disagreements)
     }
 
     func remove(documentID: String, noteID: UUID) throws {

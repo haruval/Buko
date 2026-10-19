@@ -6,5 +6,5 @@ trap 'rm -rf "$BUKO_RAG_CHECK_DIR"' EXIT
 xcrun swiftc -module-cache-path "$BUKO_RAG_CHECK_DIR/modules" \
     Buko/Retrieval/LectureRetrieval.swift Buko/Retrieval/LectureLibrary.swift Buko/Retrieval/LecturePageExtractor.swift \
     Buko/AI/MatrixProductCheck.swift Buko/AI/CircleCompletionRoute.swift \
-    Tests/LectureExtractionChecks.swift Tests/LectureRetrievalChecks.swift -o "$BUKO_RAG_CHECK_DIR/checks"
+    Tests/LectureEvidenceFixtures.swift Tests/LectureExtractionChecks.swift Tests/LectureRetrievalChecks.swift -o "$BUKO_RAG_CHECK_DIR/checks"
 "$BUKO_RAG_CHECK_DIR/checks" "$BUKO_RAG_CHECK_DIR" "$PWD/Buko/Resources/Lectures" "${1:-/private/tmp/buko-rag-evaluation.json}"

@@ -90,6 +90,84 @@ enum LectureExtractionChecks {
         try checkBytes(copiedPDF, equalTo: damaged)
         try checkBytes(original, equalTo: originalBytes)
         print("Lecture extraction checks passed: native/mixed/rotated pages, OCR provenance, retrieval, legacy repair/reopen, cancellation, and original-byte preservation.")
+        try await disagreementChecks(in: scratch, healthyPDF: original)
+    }
+
+    private static func disagreementChecks(in scratch: URL, healthyPDF: URL) async throws {
+        let bad = scratch.appendingPathComponent("incorrect-hidden-text.pdf")
+        LectureEvidenceFixtures.layeredPDF(at: bad)
+        let bytes = try Data(contentsOf: bad), pdf = PDFDocument(data: bytes)!
+        precondition(pdf.string!.contains(LectureEvidenceFixtures.seven) && !pdf.string!.contains(LectureEvidenceFixtures.nine),
+                     "The fixture must contain a genuinely incorrect native layer")
+        let extracted = try LecturePageExtractor.extract(pdf.page(at: 0)!)
+        precondition(extracted.hasTextDisagreement && extracted.text.isEmpty, "Never index either conflicting transcription as trusted evidence")
+
+        let good = scratch.appendingPathComponent("matching-hidden-text.pdf")
+        LectureEvidenceFixtures.layeredPDF(at: good, native: LectureEvidenceFixtures.nine)
+        let matched = try LecturePageExtractor.extract(PDFDocument(url: good)!.page(at: 0)!)
+        precondition(!matched.hasTextDisagreement && !matched.usedOCR && matched.text == LectureEvidenceFixtures.nine)
+        for (index, pair) in [("The Luma sample has exactly 17 chambers.", "The Luma sample has exactly 19 chambers."),
+                              ("The Luma sample is stable.", "The Luma sample is not stable.")].enumerated() {
+            let url = scratch.appendingPathComponent("layer-disagreement-\(index).pdf")
+            LectureEvidenceFixtures.layeredPDF(at: url, native: pair.0, visible: pair.1)
+            let result = try LecturePageExtractor.extract(PDFDocument(url: url)!.page(at: 0)!)
+            precondition(result.hasTextDisagreement)
+        }
+        pdf.page(at: 0)!.rotation = 90
+        let rotated = scratch.appendingPathComponent("rotated-hidden-text.pdf")
+        precondition(pdf.write(to: rotated))
+        let rotatedResult = try LecturePageExtractor.extract(PDFDocument(url: rotated)!.page(at: 0)!)
+        precondition(rotatedResult.hasTextDisagreement)
+
+        let root = scratch.appendingPathComponent("disagreement-library"), note = UUID()
+        let library = LectureLibrary(root: root)
+        let healthy = try await library.importPDF(from: healthyPDF, noteID: note)
+        let document = try await library.importPDF(from: bad, noteID: note)
+        precondition(document.textDisagreementPages == [1] && document.passages.isEmpty && document.skippedPages.isEmpty)
+        let copy = try await library.pdfURL(noteID: note, documentID: document.id)
+        try checkBytes(copy, equalTo: bytes)
+        let blocked = try await library.search(noteID: note, selected: "reactor cooling fins", intent: "")
+        precondition(blocked.hasUnverifiedText && blocked.hits.isEmpty && blocked.documentCount == 2,
+                     "Do not silently omit a suspect page while answering from the other PDFs")
+        let otherNote = UUID()
+        try await library.importPDF(from: healthyPDF, noteID: otherNote)
+        let isolated = try await library.search(noteID: otherNote, selected: "reactor cooling fins", intent: "")
+        precondition(!isolated.hasUnverifiedText && !isolated.hits.isEmpty)
+
+        // Simulate the v2 index that trusted the wrong searchable layer. Repair
+        // derived data only, retaining access to inspect/remove the original copy.
+        var legacy = document
+        legacy.extractionVersion = 2; legacy.textDisagreementPages = nil
+        legacy.passages = [LecturePassage(id: "\(document.id):1:0", documentID: document.id, title: document.title,
+                                         page: 1, text: LectureEvidenceFixtures.seven, usedOCR: false, vector: nil)]
+        let index = copy.deletingLastPathComponent().appendingPathComponent("index.json")
+        let legacyBytes = try JSONEncoder().encode(legacy)
+        try legacyBytes.write(to: index, options: .atomic)
+        let fresh = LectureLibrary(root: root)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await fresh.documents(noteID: note)
+        }
+        do { _ = try await cancelled.value; preconditionFailure("Cancelled migration published") }
+        catch is CancellationError { }
+        try checkBytes(index, equalTo: legacyBytes)
+        let repaired = try await fresh.documents(noteID: note).first { $0.id == document.id }!
+        precondition(repaired.extractionVersion == 3 && repaired.textDisagreementPages == [1] && repaired.passages.isEmpty)
+        precondition(repaired.title == document.title && repaired.importedAt == document.importedAt)
+        let repairedBytes = try Data(contentsOf: index)
+        let reopened = LectureLibrary(root: root)
+        let reopenedSearch = try await reopened.search(noteID: note, selected: "Luma chamber count", intent: "")
+        precondition(reopenedSearch.hasUnverifiedText && reopenedSearch.hits.isEmpty)
+        try checkBytes(index, equalTo: repairedBytes)
+        let inspectable = try await reopened.pdfURL(noteID: note, documentID: document.id)
+        precondition(inspectable == copy)
+        try checkBytes(copy, equalTo: bytes)
+        try checkBytes(bad, equalTo: bytes)
+        try await reopened.remove(documentID: document.id, noteID: note)
+        let resumed = try await reopened.search(noteID: note, selected: "reactor cooling fins", intent: "")
+        precondition(!resumed.hasUnverifiedText && resumed.hits.contains { $0.passage.documentID == healthy.id })
+        try checkBytes(bad, equalTo: bytes)
+        print("Text-layer disagreement checks passed: visible/native mismatch, numbers/negation, rotation, matching layer, quarantine, notebook isolation, inspect/remove, v2 repair/reopen, cancellation, and original-byte preservation.")
     }
 
     private static func checkBytes(_ url: URL, equalTo expected: Data) throws {

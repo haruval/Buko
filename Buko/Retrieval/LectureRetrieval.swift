@@ -23,6 +23,8 @@ nonisolated struct LectureDocument: Codable, Sendable, Identifiable {
     var indexVersion = 1
     // Missing in legacy indexes; extraction can be repaired without changing PDF identity.
     var extractionVersion: Int? = nil
+    // Quarantined pages remain inspectable in source.pdf, never as answer evidence.
+    var textDisagreementPages: [Int]? = nil
 }
 
 nonisolated struct LectureHit: Sendable, Identifiable {
@@ -39,6 +41,7 @@ nonisolated struct LectureSearch: Sendable {
     var revision: String
     var semanticAvailable: Bool
     var seconds: Double
+    var hasUnverifiedText = false
 }
 
 nonisolated enum LectureRetrieval {
@@ -150,12 +153,12 @@ nonisolated enum LectureRetrieval {
         let ranked = hits.sorted { $0.score == $1.score ? $0.id < $1.id : $0.score > $1.score }
         var result: [LectureHit] = [], budget = maxEvidenceCharacters
         for hit in ranked {
-            // Avoid flooding the context with near-identical overlapping windows.
-            let words = Set(tokens(hit.passage.text))
+            // Similar vocabulary is not interchangeable evidence: a changed number,
+            // negation or correction can reverse a claim. Only collapse identical
+            // text on the same physical page; keep other windows intact.
             let duplicate = result.contains {
-                let previous = Set(tokens($0.passage.text))
                 return $0.passage.documentID == hit.passage.documentID && $0.passage.page == hit.passage.page
-                    && Double(words.intersection(previous).count) / Double(max(1, words.union(previous).count)) > 0.72
+                    && $0.passage.text == hit.passage.text
             }
             guard !duplicate, hit.passage.text.count <= budget else { continue }
             result.append(hit); budget -= hit.passage.text.count

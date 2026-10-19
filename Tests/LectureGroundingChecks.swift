@@ -90,6 +90,20 @@ import Darwin
         }
         print("Conflicting sources abstained in both retrieval orders.")
 
+        let conflictPDF = root.appendingPathComponent("near-duplicate-conflict.pdf")
+        LectureEvidenceFixtures.conflictPDF(at: conflictPDF)
+        let conflictNote = UUID()
+        try await library.importPDF(from: conflictPDF, noteID: conflictNote)
+        for method in [LectureRetrieval.Method.lexical, .hybrid] {
+            let retrieved = try await library.search(noteID: conflictNote, selected: "Luma chamber count:", intent: "", method: method)
+            precondition(retrieved.hits.contains { $0.passage.text.contains(LectureEvidenceFixtures.seven) })
+            precondition(retrieved.hits.contains { $0.passage.text.contains(LectureEvidenceFixtures.nine) })
+            let result = try await complete("How many chambers does Luma have?", retrieved)
+            assertAbstention(result)
+            precondition(result.explanation == LectureGroundingPolicy.Refusal.conflicting.explanation)
+        }
+        print("Real PDF → extraction → overlapping windows → lexical/hybrid → live selector: conflict withheld in both modes.")
+
         let correctionText = "Correction to the fictional Luma laboratory handout: the earlier statement that Luma has seven chambers is incorrect. The verified chamber count is nine. This correction supersedes the earlier chamber-count statement."
         let correction = evidence([original.hits[0], hit("correction", correctionText)])
         let corrected = try await complete("How many chambers does Luma have?", correction)

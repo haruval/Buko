@@ -13,7 +13,7 @@ nonisolated struct LectureCompletion: Sendable {
 nonisolated enum LectureGroundingPolicy {
     enum Refusal {
         case noDocuments, noMatch, instructionRisk, insufficient, conflicting
-        case invalidSelection, contextLimit, modelFailure
+        case invalidSelection, contextLimit, modelFailure, unverifiedText
 
         var explanation: String {
             switch self {
@@ -21,6 +21,8 @@ nonisolated enum LectureGroundingPolicy {
                 return "Attach a lecture PDF to this notebook before requesting a source-backed completion."
             case .noMatch:
                 return "No matching lecture passage was retrieved. Try a more specific selection or attach another source. A retrieval miss does not establish that the answer is absent from your PDFs."
+            case .unverifiedText:
+                return "An attached PDF's searchable text disagrees with its visible OCR text. Lecture answers are paused for this notebook. Open Lecture sources to inspect the flagged pages, then replace or remove the affected source. OCR can also be mistaken; neither reading was accepted as evidence."
             case .instructionRisk:
                 return "The handwriting or retrieved sources contain possible instructions to override the evidence rules. No completion was produced. Review the selection and lecture PDFs."
             case .insufficient:
@@ -63,6 +65,7 @@ nonisolated enum LectureGroundingPolicy {
 
     static func preflight(selected: String, context: String, intent: String, action: String,
                           search: LectureSearch) -> LectureCompletion? {
+        if search.hasUnverifiedText { return abstain(.unverifiedText, evidenceCount: search.hits.count) }
         let inputs = [selected, context, intent, action] + search.hits.flatMap { [$0.passage.title, $0.passage.text] }
         if inputs.contains(where: containsInstructionOverride) {
             return abstain(.instructionRisk, evidenceCount: search.hits.count)

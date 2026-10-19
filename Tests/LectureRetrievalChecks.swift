@@ -8,6 +8,7 @@ import CoreText
         let scratch = URL(fileURLWithPath: CommandLine.arguments[1])
         let fixtures = URL(fileURLWithPath: CommandLine.arguments[2])
         let library = LectureLibrary(root: scratch.appendingPathComponent("library"))
+        try await conflictChecks(in: scratch)
         let noteID = UUID(), otherNote = UUID()
         var documents: [LectureDocument] = []
         let courses = ["programmingLanguages", "operatingSystems", "linearAlgebra", "biology101"]
@@ -176,5 +177,41 @@ import CoreText
                 .write(to: URL(fileURLWithPath: CommandLine.arguments[3]), options: .atomic)
         }
         print("Lecture retrieval checks passed: real PDF indexing, arithmetic precedence over retrieved examples, notebook isolation, duplicate detection, durable reopen, ranking, abstention, citation rejection, removal, corruption and cancellation.")
+    }
+
+    static func conflictChecks(in scratch: URL) async throws {
+        let base = "The fictional Luma sample is stable and has exactly seven chambers under controlled laboratory conditions."
+        for changed in [base.replacingOccurrences(of: "seven", with: "nine"),
+                        base.replacingOccurrences(of: "is stable", with: "is not stable"),
+                        "Correction: " + base.replacingOccurrences(of: "seven", with: "nine") + " This supersedes the earlier seven-chamber count.",
+                        base.replacingOccurrences(of: "under controlled laboratory conditions", with: "only under controlled laboratory conditions")] {
+            let passages = [base, changed].enumerated().map { i, text in
+                LecturePassage(id: "\(i)", documentID: "test", title: "Test", page: 1, text: text, usedOCR: false, vector: [1, 0])
+            }
+            for method in [LectureRetrieval.Method.lexical, .semantic, .hybrid] {
+                let hits = LectureRetrieval.search(passages: passages, selected: "Luma chambers", intent: "", queryVector: [1, 0], method: method)
+                precondition(hits.count == 2, "Deduplication lost a number, negation, correction or qualification")
+            }
+        }
+        var duplicate = (0..<4).map { i in
+            LecturePassage(id: "\(i)", documentID: "test", title: "Test", page: 1, text: base, usedOCR: false, vector: nil)
+        }
+        duplicate[2].page = 2; duplicate[3].documentID = "other"
+        let distinctOrigins = LectureRetrieval.search(passages: duplicate, selected: "Luma chambers", intent: "", queryVector: nil)
+        precondition(distinctOrigins.count == 3, "Collapse only identical text on the same page/document")
+
+        let url = scratch.appendingPathComponent("near-duplicate-conflict.pdf")
+        LectureEvidenceFixtures.conflictPDF(at: url)
+        let before = try Data(contentsOf: url), library = LectureLibrary(root: scratch.appendingPathComponent("conflict-library"))
+        let note = UUID(), document = try await library.importPDF(from: url, noteID: note)
+        precondition(document.passages.count == 3 && (document.textDisagreementPages ?? []).isEmpty)
+        for method in [LectureRetrieval.Method.lexical, .hybrid] {
+            let search = try await library.search(noteID: note, selected: "Luma chamber count:", intent: "", method: method)
+            precondition(search.hits.contains { $0.passage.text.contains(LectureEvidenceFixtures.seven) })
+            precondition(search.hits.contains { $0.passage.text.contains(LectureEvidenceFixtures.nine) }, "Real PDF conflict was dropped before selection")
+        }
+        let after = try Data(contentsOf: url)
+        precondition(after == before)
+        print("Conflict preservation passed: numbers, negation, corrections, qualifications, exact duplicates/provenance, and real PDF → chunks → lexical/hybrid retrieval.")
     }
 }
