@@ -19,6 +19,22 @@ import Darwin
         for course in ["programmingLanguages", "operatingSystems", "linearAlgebra", "biology101"] {
             try await library.importPDF(from: fixtures.appendingPathComponent(course + ".pdf"), noteID: noteID)
         }
+        let scopeNote = UUID()
+        try await library.importPDF(from: fixtures.appendingPathComponent("programmingLanguages.pdf"), noteID: scopeNote)
+        for mode in [CircleRetrievalMode.baseline, .structuredGap] {
+            let selected = "Static scoping: follows lexical nesting in source code.\nDynamic scoping:"
+            let context = "SCOPE - GAP PRACTICE\nPrinciples of Programming Languages"
+            let plan = try await CirclePlanner.infer(selected: selected, context: context, mode: mode)
+            precondition(!plan.action.isEmpty && plan.clarification.isEmpty)
+            if mode == .structuredGap { precondition(plan.gap?.targetText == "Dynamic scoping:") }
+            let search = try await library.search(noteID: scopeNote, selected: selected, intent: plan.intent, gap: plan.gap)
+            precondition(!search.hasUnverifiedText && !search.hits.isEmpty)
+            let result = try await LectureComposer.complete(selected: selected, context: context,
+                intent: plan.intent, action: plan.action, search: search)
+            assertVerbatim(result, search: search)
+            precondition(result.lines.contains { $0.contains("Dynamic scope resolves a name by searching active function calls") })
+            print("PPL page-3 static/dynamic selection passed in \(mode): real planner action and cited dynamic-scope excerpt.")
+        }
         for (selected, context) in [
             ("Static scope:", "Dynamic scope follows the calling sequence."),
             ("Why repeat an experiment?", "Evidence can support or challenge a hypothesis."),

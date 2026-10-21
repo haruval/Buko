@@ -18,6 +18,8 @@ final class LectureSourceTests: XCTestCase {
         app.buttons["importMatchingLecture"].tap()
         let source = app.buttons["lectureDocument"].firstMatch
         XCTAssertTrue(source.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.descendants(matching: .any)["lectureTextDisagreement"].exists,
+                       "The sample grammar notation must not quarantine the PPL lecture on iPadOS")
         app.buttons["importMatchingLecture"].tap()
         XCTAssertTrue(app.staticTexts["Attached sources · 1"].waitForExistence(timeout: 10))
         source.tap()

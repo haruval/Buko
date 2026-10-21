@@ -16,7 +16,9 @@ import CoreText
             documents.append(try await library.importPDF(from: fixtures.appendingPathComponent(course + ".pdf"), noteID: noteID))
         }
         let ids = Dictionary(uniqueKeysWithValues: zip(courses, documents.map(\.id)))
-        precondition(documents.allSatisfy { $0.pageCount == 2 && !$0.passages.isEmpty && $0.skippedPages.isEmpty })
+        precondition(documents.allSatisfy {
+            $0.pageCount == 2 && !$0.passages.isEmpty && $0.skippedPages.isEmpty && ($0.textDisagreementPages ?? []).isEmpty
+        })
         let duplicate = try await library.importPDF(from: fixtures.appendingPathComponent("biology101.pdf"), noteID: noteID)
         precondition(duplicate.id == documents.last?.id)
         let count = try await library.documents(noteID: noteID).count
@@ -169,7 +171,7 @@ import CoreText
         let chunks = LectureRetrieval.chunks(long)
         precondition(chunks.count == 3 && chunks.allSatisfy { $0.split(separator: " ").count <= 140 })
         precondition(chunks[0].contains("word139") && chunks[1].contains("word112"))
-        try await LectureExtractionChecks.run(in: scratch.appendingPathComponent("extraction-checks"))
+        try await LectureExtractionChecks.run(in: scratch.appendingPathComponent("extraction-checks"), fixtures: fixtures)
         if CommandLine.arguments.count > 3 {
             let report: [String: Any] = ["corpus": "4 original mock PDFs / 8 physical pages", "evaluation": "24 synthetic fixture-aligned questions; not held out",
                 "platform": ProcessInfo.processInfo.operatingSystemVersionString, "results": metrics]

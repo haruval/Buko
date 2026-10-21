@@ -1,10 +1,14 @@
 import Foundation
 import PDFKit
 import CoreText
+#if canImport(AppKit)
 import AppKit
+#else
+import UIKit
+#endif
 
 enum LectureExtractionChecks {
-    static func run(in scratch: URL) async throws {
+    static func run(in scratch: URL, fixtures: URL) async throws {
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let original = scratch.appendingPathComponent("mixed.pdf")
         try fixture(at: original)
@@ -91,6 +95,54 @@ enum LectureExtractionChecks {
         try checkBytes(original, equalTo: originalBytes)
         print("Lecture extraction checks passed: native/mixed/rotated pages, OCR provenance, retrieval, legacy repair/reopen, cancellation, and original-byte preservation.")
         try await disagreementChecks(in: scratch, healthyPDF: original)
+        try await sampleRepairChecks(in: scratch, fixtures: fixtures)
+    }
+
+    private static func sampleRepairChecks(in scratch: URL, fixtures: URL) async throws {
+        let original = fixtures.appendingPathComponent("programmingLanguages.pdf")
+        let bytes = try Data(contentsOf: original), pdf = PDFDocument(data: bytes)!
+        for number in 0..<pdf.pageCount {
+            let page = pdf.page(at: number)!, result = try LecturePageExtractor.extract(page)
+            precondition(!result.hasTextDisagreement && !result.usedOCR)
+            precondition(result.text == page.string!.trimmingCharacters(in: .whitespacesAndNewlines),
+                         "A successful OCR recheck must preserve the original native text")
+        }
+        // iPadOS whole-page OCR reads E | E as EIE in the grammar on PDF page 1.
+        // That v3 warning also blocked the scoping definitions on PDF page 2.
+        let root = scratch.appendingPathComponent("sample-repair"), note = UUID()
+        let library = LectureLibrary(root: root)
+        let imported = try await library.importPDF(from: original, noteID: note)
+        let copy = try await library.pdfURL(noteID: note, documentID: imported.id)
+        let index = copy.deletingLastPathComponent().appendingPathComponent("index.json")
+        var legacy = imported
+        legacy.extractionVersion = 3; legacy.textDisagreementPages = [1]
+        legacy.passages.removeAll { $0.page == 1 }
+        let legacyBytes = try JSONEncoder().encode(legacy)
+        try legacyBytes.write(to: index, options: .atomic)
+        let fresh = LectureLibrary(root: root)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await fresh.documents(noteID: note)
+        }
+        do { _ = try await cancelled.value; preconditionFailure("Cancelled v3 repair published") }
+        catch is CancellationError { }
+        try checkBytes(index, equalTo: legacyBytes)
+        let selected = "Static scoping: follows lexical nesting in source code.\nDynamic scoping:"
+        let search = try await fresh.search(noteID: note, selected: selected, intent: "Define dynamic scoping")
+        precondition(!search.hasUnverifiedText && search.hits.contains {
+            $0.passage.page == 2 && $0.passage.text.contains("Dynamic scope resolves a name by searching active function calls")
+        }, "The reported page-3 selection must resume after automatic index repair")
+        let repaired = try await fresh.documents(noteID: note).first!
+        precondition(repaired.extractionVersion == LecturePageExtractor.version && repaired.textDisagreementPages == [])
+        precondition(repaired.id == imported.id && repaired.importedAt == imported.importedAt && repaired.title == imported.title)
+        precondition(repaired.passages.contains { $0.page == 1 } && repaired.passages.contains { $0.page == 2 })
+        let repairedBytes = try Data(contentsOf: index)
+        let reopened = try await LectureLibrary(root: root).search(noteID: note, selected: selected, intent: "")
+        precondition(!reopened.hasUnverifiedText && !reopened.hits.isEmpty)
+        try checkBytes(index, equalTo: repairedBytes)
+        try checkBytes(copy, equalTo: bytes)
+        try checkBytes(original, equalTo: bytes)
+        print("PPL OCR regression passed: original native text, v3 quarantine repair, page-3 scoping retrieval, cancellation/reopen, source bytes and metadata preserved.")
     }
 
     private static func disagreementChecks(in scratch: URL, healthyPDF: URL) async throws {
@@ -107,7 +159,10 @@ enum LectureExtractionChecks {
         let matched = try LecturePageExtractor.extract(PDFDocument(url: good)!.page(at: 0)!)
         precondition(!matched.hasTextDisagreement && !matched.usedOCR && matched.text == LectureEvidenceFixtures.nine)
         for (index, pair) in [("The Luma sample has exactly 17 chambers.", "The Luma sample has exactly 19 chambers."),
-                              ("The Luma sample is stable.", "The Luma sample is not stable.")].enumerated() {
+                              ("The Luma sample is stable.", "The Luma sample is not stable."),
+                              ("The Luma threshold is -1.5 units.", "The Luma threshold is +1.5 units."),
+                              ("The Luma threshold is 1.5 units.", "The Luma threshold is 1.9 units."),
+                              ("The Luma sample can expand.", "The Luma sample cannot expand.")].enumerated() {
             let url = scratch.appendingPathComponent("layer-disagreement-\(index).pdf")
             LectureEvidenceFixtures.layeredPDF(at: url, native: pair.0, visible: pair.1)
             let result = try LecturePageExtractor.extract(PDFDocument(url: url)!.page(at: 0)!)
@@ -152,7 +207,7 @@ enum LectureExtractionChecks {
         catch is CancellationError { }
         try checkBytes(index, equalTo: legacyBytes)
         let repaired = try await fresh.documents(noteID: note).first { $0.id == document.id }!
-        precondition(repaired.extractionVersion == 3 && repaired.textDisagreementPages == [1] && repaired.passages.isEmpty)
+        precondition(repaired.extractionVersion == LecturePageExtractor.version && repaired.textDisagreementPages == [1] && repaired.passages.isEmpty)
         precondition(repaired.title == document.title && repaired.importedAt == document.importedAt)
         let repairedBytes = try Data(contentsOf: index)
         let reopened = LectureLibrary(root: root)
