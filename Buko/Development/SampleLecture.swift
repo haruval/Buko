@@ -52,7 +52,14 @@ enum SampleLecture: String, CaseIterable, Identifiable {
          "Deadlock: threads wait forever for resources.", "Four necessary conditions for deadlock:", "", "",
          "Virtual memory gives each process an", "independent view of its address space.",
          "Page fault: what happens next?", "", "",
-         "FIFO vs LRU page replacement:", "", "Explain why locality matters."]
+         "FIFO vs LRU page replacement:", "", "Explain why locality matters."],
+        ["CONCURRENCY - GAP PRACTICE", "Operating Systems", "",
+         "Process: owns an address space and resources.",
+         "Thread:", "", "", "",
+         "Mutex: protects exclusive ownership of a critical section.",
+         "Semaphore:", "", "", "",
+         "Process vs thread:", "", "", "",
+         "Mutex vs semaphore:", "", "", ""]
     ]
     static let linearAlgebraPages: [[String]] = [
         ["LINEAR ALGEBRA", "Lecture 08 - matrix products", "",
@@ -83,6 +90,10 @@ enum SampleLecture: String, CaseIterable, Identifiable {
          "Question: does light affect plant growth?", "Prediction: plants with more light grow taller.",
          "Independent variable:", "", "Dependent variable:", "", "",
          "Keep water, soil, and plant type the same.", "Why do we need a control group?", "", "",
-         "Why repeat an experiment?", "", "Evidence can support or challenge a hypothesis."]
+         "Why repeat an experiment?", "", "Evidence can support or challenge a hypothesis."],
+        ["BIOLOGY - GAP PRACTICE", "Introduction to Biology", "",
+         "Independent variable: the light given to a plant.",
+         "Dependent variable:", "", "", "", "",
+         "Prokaryotic vs eukaryotic cells:", "", "", "", ""]
     ]
 }

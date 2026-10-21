@@ -6,7 +6,12 @@ import PencilKit
         precondition(Set(SampleLecture.allCases.map(\.storageKey)).count == SampleLecture.allCases.count,
                      "Each fixture must reset independently")
         for lecture in SampleLecture.allCases {
-            precondition(lecture.pages.count == 2)
+            let expectedPages = switch lecture {
+            case .programmingLanguages: 4
+            case .operatingSystems, .biology101: 3
+            case .linearAlgebra: 2
+            }
+            precondition(lecture.pages.count == expectedPages)
             let drawing = lecture.drawing()
             precondition(!drawing.strokes.isEmpty)
             for index in lecture.pages.indices {
@@ -23,6 +28,6 @@ import PencilKit
         let symbols = LectureHandwriting.drawing(pages: [["6789[]/"]])
         let unknowns = LectureHandwriting.drawing(pages: [["???????"]])
         precondition(symbols.strokes.count != unknowns.strokes.count)
-        print("Sample lecture checks passed: separate identities, two-page ink bounds, serialization, and math glyphs.")
+        print("Sample lecture checks passed: separate identities, lecture/practice page ink bounds, serialization, and math glyphs.")
     }
 }
