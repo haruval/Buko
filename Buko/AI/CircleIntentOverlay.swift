@@ -92,6 +92,16 @@ struct CircleIntentOverlay: View {
                     }
                     pipelineSection("1. Intent Guess", text: state.intent, identifier: "intentGuess")
                     pipelineSection("2. Action that should be taken", text: state.action, identifier: "intentAction")
+                    if let gap = state.missingInformation {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Missing information · experimental").font(.subheadline.weight(.semibold))
+                            Text(gap.informationNeeds.joined(separator: " · ")).font(.caption)
+                            if !gap.alreadyCovered.isEmpty {
+                                Text("Already written: " + gap.alreadyCovered.map(\.quote).joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.accessibilityIdentifier("missingInformationPlan")
+                    }
                     VStack(alignment: .leading, spacing: 6) {
                         Label(state.sourceLabel, systemImage: state.citations.isEmpty ? "info.circle" : "doc.text.magnifyingglass")
                             .font(.subheadline.weight(.semibold)).accessibilityIdentifier("autofillSource")
@@ -155,6 +165,8 @@ struct CircleIntentOverlay: View {
                             .font(.subheadline).textSelection(.enabled).accessibilityIdentifier("recognizedHandwriting")
                         Text("On-device model · \(state.elapsed, specifier: "%.1f") s")
                             .font(.caption).accessibilityIdentifier("modelTiming")
+                        Text(state.retrievalMode == .baseline ? "Original retrieval" : "Missing-information retrieval · experimental")
+                            .font(.caption2)
                         Text("Intent \(state.intentSeconds, specifier: "%.1f") s · Proposal \(state.proposalSeconds, specifier: "%.1f") s · Recognition \(state.recognitionSeconds, specifier: "%.1f") s")
                             .font(.caption2)
                         if !state.retrievalMethod.isEmpty {

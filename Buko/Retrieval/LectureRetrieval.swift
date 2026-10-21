@@ -42,6 +42,7 @@ nonisolated struct LectureSearch: Sendable {
     var semanticAvailable: Bool
     var seconds: Double
     var hasUnverifiedText = false
+    var gapTrace: GapRetrievalTrace? = nil
 }
 
 nonisolated enum LectureRetrieval {

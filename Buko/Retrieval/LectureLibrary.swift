@@ -84,7 +84,8 @@ actor LectureLibrary {
         try documents(noteID: noteID).map { "\($0.id):extraction-\($0.extractionVersion ?? 1)" }.sorted().joined(separator: ":")
     }
 
-    func search(noteID: UUID, selected: String, intent: String, method: LectureRetrieval.Method = .hybrid) throws -> LectureSearch {
+    func search(noteID: UUID, selected: String, intent: String, method: LectureRetrieval.Method = .hybrid,
+                gap: ValidatedGapPlan? = nil) throws -> LectureSearch {
         let start = ProcessInfo.processInfo.systemUptime
         let documents = try documents(noteID: noteID)
         // A discarded page could contain a correction/conflict. Do not answer from
@@ -105,9 +106,21 @@ actor LectureLibrary {
                 passages[index].sentenceVectors = sentenceVectors(passages[index].text, embedding: embedding)
             }
         }
-        let hits = LectureRetrieval.search(passages: passages, selected: selected, intent: intent, queryVector: vector, method: method)
+        var trace: GapRetrievalTrace?
+        let hits: [LectureHit]
+        if let gap {
+            let result = GapRetrieval.search(passages: passages, selected: selected, intent: intent,
+                originalVector: vector, targetVector: embedding?.vector(for: String(gap.targetText.prefix(1000))),
+                gap: gap, componentVectors: gap.componentQueries.map { embedding?.vector(for: String($0.prefix(1000))) },
+                method: method)
+            hits = result.hits; trace = result.trace
+        } else {
+            hits = LectureRetrieval.search(passages: passages, selected: selected, intent: intent, queryVector: vector, method: method)
+        }
+        try Task.checkCancellation()
         return LectureSearch(hits: hits, documentCount: documents.count, revision: try revision(noteID: noteID),
-                             semanticAvailable: vector != nil, seconds: ProcessInfo.processInfo.systemUptime - start)
+                             semanticAvailable: vector != nil, seconds: ProcessInfo.processInfo.systemUptime - start,
+                             gapTrace: trace)
     }
 
     /// Stages the PDF and complete index together, then atomically renames the directory.

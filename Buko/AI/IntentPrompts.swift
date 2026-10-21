@@ -3,7 +3,7 @@ import FoundationModels
 
 /// Edit prompts, examples, limits and schemas here; rebuild to apply changes.
 /// Recognition never reads fixture authoring text or expected answers.
-enum IntentPrompts {
+nonisolated enum IntentPrompts {
     static let intentTokenLimit = 420
     static let timeoutSeconds: Double = 90
     static let selectedCharacterLimit = 2400
@@ -68,7 +68,7 @@ enum IntentPrompts {
 }
 
 @Generable
-struct InferredCircleIntent {
+nonisolated struct InferredCircleIntent {
     @Guide(description: "One specific sentence beginning The user wants to, identifying the missing topic or problem.")
     var intent: String
     @Guide(description: "The concrete action, output format and placement, naming the target heading. No answer content yet.")

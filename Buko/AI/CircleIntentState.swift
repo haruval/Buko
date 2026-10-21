@@ -33,6 +33,8 @@ final class CircleIntentState {
     var selectionBounds = CGRect.zero
     var recognizedText = ""
     var nearbyContext = ""
+    var retrievalMode = CircleRetrievalMode.baseline
+    var missingInformation: MissingInformationPlan?
     var intent = ""
     var action = ""
     var proposedLines: [String] = []
@@ -101,6 +103,7 @@ final class CircleIntentState {
         citations = []; sourceLabel = "Determining source…"; sourceDetail = ""
         retrievalSeconds = 0; retrievedPassageCount = 0; retrievalMethod = ""
         nearbyContext = ""
+        missingInformation = nil
         modelStartedAt = nil
         action = ""; proposedLines = []; intentSeconds = 0; proposalSeconds = 0; recognitionSeconds = 0; elapsed = 0
         phase = .idle; textBounds = []; popupBounds = .zero; popupAnchor = nil
@@ -146,6 +149,8 @@ final class CircleIntentState {
         }
         task?.cancel(); timeout?.cancel()
         let id = UUID(); requestID = id
+        retrievalMode = UserDefaults.standard.bool(forKey: CircleRetrievalMode.preferenceKey) ? .structuredGap : .baseline
+        let mode = retrievalMode
         phase = .recognizing; issue = nil; intent = ""; evidence = ""; clarification = ""
         let started = ProcessInfo.processInfo.systemUptime
         task = Task { [weak self] in
@@ -198,22 +203,19 @@ final class CircleIntentState {
             modelStartedAt = modelStarted
             var proposalStarted: Double?
             do {
-                let session = LanguageModelSession(model: model, instructions: IntentPrompts.instructions)
-                let response = try await session.respond(
-                    to: IntentPrompts.request(selected: recognizedText, context: context),
-                    generating: InferredCircleIntent.self,
-                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: IntentPrompts.intentTokenLimit))
+                let plan = try await CirclePlanner.infer(selected: recognizedText, context: context, mode: mode, model: model)
                 guard requestID == id, !Task.isCancelled else { return }
-                intent = response.content.intent
-                action = response.content.action
+                intent = plan.intent
+                action = plan.action
+                missingInformation = plan.gap?.value
                 intentSeconds = ProcessInfo.processInfo.systemUptime - modelStarted
                 elapsed = intentSeconds
-                evidence = response.content.evidence
-                clarification = response.content.clarification
+                evidence = plan.evidence
+                clarification = plan.clarification
                 if clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     phase = .retrieving
                     guard let noteID else { throw LectureLibrary.LibraryError.missingDocument }
-                    let search = try await LectureLibrary.shared.search(noteID: noteID, selected: recognizedText, intent: intent)
+                    let search = try await LectureLibrary.shared.search(noteID: noteID, selected: recognizedText, intent: intent, gap: plan.gap)
                     guard requestID == id, !Task.isCancelled else { return }
                     retrievalSeconds = search.seconds
                     retrievedPassageCount = search.hits.count
