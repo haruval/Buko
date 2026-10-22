@@ -75,10 +75,9 @@ nonisolated enum AutofillLayout {
             guard b.minY.isFinite, b.maxY.isFinite else { throw LayoutError.invalidGeometry }
             if b.minY <= split && b.maxY > split { split = b.maxY }
         }
-        let left = anchor?.x ?? max(PageGeometry.pageOriginX + margin,
-            min(selectedBounds.minX, PageGeometry.pageOriginX + PageGeometry.pageWidth * 0.35))
+        let continuationLeft = max(PageGeometry.pageOriginX + margin, anchor?.row.minX
+            ?? min(selectedBounds.minX, PageGeometry.pageOriginX + PageGeometry.pageWidth * 0.35))
         let right = PageGeometry.pageOriginX + PageGeometry.pageWidth - margin
-        let width = right - left
         var decoded: [String: PKDrawing] = [:]
         for (key, value) in samples { decoded[key] = try PKDrawing(data: value.drawingData) }
         let personal = Set(decoded.keys)
@@ -92,6 +91,11 @@ nonisolated enum AutofillLayout {
         let sampleBottom = max(126, used.map { $0.bounds.maxY }.max() ?? 126)
         let inkHeight = (sampleBottom - sampleTop) * scale
         let lineHeight = max(anchor?.lineSpacing ?? style.lineSpacing, inkHeight + size * 0.35)
+        let proposedY = anchor?.top ?? split + size * 0.5
+        let onPaperY = try onPaper(proposedY, height: inkHeight)
+        let startsInline = anchor != nil && abs(onPaperY - proposedY) < 0.001
+        let firstLeft = startsInline ? anchor!.x : continuationLeft
+        let firstY = startsInline ? onPaperY : try onPaper(split + size * 0.5, height: inkHeight)
         let space = size * 0.45
         struct Unit { let text: String; let glyph: PKDrawing?; let advance: CGFloat; let personal: Bool }
         func unit(_ key: String) -> Unit {
@@ -109,19 +113,29 @@ nonisolated enum AutofillLayout {
             return word.map { unit(String($0)) }
         }
         var rows: [[Unit]] = []
+        // Only the first line shares the heading's row. Every continuation,
+        // paragraph and new-page line returns to the heading's left edge.
+        func availableWidth() -> CGFloat { right - (rows.isEmpty ? firstLeft : continuationLeft) }
         for paragraph in text.components(separatedBy: .newlines) {
             var line: [Unit] = [], used: CGFloat = 0
             for word in paragraph.split(whereSeparator: \.isWhitespace).map(String.init) {
                 var letters = units(word)
+                let wordWidth = letters.reduce(CGFloat.zero) { $0 + $1.advance }
+                if !line.isEmpty && used + space + wordWidth > availableWidth() {
+                    rows.append(line); line = []; used = 0
+                }
+                // Don't break a word just to occupy the short space after a
+                // long heading. Start it intact on the full-width line below.
+                if line.isEmpty && rows.isEmpty && firstLeft > continuationLeft && wordWidth > availableWidth() {
+                    rows.append([])
+                }
                 // A whole-word sample wider than the column yields to individual
                 // glyphs; its shape is never squeezed horizontally to force a fit.
-                if letters.contains(where: { $0.advance > width }) { letters = word.map { unit(String($0)) } }
-                let wordWidth = letters.reduce(CGFloat.zero) { $0 + $1.advance }
-                if !line.isEmpty && used + space + wordWidth > width { rows.append(line); line = []; used = 0 }
+                if letters.contains(where: { $0.advance > availableWidth() }) { letters = word.map { unit(String($0)) } }
                 if !line.isEmpty { line.append(Unit(text: " ", glyph: nil, advance: space, personal: false)); used += space }
                 for letter in letters {
-                    if used + letter.advance > width && !line.isEmpty { rows.append(line); line = []; used = 0 }
-                    guard letter.advance <= width else { throw LayoutError.invalidGeometry }
+                    if used + letter.advance > availableWidth() && !line.isEmpty { rows.append(line); line = []; used = 0 }
+                    guard letter.advance <= availableWidth() else { throw LayoutError.invalidGeometry }
                     line.append(letter); used += letter.advance
                 }
             }
@@ -129,12 +143,15 @@ nonisolated enum AutofillLayout {
         }
         var lines: [Line] = [], ink: [PKStroke] = []
         var sampledCount = 0, fallbackCount = 0
-        var y = anchor?.top ?? split + size * 0.5
+        var y = firstY
         var bottom: CGFloat = y
-        for row in rows {
+        for (index, row) in rows.enumerated() {
             y = try onPaper(y, height: inkHeight)
+            let left = index == 0 ? firstLeft : continuationLeft
             let rowWidth = row.reduce(CGFloat.zero) { $0 + $1.advance }
-            lines.append(Line(text: row.map(\.text).joined(), frame: CGRect(x: left, y: y, width: rowWidth, height: inkHeight)))
+            if !row.isEmpty {
+                lines.append(Line(text: row.map(\.text).joined(), frame: CGRect(x: left, y: y, width: rowWidth, height: inkHeight)))
+            }
             var x = left
             for letter in row {
                 defer { x += letter.advance }
@@ -150,6 +167,7 @@ nonisolated enum AutofillLayout {
             }
             bottom = y + inkHeight + size * 0.5
             y += lineHeight
+            if index == 0 { y = max(y, split + size * 0.5) }
         }
         let lower = drawing.strokes.enumerated().filter { $0.element.renderBounds.minY > split }
             .sorted { $0.element.renderBounds.minY < $1.element.renderBounds.minY }

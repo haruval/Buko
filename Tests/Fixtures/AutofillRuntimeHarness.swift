@@ -29,9 +29,18 @@ private struct InsertionHarnessView: UIViewRepresentable {
     let session = CanvasSession()
     var coordinator: NoteCanvas.Coordinator?
     var failSave = false
-    let text = "groups tokens into a syntax tree.\nThe parser checks how tokens fit the grammar."
-    let polygon = [CGPoint(x: 1060, y: 180), CGPoint(x: 1260, y: 180),
-                   CGPoint(x: 1260, y: 222), CGPoint(x: 1060, y: 222)]
+    var isFlowExample: Bool { ProcessInfo.processInfo.arguments.contains("--flow-preview") }
+    var heading: String { isFlowExample ? "Precedence vs associativity:" : "Parsing:" }
+    var text: String {
+        isFlowExample
+            ? "Precedence determines which operators bind more tightly: multiplication typically binds more tightly than addition.\nAssociativity resolves grouping among operators of the same precedence. Left-associative subtraction groups a - b - c as (a - b) - c."
+            : "groups tokens into a syntax tree.\nThe parser checks how tokens fit the grammar."
+    }
+    var polygon: [CGPoint] {
+        isFlowExample
+            ? [CGPoint(x: 1060, y: 120), CGPoint(x: 1530, y: 120), CGPoint(x: 1530, y: 182), CGPoint(x: 1060, y: 182)]
+            : [CGPoint(x: 1060, y: 180), CGPoint(x: 1260, y: 180), CGPoint(x: 1260, y: 222), CGPoint(x: 1060, y: 222)]
+    }
 
     init(host: CanvasHostView) {
         self.host = host
@@ -39,9 +48,11 @@ private struct InsertionHarnessView: UIViewRepresentable {
         note = Note(title: "Isolated autofill validation")
         note.pageLayoutVersion = 2
         try! note.setPages([NotebookPage()])
-        note.drawingData = LectureHandwriting.drawing(pages: [[
+        let fixtureLines = ProcessInfo.processInfo.arguments.contains("--flow-preview")
+            ? ["Precedence vs associativity:", "Keep these existing notes intact."] : [
             "Lexical analysis: groups characters into tokens.", "Parsing:", "Type checking:",
-            "Keep these existing notes intact.", "An expression can have a type."]]).dataRepresentation()
+            "Keep these existing notes intact.", "An expression can have a type."]
+        note.drawingData = LectureHandwriting.drawing(pages: [fixtureLines]).dataRepresentation()
         container.mainContext.insert(note); try! container.mainContext.save()
         original = AutofillDocument(note)
         host.circleIntent.noteID = note.id
@@ -71,10 +82,10 @@ private struct InsertionHarnessView: UIViewRepresentable {
         host.circleIntent.cancel()
         let revision = try await LectureLibrary.shared.revision(noteID: note.id)
         let proposal = AutofillProposal(requestID: UUID(), noteID: note.id, capturedAt: .now,
-            selectionPolygon: polygon, selectedText: "Parsing:", sourceRevision: source ?? revision,
+            selectionPolygon: polygon, selectedText: heading, sourceRevision: source ?? revision,
             content: AutofillContent(lines: text.components(separatedBy: .newlines).map {
                 .init(text: $0, citationIndices: [])
-            }, origin: .lectureDraft), citations: [], insertionTarget: "Parsing:")
+            }, origin: .lectureDraft), citations: [], insertionTarget: heading)
         host.circleIntent.insertion.capture()
         host.circleIntent.validationPreview(proposal, scale: host.canvas.zoomScale, offset: host.canvas.contentOffset)
         for _ in 0..<200 {

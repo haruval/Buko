@@ -107,11 +107,54 @@ import SwiftData
         precondition(inline.letterHeight < 35 && inline.letterHeight > 15, "Match note size")
         let wrapped = try AutofillLayout.stage(text: String(repeating: text + " ", count: 12), drawing: source,
             selection: circle, pageCount: 1, samples: [:], selectedText: "Lexical analysis: groups characters into tokens.\nParsing:", target: "Parsing:")
-        precondition(wrapped.lines.count > 1 && wrapped.lines.allSatisfy { $0.frame.minX == inline.lines[0].frame.minX })
+        precondition(wrapped.lines.count > 1 && wrapped.lines[0].frame.minX == inline.lines[0].frame.minX)
+        precondition(wrapped.lines.dropFirst().allSatisfy { $0.frame.minX == rows[1].bounds.minX },
+                     "Wrapped lines return to the heading's left edge")
         for line in wrapped.lines { precondition(line.frame.maxX <= PageGeometry.pageOriginX + PageGeometry.pageWidth - AutofillLayout.margin + 0.01) }
         let lastOriginalRow = rows[2]
         let firstMoved = wrapped.existing.strokes.first { lastOriginalRow.strokes.map(\.id).contains($0.id) }!
         precondition(firstMoved.renderBounds.minY > wrapped.bounds.maxY, "Later rows must clear wrapped definitions")
+        let comparison = "Precedence vs associativity:"
+        let comparisonInk = LectureHandwriting.drawing(pages: [[comparison]])
+        let headingBounds = comparisonInk.bounds
+        let headingCircle = [CGPoint(x: headingBounds.minX - 10, y: headingBounds.minY - 10),
+            CGPoint(x: headingBounds.maxX + 10, y: headingBounds.minY - 10),
+            CGPoint(x: headingBounds.maxX + 10, y: headingBounds.maxY + 10),
+            CGPoint(x: headingBounds.minX - 10, y: headingBounds.maxY + 10)]
+        let definition = "Precedence determines which operators bind more tightly: multiplication typically binds more tightly than addition.\nAssociativity resolves grouping among operators of the same precedence. Left-associative subtraction groups a - b - c as (a - b) - c."
+        let fullWidth = try AutofillLayout.stage(text: definition, drawing: comparisonInk, selection: headingCircle,
+            pageCount: 1, samples: [:], selectedText: comparison)
+        let rightMargin = PageGeometry.pageOriginX + PageGeometry.pageWidth - AutofillLayout.margin
+        precondition(fullWidth.lines[0].frame.minX > headingBounds.maxX)
+        precondition(fullWidth.lines.dropFirst().allSatisfy { $0.frame.minX == headingBounds.minX })
+        precondition(fullWidth.lines.dropFirst().contains { $0.frame.width > rightMargin - fullWidth.lines[0].frame.minX },
+                     "Continuations must use the newly available width, not merely shift a narrow column left")
+        precondition(fullWidth.lines.map(\.text).joined(separator: " ") == definition.replacingOccurrences(of: "\n", with: " "))
+        let crossingInk = stroke(headingBounds.minX, headingBounds.maxY - 5, 60, 160)
+        let aroundDiagram = try AutofillLayout.stage(text: definition,
+            drawing: PKDrawing(strokes: comparisonInk.strokes + [crossingInk]), selection: headingCircle,
+            pageCount: 1, samples: [:], selectedText: comparison)
+        precondition(aroundDiagram.lines[1].frame.minY > crossingInk.renderBounds.maxY,
+                     "Full-width continuation must clear intact ink crossing the heading row")
+        // The same rule survives a page break and explicit paragraph boundary.
+        let offset = CGAffineTransform(translationX: 0, y: 1_070)
+        let nearPageEnd = PKDrawing(strokes: comparisonInk.strokes.map { original in
+            var copy = original; copy.transform = copy.transform.concatenating(offset); return copy
+        })
+        let acrossPages = try AutofillLayout.stage(text: definition, drawing: nearPageEnd,
+            selection: headingCircle.map { $0.applying(offset) }, pageCount: 1, samples: [:], selectedText: comparison)
+        precondition(acrossPages.pageCount > 1)
+        precondition(acrossPages.lines.dropFirst().allSatisfy { $0.frame.minX == headingBounds.minX })
+        for line in acrossPages.lines {
+            let page = NotebookPaging.rect(for: Int(line.frame.minY / NotebookPaging.pageStride))
+            precondition(page.insetBy(dx: AutofillLayout.margin, dy: AutofillLayout.margin).contains(line.frame))
+        }
+        let longWord = "pneumonoultramicroscopicsilicovolcanoconiosis"
+        let wholeWord = try AutofillLayout.stage(text: longWord, drawing: comparisonInk, selection: headingCircle,
+            pageCount: 1, samples: [:], selectedText: comparison)
+        precondition(wholeWord.lines.count == 1 && wholeWord.lines[0].text == longWord)
+        precondition(wholeWord.lines[0].frame.minX == headingBounds.minX && wholeWord.lines[0].frame.minY > headingBounds.maxY,
+                     "A word too wide for the inline slot should move intact below the heading")
         let crowded = PKDrawing(strokes: source.strokes + [stroke(rows[1].bounds.maxX + 50, rows[1].bounds.minY, 100, 15)])
         precondition(AutofillTypography.anchor(drawing: crowded, selection: circle, selectedText: "Parsing:", target: "Parsing:") == nil)
         let attached = stroke(100, 60, 150, 30)
