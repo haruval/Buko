@@ -5,6 +5,7 @@ import SwiftUI
 
 @Observable @MainActor
 final class CircleIntentState {
+    let insertion = AutofillInsertionState()
     enum Phase { case idle, tracing, recognizing, inferring, retrieving, proposing, drafting, finished }
     var phase = Phase.idle
     var noteID: UUID?
@@ -36,7 +37,9 @@ final class CircleIntentState {
     var missingInformation: MissingInformationPlan?
     var intent = ""
     var action = ""
-    private(set) var proposal: AutofillProposal?
+    private(set) var proposal: AutofillProposal? {
+        didSet { if let proposal { insertion.prepare(proposal) } }
+    }
     var draftDetail = ""
     var draftingSeconds: Double = 0
     var arithmeticChecked = false
@@ -103,8 +106,12 @@ final class CircleIntentState {
 
     func positionPopup(size: CGSize, viewport: CGSize) {
         if popupAnchor == nil {
+            var occupied = selectionBounds
+            if let preview = insertion.layout {
+                occupied = occupied.union(PageGeometry.screenRect(preview.bounds, scale: captureScale, offset: captureOffset))
+            }
             let initial = CirclePopupPlacement.place(size: size, viewport: viewport,
-                region: selectionBounds.applying(projection))
+                region: occupied.applying(projection))
             popupAnchor = initial.origin.applying(projection.inverted())
         }
         if let popupAnchor {
@@ -112,7 +119,10 @@ final class CircleIntentState {
         }
     }
 
+    func resetPopupAnchor() { popupAnchor = nil }
+
     func cancel() {
+        insertion.cancel()
         requestID = UUID()
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
@@ -147,6 +157,7 @@ final class CircleIntentState {
 
     func analyze(drawing: PKDrawing, polygon: [CGPoint], screenPolygon: [CGPoint], scale: CGFloat, offset: CGPoint) {
         guard !hasPreview else { return }
+        insertion.capture()
         captureScale = scale; captureOffset = offset; projection = .identity
         selectionBounds = CircleGeometry.path(screenPolygon).boundingBoxOfPath
         closedAt = Date.timeIntervalSinceReferenceDate
@@ -284,7 +295,8 @@ final class CircleIntentState {
                             if let content = draft.content {
                                 proposal = AutofillProposal(requestID: id, noteID: noteID, capturedAt: capturedAt,
                                     selectionPolygon: polygon, selectedText: recognizedText, sourceRevision: search.revision,
-                                    content: content, citations: completion.citations)
+                                    content: content, citations: completion.citations,
+                                    insertionTarget: gap.value.targets.count == 1 ? gap.value.targets[0].quote : nil)
                             }
                         } else {
                             draftDetail = completion.explanation

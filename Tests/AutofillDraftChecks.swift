@@ -10,11 +10,32 @@ import Darwin
 
     @MainActor static func main() async throws {
         setbuf(stdout, nil)
+        let heading = "Lexical analysis: groups characters into tokens.\nParsing:"
+        precondition(AutofillWriter.inlineContinuation("Parsing checks the grammar.", selected: heading, gap: nil) == "checks the grammar.")
+        precondition(AutofillWriter.inlineContinuation("Parsing: checks the grammar.", selected: heading, gap: nil) == "checks the grammar.")
+        for sentence in ["Parsing and lexing work together.", "Parsing errors are reported.", "Parsingness is unrelated."] {
+            precondition(AutofillWriter.inlineContinuation(sentence, selected: heading, gap: nil) == sentence)
+        }
+        precondition(AutofillWriter.inlineContinuation("Parsing is different.", selected: "Parsing vs lexing:", gap: nil) == "Parsing is different.")
         policyChecks()
         try plannerChecks()
         guard CommandLine.arguments.contains("--live") else { return }
         guard #available(macOS 27, *), case .available = SystemLanguageModel.default.availability else {
             print("SKIPPED: local model unavailable"); exit(77)
+        }
+        if CommandLine.arguments.contains("--inline-only") {
+            let selection = "Lexical analysis: groups characters into tokens.\nParsing:"
+            let search = makeSearch(["Parsing checks the token sequence against a grammar and builds a syntax tree."])
+            let evidence = selectedEvidence(search, ids: ["P1"])
+            let gap = try CirclePlanner.explicitPlan(in: GapTranscript(selected: selection, context: ""), mode: .structuredGap)!.gap!.value
+            let draft = try await AutofillWriter.draft(selected: selection, context: "", intent: "Define Parsing.",
+                action: "Complete the unfinished heading.", gap: gap, evidence: evidence, search: search)
+            guard let content = draft.content else { fatalError(draft.explanation) }
+            print("LIVE INLINE DEFINITION: \(content.text)")
+            let line = content.lines[0].text.lowercased()
+            precondition(!line.hasPrefix("parsing") && line.contains("grammar") && !line.contains("groups characters"))
+            precondition(content.lines.allSatisfy { !$0.citationIndices.isEmpty })
+            return
         }
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let library = LectureLibrary(root: root)

@@ -6,7 +6,7 @@ nonisolated enum AutofillDraftStatus { case ready, insufficientEvidence }
 
 @Generable
 nonisolated struct AutofillDraftLine {
-    @Guide(description: "Only the note wording, directly answering the unfinished target. No P IDs or bracketed citations: put those in sourceIDs instead. Do not separately define a related concept or summarize neighboring topics. Preserve necessary qualifications. Keep each line under 400 characters.")
+    @Guide(description: "Only the missing note wording. For an unfinished colon heading, begin with its definition or verb phrase (e.g. checks...), NEVER repeat the heading name as the subject. Otherwise answer the target normally. No P IDs or bracketed citations: put those in sourceIDs instead. Do not separately define a related concept or summarize neighboring topics. Preserve necessary qualifications. Keep each line under 400 characters.")
     var text: String
     @Guide(description: "One or more approved source IDs such as P1, without brackets. Required even though the text has no citation marker. These passages must support every claim in this line.", .maximumCount(4))
     var sourceIDs: [String]
@@ -56,6 +56,12 @@ enum AutofillWriter {
     even when the action hint asks for two. Examples belong only when requested
     or necessary to answer an example-seeking task. Preserve all necessary
     qualifications; brevity is not permission to omit a caveat or contradiction.
+    Match the surrounding note's sentence pattern. For a single unfinished
+    heading ending in a colon, the first line will follow that colon. Do not
+    repeat its heading or subject. When a neighboring definition starts with a
+    verb after its colon, use that same continuation style (for example, "checks
+    ..." rather than repeating the target name). This affects wording only;
+    never infer an answer from the neighboring definition or copy its facts.
     Write plain note text, without a heading or preamble; at most six lines for
     an explicit list. Do not invent examples, mechanisms or facts.
     Preserve exact entities, numbers, negation, scope, uncertainty, and causal
@@ -146,7 +152,7 @@ enum AutofillWriter {
         guard (1...6).contains(generated.lines.count) else { return invalidDraft() }
         var lines: [AutofillContent.Line] = []
         for line in generated.lines {
-            let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            var text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty, text.count <= 400, !text.contains("\n"), !text.contains("\r"),
                   !LectureGroundingPolicy.containsInstructionOverride(text),
                   (1...4).contains(line.sourceIDs.count), Set(line.sourceIDs).count == line.sourceIDs.count else { return invalidDraft() }
@@ -156,12 +162,45 @@ enum AutofillWriter {
                       let index = evidence.citations.firstIndex(where: { $0.passage.id == hit.id }) else { return invalidDraft() }
                 indices.append(index)
             }
+            if lines.isEmpty { text = inlineContinuation(text, selected: selected, gap: gap) }
             lines.append(.init(text: text, citationIndices: indices.sorted()))
         }
         guard lines.reduce(0, { $0 + $1.text.count }) <= 1800,
               Set(lines.map { CitationValidation.normalized($0.text).lowercased() }).count == lines.count else { return invalidDraft() }
         return AutofillDraftResult(content: AutofillContent(lines: lines, origin: .lectureDraft),
             explanation: "AI-written draft from the lecture sources below. Review the wording and citations before using it.")
+    }
+
+    /// Deterministic punctuation/subject elision for an exact colon heading. The
+    /// heading still supplies the subject on paper. Never rewrite a compound
+    /// subject, an arbitrary noun phrase, a comparison, or a later sentence.
+    static func inlineContinuation(_ text: String, selected: String, gap: MissingInformationPlan?) -> String {
+        let targets: [String]
+        if let gap {
+            guard gap.operation == .define else { return text }
+            targets = gap.targets.map(\.quote)
+        } else if case .bound(let binding) = GapSyntaxBinding.inspect(GapTranscript(selected: selected, context: "")), binding.operation == .define {
+            targets = binding.targets.map(\.quote)
+        } else { return text }
+        guard targets.count == 1 else { return text }
+        let quote = targets[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard quote.hasSuffix(":"), let match = text.range(of: String(quote.dropLast()), options: [.anchored, .caseInsensitive]),
+              match.upperBound < text.endIndex else { return text }
+        let boundary = text[match.upperBound]
+        guard boundary == ":" || boundary.isWhitespace else { return text }
+        var remainder = String(text[match.upperBound...]).trimmingCharacters(in: .whitespaces)
+        if remainder.hasPrefix(":") {
+            remainder = String(remainder.dropFirst()).trimmingCharacters(in: .whitespaces)
+            return remainder.isEmpty ? text : remainder
+        }
+        // These finite verb forms unambiguously continue the named heading in
+        // this narrow definition template. Unknown grammar keeps the full text.
+        let verbs: Set<String> = ["is", "are", "was", "were", "means", "refers", "uses", "checks", "groups",
+            "organizes", "builds", "describes", "defines", "determines", "represents", "involves", "converts",
+            "maps", "returns", "takes", "produces", "consists", "follows", "searches", "binds", "evaluates"]
+        guard let first = remainder.split(whereSeparator: \.isWhitespace).first,
+              verbs.contains(first.lowercased()) else { return text }
+        return remainder
     }
 
     static func prompt(selected: String, context: String, intent: String, action: String,

@@ -11,23 +11,30 @@ struct CircleIntentOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sourcePreview: LecturePDFDestination?
     @State private var sourceError: String?
+    @State private var showsDetails = false
 
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 if state.phase != .idle {
                     jelly(in: geometry.size)
+                        .opacity(state.insertion.layout == nil ? 1 : 0)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: state.insertion.layout != nil)
                         .allowsHitTesting(false)
                     if state.phase == .finished || state.processing {
                         popup
                             .frame(width: state.popupBounds.isEmpty
                                    ? CirclePopupPlacement.preferredWidth(viewport: geometry.size, region: state.selectionBounds.applying(state.projection))
-                                   : min(state.popupBounds.width, geometry.size.width - 32), height: min(600, geometry.size.height - 160))
+                                   : min(state.popupBounds.width, geometry.size.width - 32), height: min(popupHeight, geometry.size.height - 160))
                             .background {
                                 GeometryReader { card in
                                     Color.clear.onAppear { positionPopup(card.size, viewport: geometry.size) }
                                         .onChange(of: card.size) { _, size in positionPopup(size, viewport: geometry.size) }
                                         .onChange(of: geometry.size) { _, _ in positionPopup(card.size, viewport: geometry.size) }
+                                        .onChange(of: state.insertion.layout?.bounds) { _, _ in
+                                            state.resetPopupAnchor()
+                                            positionPopup(card.size, viewport: geometry.size)
+                                        }
                                 }
                             }
                             .offset(x: state.popupBounds.minX, y: state.popupBounds.minY)
@@ -39,6 +46,7 @@ struct CircleIntentOverlay: View {
         }
         .ignoresSafeArea()
         .sheet(item: $sourcePreview) { LecturePDFView(destination: $0) }
+
     }
 
     private func jelly(in viewport: CGSize) -> some View {
@@ -76,12 +84,19 @@ struct CircleIntentOverlay: View {
             HStack {
                 Text("Autofill preview").font(.headline)
                 Spacer(minLength: 8)
+                if state.proposal != nil {
+                    Button { showsDetails.toggle() } label: {
+                        Image(systemName: showsDetails ? "chevron.down" : "info.circle").frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain).accessibilityLabel(showsDetails ? "Hide autofill details" : "Show autofill details and sources")
+                }
                 Button(action: state.cancel) {
                     Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(.rect)
                 }
                 .buttonStyle(.plain).accessibilityLabel("Dismiss intent")
             }
-            ScrollView {
+            if state.proposal == nil || showsDetails {
+              ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if state.processing {
                         HStack(spacing: 10) {
@@ -164,20 +179,22 @@ struct CircleIntentOverlay: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollBounceBehavior(.basedOnSize)
-            Button(action: state.cancel) {
-                Text("okay")
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
+            } else {
+                Text("Review the green handwriting in your note.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .bukoGlass(interactive: true)
-            .accessibilityIdentifier("acknowledgeAutofill")
-            .accessibilityHint("Closes the preview. Your note is unchanged.")
+            insertionControls
         }
         .padding(16)
         .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.28)), in: .rect(cornerRadius: 26))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("intentPopup")
+    }
+
+    private var popupHeight: CGFloat {
+        if state.proposal == nil || showsDetails { return 600 }
+        return state.insertion.issue == nil ? 220 : 280
     }
 
     private var proposedFill: some View {
@@ -199,13 +216,47 @@ struct CircleIntentOverlay: View {
                 }
                 .accessibilityIdentifier("proposedContent")
                 Text(state.draftDetail).font(.caption).foregroundStyle(.secondary)
-                Text("Preview only · Nothing has been added to your note.")
+                Text("Green ink is a preview. Accept adds it to your note; Decline restores the spacing.")
                     .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillPreviewOnly")
             } else {
                 Text(state.processing ? (state.phase == .drafting ? "Drafting the missing text…" : "Waiting for the proposed fill…")
                      : state.draftDetail.isEmpty ? "No proposed fill available." : state.draftDetail)
                     .font(.subheadline).foregroundStyle(.secondary)
                     .accessibilityIdentifier("proposedFillStatus")
+            }
+        }
+    }
+
+    private var insertionControls: some View {
+        VStack(spacing: 10) {
+            if let issue = state.insertion.issue {
+                Text(issue).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("autofillInsertionIssue")
+            }
+            if state.proposal != nil {
+                HStack(spacing: 8) {
+                    if state.insertion.isPreparing { ProgressView().controlSize(.mini) }
+                    Text(state.insertion.handwritingDetail).font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("autofillHandwritingSource")
+                }
+            }
+            HStack(spacing: 12) {
+                Button(action: state.cancel) {
+                    Text("Decline").frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain).bukoGlass(interactive: true)
+                .accessibilityIdentifier("declineAutofill")
+                .accessibilityHint("Removes the preview without changing your note.")
+                Button(action: state.insertion.accept) {
+                    HStack {
+                        if state.insertion.isAccepting { ProgressView().controlSize(.small) }
+                        Text("Accept")
+                    }.frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain).bukoGlass(interactive: true)
+                .disabled(state.processing || !state.insertion.canAccept)
+                .accessibilityIdentifier("acceptAutofill")
+                .accessibilityHint("Inserts the previewed handwriting. Undo restores the original note and spacing.")
             }
         }
     }

@@ -65,7 +65,7 @@ struct ContentView: View {
             LectureSourcesView(noteID: note.id, noteTitle: note.title)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { session.host?.circleIntent.cancelPending(); saveNow() }
+            if phase != .active { session.host?.circleIntent.cancel(); saveNow() }
         }
         .onChange(of: sidebarVisible) { _, _ in titleFocused = false }
         .onChange(of: settingsVisible) { _, _ in titleFocused = false }
@@ -186,6 +186,19 @@ struct ContentView: View {
             note.drawingData = data
             note.updatedAt = .now
             scheduleSave()
+        }, handwritingDocuments: {
+            notes.lazy.filter { $0.id != note.id && $0.deletedAt == nil }.prefix(3).map { AutofillDocument($0) }
+        }, onAutofillCommit: { before, after in
+            guard revision == canvasRevision, selectedNote?.id == note.id,
+                  note.deletedAt == nil, !session.isDrawing,
+                  before.matches(AutofillDocument(note)) else { throw AutofillEditError.stale }
+            guard saveNow() else { throw AutofillEditError.unavailable }
+            do {
+                try NotebookEdits.commit(in: modelContext, notes: [note]) { after.apply(to: note) }
+            } catch {
+                persistenceError = error.localizedDescription
+                throw error
+            }
         })
         .id("\(note.id)-\(revision)")
         .ignoresSafeArea()

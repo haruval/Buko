@@ -62,13 +62,17 @@ nonisolated enum CircleJellyGeometry {
         let initialBlob: [CGPoint]
         let initialHead: CGPoint
         let tail: CGPoint?
+        let releaseSpeed: CGFloat
+        let joinDirection: CGPoint
+        let impactStrength: CGFloat
 
         init(traced: [CGPoint], completed: [CGPoint], droplet: CircleDropletDynamics, time: TimeInterval) {
             self.completed = completed
             center = centroid(completed) ?? CircleGeometry.path(completed).boundingBoxOfPath.origin
             basePaint = paint(Array(traced.dropLast()))
             finalPaint = paint(completed)
-            initialHead = droplet.sample(at: time).position
+            let motion = droplet.sample(at: time)
+            initialHead = motion.position
             initialBlob = droplet.contour(at: time, reduceMotion: false)
             tail = traced.dropLast().last
             // completedLoop preserves the raw samples before appending the gap.
@@ -78,6 +82,44 @@ nonisolated enum CircleJellyGeometry {
                 lengths.append(lengths[i - 1] + CircleGeometry.distance(arc[i - 1], arc[i]))
             }
             distances = lengths
+            let first = arc.dropFirst().first ?? initialHead
+            let startDelta = first - initialHead
+            let startLength = max(1, hypot(startDelta.x, startDelta.y))
+            releaseSpeed = min(2, max(0, (motion.velocity.x * startDelta.x + motion.velocity.y * startDelta.y)
+                / startLength * closeDuration / max(1, lengths.last ?? 1)))
+            let end = completed.last ?? initialHead
+            let before = completed.dropLast().last ?? initialHead
+            let delta = end - before
+            let distance = max(0.001, hypot(delta.x, delta.y))
+            joinDirection = CGPoint(x: delta.x / distance, y: delta.y / distance)
+            impactStrength = min(7, max(2, (lengths.last ?? 0) * 0.045 + hypot(motion.velocity.x, motion.velocity.y) * 0.002))
+        }
+
+        /// A velocity-aware Hermite sweep arrives at the seam with momentum.
+        /// The seam transfers that momentum into the damped body response below.
+        func closingProgress(age: TimeInterval) -> CGFloat {
+            let t = min(1, max(0, CGFloat(age / closeDuration)))
+            let t2 = t * t, t3 = t2 * t
+            return (-2 * t3 + 3 * t2) + releaseSpeed * (t3 - 2 * t2 + t) + 1.65 * (t3 - t2)
+        }
+
+        /// The joining tangent determines the recoil direction. An area-preserving
+        /// squeeze makes the gel feel soft without changing the selected region.
+        /// This is an analytic damped oscillator, independent of display cadence.
+        func impactTransform(age: TimeInterval, reduceMotion: Bool) -> CGAffineTransform {
+            let t = CGFloat(age - closeDuration)
+            guard !reduceMotion, t > 0, t < fillDuration else { return .identity }
+            let envelope = exp(-8.5 * t) * (1 - smoothstep((t - 0.55) / 0.27))
+            let response = sin(23 * t) * envelope
+            let displacement = impactStrength * response
+            let stretch = 1 + 0.055 * response
+            let x = joinDirection.x, y = joinDirection.y
+            let a = stretch * x * x + y * y / stretch
+            let b = (stretch - 1 / stretch) * x * y
+            let d = stretch * y * y + x * x / stretch
+            return CGAffineTransform(a: a, b: b, c: b, d: d,
+                tx: center.x - a * center.x - b * center.y + x * displacement,
+                ty: center.y - b * center.x - d * center.y + y * displacement)
         }
 
         func closingPoints(progress: CGFloat) -> [CGPoint] {
@@ -95,7 +137,7 @@ nonisolated enum CircleJellyGeometry {
 
         func path(age: TimeInterval, reduceMotion: Bool) -> CGPath {
             if !reduceMotion, age < closeDuration {
-                let progress = smoothstep(CGFloat(max(0, age) / closeDuration))
+                let progress = closingProgress(age: age)
                 var swept = closingPoints(progress: progress)
                 if let releasedPoint = arc.dropFirst().first {
                     swept[0] = CGPoint(x: initialHead.x + (releasedPoint.x - initialHead.x) * progress,
@@ -126,7 +168,8 @@ nonisolated enum CircleJellyGeometry {
                 }
                 fill.addPath(smoothPath(inner))
             }
-            return finalPaint.union(fill)
+            var transform = impactTransform(age: age, reduceMotion: reduceMotion)
+            return finalPaint.union(fill).copy(using: &transform) ?? finalPaint.union(fill)
         }
     }
 

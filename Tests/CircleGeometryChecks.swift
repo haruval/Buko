@@ -73,6 +73,22 @@ import Foundation
             let done = release.path(age: 2, reduceMotion: false)
             precondition(done.contains(release.center))
             precondition(release.path(age: 0, reduceMotion: true).contains(release.center))
+            var lastProgress: CGFloat = 0
+            for tick in 0...100 {
+                let progress = release.closingProgress(age: CircleJellyGeometry.closeDuration * Double(tick) / 100)
+                precondition(progress >= lastProgress && progress >= 0 && progress <= 1)
+                lastProgress = progress
+            }
+            let impactAge = CircleJellyGeometry.closeDuration + 0.045
+            let transform = release.impactTransform(age: impactAge, reduceMotion: false)
+            let movedCenter = release.center.applying(transform)
+            let displacement = CGPoint(x: movedCenter.x - release.center.x, y: movedCenter.y - release.center.y)
+            precondition(displacement.x * release.joinDirection.x + displacement.y * release.joinDirection.y > 0,
+                         "Closing recoil must follow the joining tangent")
+            precondition(abs(transform.a * transform.d - transform.b * transform.c - 1) < 0.0001,
+                         "The gel squeeze should preserve area")
+            precondition(release.impactTransform(age: impactAge, reduceMotion: true) == .identity)
+            precondition(release.impactTransform(age: 2, reduceMotion: false) == .identity)
         }
 
         // Dragging retains momentum, is tethered to the finger, and settles at rest.
