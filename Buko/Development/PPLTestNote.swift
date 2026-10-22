@@ -17,7 +17,16 @@ enum PPLTestNote {
          "A closure stores a function and its", "lexical environment, even after return.", "",
          "Example of a closure:", "", "",
          "Type safety prevents invalid operations.", "Static type checking happens before execution.", "",
-         "Progress + preservation imply:", "", "Exam in 12 days - review lambda calculus.", "TODO: finish the substitution example."]
+         "Progress + preservation imply:", "", "Exam in 12 days - review lambda calculus.", "TODO: finish the substitution example."],
+        ["SCOPE - GAP PRACTICE", "Principles of Programming Languages", "",
+         "Static scoping: follows lexical nesting in source code.",
+         "Dynamic scoping:", "", "", "", "",
+         "Lexical analysis: groups characters into tokens.",
+         "Parsing:", "", "", "", "",
+         "Lexical analysis vs parsing:", "", "", ""],
+        ["SCOPE - REVERSED GAP", "Principles of Programming Languages", "",
+         "Dynamic scoping: searches the active calling sequence.",
+         "Static scoping:", "", "", "", ""]
     ]
 
     static func drawing() -> PKDrawing { LectureHandwriting.drawing(pages: pages) }

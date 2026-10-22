@@ -1,0 +1,294 @@
+{
+  "schemaVersion": 1,
+  "split": "development",
+  "provenance": "Synthetic transcript replay and lecture passages authored for this implementation. All cases are development data; no natural handwriting, independent annotation or held-out claim.",
+  "frozenAt": null,
+  "sources": [
+    {
+      "id": "lecture",
+      "title": "Gap retrieval development lectures",
+      "textPages": [
+        "Static scoping determines variable bindings from lexical nesting in the source code. A reference resolves in the enclosing source-code blocks, regardless of the calling sequence.",
+        "Dynamic scoping determines variable bindings from the active calling sequence. A reference searches the current activation and then callers for a matching binding.",
+        "Lexical analysis groups input characters into tokens such as identifiers, keywords and operators. It supplies a token stream to the parser.",
+        "Parsing organizes a token stream according to a grammar and builds a syntax tree. It checks grammatical structure rather than grouping characters into tokens.",
+        "A process is an executing program with its own virtual address space and operating-system resources. Isolation separates the address spaces of different processes.",
+        "A thread is an execution path within a process. Threads in the same process share its address space and resources, while each thread has its own stack and execution state.",
+        "A semaphore maintains a count of available permits. Waiting acquires a permit or blocks; signaling releases a permit. A counting semaphore can allow multiple concurrent entrants.",
+        "A mutex provides mutual exclusion for a critical section. One owner holds the mutex at a time; the owner releases it after leaving the critical section.",
+        "An observational pilot found a three-point score increase among participants. The difference was not statistically significant. The pilot does not establish causation or a long-term retention benefit.",
+        "The fictional Luma sample has seven chambers. This is the original classroom handout and gives no temperature measurements.",
+        "Correction to the Luma chamber-count handout: the earlier seven-chamber statement is incorrect. Luma has nine chambers. This correction replaces only the chamber count.",
+        "A cache stores copies of data to reduce repeated access cost. A cache hit finds the requested data; a cache miss requires fetching it from the underlying store.",
+        "Static typing checks types before program execution. A type checker uses declarations and program structure to detect incompatible operations.",
+        "Dynamic typing checks types during execution. Values have types, and an incompatible operation can produce a runtime type error.",
+        "Lexical scope and static scope name the same binding discipline in this lecture. Static scope follows source-code nesting and is independent of the active call stack.",
+        "A deadlock is a state where tasks wait indefinitely for resources held by one another. Mutual exclusion, hold and wait, no preemption and circular wait are necessary conditions in the standard model."
+      ],
+      "pdfPath": null
+    }
+  ],
+  "cases": [
+    {
+      "id": "empty-dynamic",
+      "selected": "Static scoping: scope follows lexical nesting in source-code blocks.\nDynamic scoping:",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "Dynamic scoping:"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 2,
+            "quote": "Dynamic scoping determines variable bindings from the active calling sequence. A reference searches the current activation and then callers for a matching binding."
+          }
+        ]
+      ],
+      "tags": [
+        "completed-neighbor",
+        "definition"
+      ]
+    },
+    {
+      "id": "empty-static",
+      "selected": "Dynamic scoping: variable lookup follows the active calling sequence.\nStatic scoping:",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "Static scoping:"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 1,
+            "quote": "Static scoping determines variable bindings from lexical nesting in the source code. A reference resolves in the enclosing source-code blocks, regardless of the calling sequence."
+          }
+        ]
+      ],
+      "tags": [
+        "completed-neighbor",
+        "definition"
+      ]
+    },
+    {
+      "id": "inline-heading",
+      "selected": "Static scoping: follows lexical nesting. Dynamic scoping:",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "Dynamic scoping:"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 2,
+            "quote": "Dynamic scoping determines variable bindings from the active calling sequence. A reference searches the current activation and then callers for a matching binding."
+          }
+        ]
+      ],
+      "tags": [
+        "same-line",
+        "definition"
+      ]
+    },
+    {
+      "id": "direct-dynamic",
+      "selected": "Dynamic scoping:",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "Dynamic scoping:"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 2,
+            "quote": "Dynamic scoping determines variable bindings from the active calling sequence. A reference searches the current activation and then callers for a matching binding."
+          }
+        ]
+      ],
+      "tags": [
+        "direct",
+        "definition"
+      ]
+    },
+    {
+      "id": "lexing-vs-parsing",
+      "selected": "Lexical analysis vs parsing:",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "Lexical analysis",
+        "parsing"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 3,
+            "quote": "Lexical analysis groups input characters into tokens such as identifiers, keywords and operators. It supplies a token stream to the parser."
+          },
+          {
+            "source": "lecture",
+            "page": 4,
+            "quote": "Parsing organizes a token stream according to a grammar and builds a syntax tree. It checks grammatical structure rather than grouping characters into tokens."
+          }
+        ]
+      ],
+      "tags": [
+        "comparison",
+        "multiple-passages"
+      ]
+    },
+    {
+      "id": "empty-thread",
+      "selected": "Process: an executing program with its own virtual address space and resources.\nThread:",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "Thread:"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 6,
+            "quote": "A thread is an execution path within a process. Threads in the same process share its address space and resources, while each thread has its own stack and execution state."
+          }
+        ]
+      ],
+      "tags": [
+        "completed-neighbor",
+        "definition"
+      ]
+    },
+    {
+      "id": "process-vs-thread",
+      "selected": "Process vs thread:",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "Process",
+        "thread"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 5,
+            "quote": "A process is an executing program with its own virtual address space and operating-system resources. Isolation separates the address spaces of different processes."
+          },
+          {
+            "source": "lecture",
+            "page": 6,
+            "quote": "A thread is an execution path within a process. Threads in the same process share its address space and resources, while each thread has its own stack and execution state."
+          }
+        ]
+      ],
+      "tags": [
+        "comparison",
+        "multiple-passages"
+      ]
+    },
+    {
+      "id": "semaphore-after-mutex",
+      "selected": "Mutex: one owner protects a critical section.\nSemaphore:",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "Semaphore:"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 7,
+            "quote": "A semaphore maintains a count of available permits. Waiting acquires a permit or blocks; signaling releases a permit. A counting semaphore can allow multiple concurrent entrants."
+          }
+        ]
+      ],
+      "tags": [
+        "completed-neighbor",
+        "definition"
+      ]
+    },
+    {
+      "id": "negative-finding",
+      "selected": "Does the pilot establish causation?",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "Does the pilot establish causation?"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 9,
+            "quote": "An observational pilot found a three-point score increase among participants. The difference was not statistically significant. The pilot does not establish causation or a long-term retention benefit."
+          }
+        ]
+      ],
+      "tags": [
+        "negative",
+        "qualification"
+      ]
+    },
+    {
+      "id": "corrected-count",
+      "selected": "How many chambers does Luma have?",
+      "context": "",
+      "expectedBehavior": "answer",
+      "expectedTargetQuotes": [
+        "How many chambers does Luma have?"
+      ],
+      "sufficientEvidenceSets": [
+        [
+          {
+            "source": "lecture",
+            "page": 11,
+            "quote": "Correction to the Luma chamber-count handout: the earlier seven-chamber statement is incorrect. Luma has nine chambers. This correction replaces only the chamber count."
+          }
+        ]
+      ],
+      "tags": [
+        "correction",
+        "near-duplicate"
+      ]
+    },
+    {
+      "id": "missing-temperature",
+      "selected": "What is the freezing temperature of Luma?",
+      "context": "",
+      "expectedBehavior": "abstain",
+      "expectedTargetQuotes": [
+        "What is the freezing temperature of Luma?"
+      ],
+      "sufficientEvidenceSets": [],
+      "tags": [
+        "unanswerable",
+        "near-match"
+      ]
+    },
+    {
+      "id": "ambiguous-heading",
+      "selected": "Static scoping:\nDynamic scoping:",
+      "context": "",
+      "expectedBehavior": "clarify",
+      "expectedTargetQuotes": [
+        "Static scoping:",
+        "Dynamic scoping:"
+      ],
+      "sufficientEvidenceSets": [],
+      "tags": [
+        "ambiguous",
+        "multiple-targets"
+      ]
+    }
+  ]
+}

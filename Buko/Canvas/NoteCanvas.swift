@@ -15,6 +15,7 @@ struct NoteCanvas: UIViewRepresentable {
 
     func makeUIView(context: Context) -> CanvasHostView {
         let host = CanvasHostView(pagePull: session.pagePull)
+        host.circleIntent.noteID = note.id
         do {
             let drawing = note.drawingData.isEmpty ? PKDrawing() : try PKDrawing(data: note.drawingData)
             context.coordinator.hasLoadedDrawing = true
@@ -69,7 +70,7 @@ struct NoteCanvas: UIViewRepresentable {
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             guard hasLoadedDrawing, let host, !host.isUpdatingInk else { return }
-            host.circleIntent.cancelPending()
+            host.circleIntent.drawingDidChange()
             // Undo may restore strokes created under another appearance.
             host.normalizeDisplayedInk()
             onDrawingChange(host.canonicalDrawing.dataRepresentation())

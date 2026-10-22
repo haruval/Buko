@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ToolShelf: View {
     @Bindable var session: CanvasSession
+    let openLectureSources: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
@@ -28,20 +29,9 @@ struct ToolShelf: View {
             .accessibilityIdentifier("circleIntentTool")
             .accessibilityAddTraits(session.tool == .circle ? [.isSelected] : [])
             .accessibilityHint("Draw a closed loop with one finger to interpret handwriting. With Pen selected, use two fingers.")
-            Button { session.tool = session.tool == .cube ? .pen : .cube } label: {
-                RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.clear)
-                    .frame(width: 22, height: 22)
-                    .glassEffect(.clear.tint(CircleAIStyle.glassTint).interactive(), in: .rect(cornerRadius: 7))
-                    .overlay { RoundedRectangle(cornerRadius: 7).stroke(CircleAIStyle.green.opacity(0.85), lineWidth: 1.5) }
-                    .frame(width: 46, height: 46)
-                    .background(session.tool == .cube ? CircleAIStyle.green.opacity(0.18) : .clear, in: .circle)
-                    .contentShape(.circle)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Cube")
-            .accessibilityIdentifier("cubeTool")
-            .accessibilityAddTraits(session.tool == .cube ? [.isSelected] : [])
-            .accessibilityHint("Drag a glass cube. Microphone volume animates it while selected. Tap again to put it away.")
+            ShelfButton(title: "Lecture sources", symbol: "books.vertical", action: openLectureSources)
+                .accessibilityIdentifier("lectureSources")
+                .accessibilityHint("Attach lecture PDFs for source-grounded autofill.")
             Divider().frame(height: 22).padding(.horizontal, 6)
             ShelfButton(title: "Undo", symbol: "arrow.uturn.backward", action: session.undo)
                 .disabled(!session.canUndo)

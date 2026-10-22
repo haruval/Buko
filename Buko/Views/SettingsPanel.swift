@@ -98,7 +98,7 @@ struct SettingsPanel: View {
                             .buttonStyle(.glass)
                             .accessibilityIdentifier(lecture.resetIdentifier)
                         }
-                        Text("Each example has two pages of editable handwriting. Resetting moves only that example’s previous note to Trash.")
+                        Text("Each example has editable handwriting. Resetting moves only that example’s previous note to Trash.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

@@ -1,6 +1,22 @@
 import XCTest
 
 final class CircleIntentTests: XCTestCase {
+    @MainActor func testMissingInformationCannotBeDisabled() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        // A persisted value from the removed development setting must not expose
+        // or disable the production pipeline.
+        app.launchArguments = ["-structuredGapRetrievalEnabled", "NO"]
+        app.launch()
+        XCTAssertTrue(app.buttons["openSettings"].waitForExistence(timeout: 15))
+        app.buttons["openSettings"].tap()
+        Thread.sleep(forTimeInterval: 0.8)
+        app.buttons["openDevelopment"].tap()
+        XCTAssertTrue(app.buttons["recreateTestNote"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.switches["structuredGapRetrieval"].exists)
+        XCTAssertFalse(app.staticTexts["Find missing information"].exists)
+    }
+
     @MainActor func testDevelopmentResetAndCircleTool() {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
@@ -20,7 +36,7 @@ final class CircleIntentTests: XCTestCase {
         app.buttons["openDevelopment"].tap()
         Thread.sleep(forTimeInterval: 0.7)
         app.buttons["recreateTestNote"].tap()
-        expectation(for: NSPredicate(format: "value == 'Page 1 of 2'"), evaluatedWith: canvas)
+        expectation(for: NSPredicate(format: "value == 'Page 1 of 4'"), evaluatedWith: canvas)
         waitForExpectations(timeout: 10)
         XCTAssertTrue((app.textFields["currentNoteTitle"].value as? String)?.contains("Test PPL Lecture") == true)
         app.buttons["circleIntentTool"].tap()
@@ -31,7 +47,7 @@ final class CircleIntentTests: XCTestCase {
             .press(forDuration: 0.05, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.4)))
         XCTAssertFalse(app.otherElements["intentPopup"].exists)
         XCTAssertFalse(app.buttons["Undo"].isEnabled)
-        XCTAssertEqual(canvas.value as? String, "Page 1 of 2")
+        XCTAssertEqual(canvas.value as? String, "Page 1 of 4")
         app.buttons["Pen"].tap()
         app.buttons["openSettings"].tap()
         Thread.sleep(forTimeInterval: 0.8)
@@ -45,11 +61,11 @@ final class CircleIntentTests: XCTestCase {
         expectation(for: NSPredicate(format: "NOT (value CONTAINS 'overview')"), evaluatedWith: canvas)
         waitForExpectations(timeout: 8)
         let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "Two-page handwritten PPL fixture and circle tool"
+        shot.name = "Handwritten PPL fixture and circle tool"
         shot.lifetime = .keepAlways
         add(shot)
         app.terminate(); app.launch()
         XCTAssertTrue(canvas.waitForExistence(timeout: 10))
-        XCTAssertTrue((canvas.value as? String)?.contains("of 2") == true)
+        XCTAssertTrue((canvas.value as? String)?.contains("of 4") == true)
     }
 }
