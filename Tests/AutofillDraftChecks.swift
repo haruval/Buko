@@ -11,6 +11,7 @@ import Darwin
     @MainActor static func main() async throws {
         setbuf(stdout, nil)
         policyChecks()
+        try plannerChecks()
         guard CommandLine.arguments.contains("--live") else { return }
         guard #available(macOS 27, *), case .available = SystemLanguageModel.default.availability else {
             print("SKIPPED: local model unavailable"); exit(77)
@@ -21,6 +22,11 @@ import Darwin
         try await library.importPDF(from: URL(fileURLWithPath: "Buko/Resources/Lectures/programmingLanguages.pdf"), noteID: noteID)
         try await focusChecks(library: library, noteID: noteID)
         if CommandLine.arguments.contains("--focus-only") { return }
+        for mode in [CircleRetrievalMode.baseline, .structuredGap] {
+            let uncertain = try await CirclePlanner.infer(selected: "A = [1 ?; 3 4]. Find its determinant.", context: "", mode: mode)
+            precondition(!uncertain.clarification.isEmpty && uncertain.planningPasses == 1,
+                         "Freeform math must retain model clarification for missing operands")
+        }
         for mode in [CircleRetrievalMode.baseline, .structuredGap] {
             let selection = "Static scoping: follows lexical nesting in source code.\nDynamic scoping:"
             let plan = try await CirclePlanner.infer(selected: selection, context: context, mode: mode)
@@ -73,12 +79,28 @@ import Darwin
              "Lexical analysis vs parsing:", .baseline, false),
             ("parsing-gap", "Lexical analysis: groups characters into tokens.\nParsing:",
              "Lexical analysis vs parsing:", .structuredGap, false),
+            ("parsing-gap", "Lexical analysis: groups characters into tokens. Parsing:",
+             "Lexical analysis vs parsing:", .baseline, false),
+            ("parsing-gap", "Lexical analysis: groups characters into tokens. Parsing:",
+             "Lexical analysis vs parsing:", .structuredGap, false),
+            ("parsing-gap", "Lexical analysis: groups characters into tokens\nParsing:",
+             "Lexical analysis vs parsing:", .baseline, false),
+            ("parsing-gap", "Lexical analysis: groups characters into tokens\nParsing:",
+             "Lexical analysis vs parsing:", .structuredGap, false),
             ("explicit-comparison", "Lexical analysis vs parsing:", "", .baseline, false),
+            ("explicit-comparison", "Lexical analysis vs parsing:", "", .structuredGap, false),
             ("explicit-ast", "Abstract syntax tree (AST):", "Parsing organizes tokens according to a grammar.", .baseline, true)
         ]
         var failures = 0
         for (name, selection, nearby, mode, asksForAST) in cases {
             let plan = try await CirclePlanner.infer(selected: selection, context: nearby, mode: mode)
+            if name == "parsing-gap" {
+                precondition(plan.intent == "The user wants to define Parsing." && plan.evidence == "Parsing:")
+                precondition(plan.action == "Add a concise definition beneath Parsing." && plan.clarification.isEmpty)
+                precondition(plan.planningPasses == 0, "Explicit targets must be bound before model inference")
+            } else if name == "explicit-comparison" {
+                precondition(plan.intent.contains("compare") && plan.action.contains("comparison"))
+            }
             let search = try await library.search(noteID: noteID, selected: selection, intent: plan.intent, gap: plan.gap)
             let evidence = try await LectureComposer.complete(selected: selection, context: nearby,
                 intent: plan.intent, action: plan.action, search: search)
@@ -112,8 +134,8 @@ import Darwin
             if !relevant { print("FAIL: draft topic drift or missing requested definition"); failures += 1 }
         }
         guard failures == 0 else { print("Focus checks failed: \(failures)"); exit(1) }
-        // Isolate the writer from the baseline planner's separate inline-target
-        // false abstention. Use the real whole PDF passage, not a shortened answer.
+        // Also isolate the writer's scope handling with a deliberately broad
+        // two-bullet hint and the real whole PDF passage.
         let search = try await library.search(noteID: noteID, selected: "Parsing:", intent: "Define parsing.", gap: nil)
         let sourceIndex = search.hits.firstIndex { $0.passage.text.contains("Parsing checks the token sequence") }!
         let evidence = LectureGroundingPolicy.resolve(status: "supported", sourceIDs: ["P\(sourceIndex + 1)"],
@@ -129,6 +151,48 @@ import Darwin
                          && !text.contains("lexer") && !text.contains("groups characters"))
         }
         print("Focus checks passed: parsing gap, isolated inline/heading writer, explicit comparison, and explicit AST target.")
+    }
+
+    static func plannerChecks() throws {
+        let selections = [
+            "Lexical analysis: groups characters into tokens.\nParsing:",
+            "Lexical analysis: groups characters into tokens. Parsing:",
+            "Lexical analysis: groups characters into tokens\nParsing:",
+            "Parsing:\nLexical analysis: groups characters into tokens.",
+            "Parsing:"
+        ]
+        for mode in [CircleRetrievalMode.baseline, .structuredGap] {
+            for selection in selections {
+                let transcript = GapTranscript(selected: selection, context: "Lexical analysis vs parsing:\nAbstract syntax trees:")
+                guard let plan = try CirclePlanner.explicitPlan(in: transcript, mode: mode) else { fatalError("Unbound Parsing target") }
+                precondition(plan.intent == "The user wants to define Parsing." && plan.evidence == "Parsing:")
+                precondition(plan.action == "Add a concise definition beneath Parsing." && plan.clarification.isEmpty)
+                precondition(plan.planningPasses == 0 && plan.responseTokenLimit == 0)
+                if mode == .structuredGap {
+                    precondition(plan.gap?.targetText == "Parsing:" && plan.gap?.value.informationNeeds == ["definition"])
+                    precondition(plan.gap?.value.alreadyCovered.count == (selection == "Parsing:" ? 0 : 1))
+                } else { precondition(plan.gap == nil, "Keep the selected retrieval mode") }
+            }
+            for selection in ["Lexical analysis vs parsing:", "Parsing VERSUS lexical analysis:"] {
+                let plan = try CirclePlanner.explicitPlan(in: GapTranscript(selected: selection, context: "Parsing:"), mode: mode)
+                precondition(plan?.intent.contains("compare") == true && plan?.action.contains("comparison") == true)
+                precondition(plan?.evidence == selection && plan?.clarification.isEmpty == true)
+                if mode == .structuredGap { precondition(plan?.gap?.value.operation == .compare) }
+            }
+            let unrelated = try CirclePlanner.explicitPlan(in: GapTranscript(
+                selected: "Thread: an execution path with its own stack.\nProcess:", context: "Thread vs process:"), mode: mode)
+            precondition(unrelated?.intent == "The user wants to define Process.", "Binding must be topic-independent")
+            let ambiguous = try CirclePlanner.explicitPlan(in: GapTranscript(selected: "Lexical analysis:\nParsing:", context: "Parsing:"), mode: mode)
+            precondition(ambiguous?.clarification.isEmpty == false && ambiguous?.gap == nil)
+            for selection in ["Why does parsing need a grammar?", "A = [1 ?; 3 4]. Find its determinant.",
+                              "Lexical analysis: groups characters into tokens.", "Process: an incomplete thought",
+                              "Lexical analysis: groups characters into tokens.\nLexical analysis vs parsing:",
+                              "Question: what is lexical analysis?\nParsing:"] {
+                let freeform = try CirclePlanner.explicitPlan(in: GapTranscript(selected: selection, context: "Parsing:"), mode: mode)
+                precondition(freeform == nil, "Do not force-bind freeform or already-complete selections")
+            }
+        }
+        print("Planner focus checks passed: exact unfinished target, context isolation, comparison, ambiguity and freeform routing in both modes.")
     }
 
     static func makeSearch(_ texts: [String]) -> LectureSearch {

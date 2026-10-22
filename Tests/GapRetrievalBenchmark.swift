@@ -61,8 +61,7 @@ import Darwin
         report["sampling"] = "greedy"
         report["baselinePromptSHA256"] = hash(Data(IntentPrompts.instructions.utf8))
         report["gapPromptSHA256"] = hash(Data(MissingInformationPrompts.instructions.utf8))
-        report["boundNeedsPromptSHA256"] = hash(Data(MissingInformationPrompts.boundInstructions.utf8))
-        report["boundNeedsSchemaSHA256"] = hash(Data(String(describing: BoundInformationNeeds.generationSchema).utf8))
+        report["explicitSyntaxPlanning"] = "Shared exact-text binding; no model call. See bindingStrategy and planningPasses per request."
         report["selectorPromptSHA256"] = hash(Data(LectureComposer.instructions.utf8))
         report["gapSchemaSHA256"] = hash(Data(String(describing: MissingInformationPlan.generationSchema).utf8))
         var codeHashes: [String: String] = [:]

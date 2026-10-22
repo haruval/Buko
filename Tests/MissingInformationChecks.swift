@@ -46,6 +46,7 @@ import Foundation
         rejects(MissingInformationPlan(alreadyCovered: [], targets: [.init(blockID: "S1", quote: explicit.selected)],
             informationNeeds: ["definition"], operation: .define), in: explicit)
         for selected in ["Thread: an execution path with its own stack.\nProcess:",
+                         "Thread: an execution path with its own stack\nProcess:",
                          "Thread: an execution path with its own stack. Process:"] {
             let transcript = GapTranscript(selected: selected, context: "Semaphore: completed context stays separate.")
             guard case .bound(let binding) = GapSyntaxBinding.inspect(transcript) else { preconditionFailure("Expected explicit heading") }
