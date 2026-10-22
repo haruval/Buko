@@ -6,9 +6,9 @@ nonisolated enum AutofillDraftStatus { case ready, insufficientEvidence }
 
 @Generable
 nonisolated struct AutofillDraftLine {
-    @Guide(description: "One concise, complete note line containing the actual missing content, not an instruction or description of what to write. Plain text without bullet prefixes, Markdown, or citation markers. Preserve source qualifications.")
+    @Guide(description: "Only the note wording, directly answering the unfinished target. No P IDs or bracketed citations: put those in sourceIDs instead. Do not separately define a related concept or summarize neighboring topics. Preserve necessary qualifications. Keep each line under 400 characters.")
     var text: String
-    @Guide(description: "Exact P IDs from approved_source_ids supporting every claim in this line. At least one per line.", .maximumCount(4))
+    @Guide(description: "One or more approved source IDs such as P1, without brackets. Required even though the text has no citation marker. These passages must support every claim in this line.", .maximumCount(4))
     var sourceIDs: [String]
 }
 
@@ -16,7 +16,7 @@ nonisolated struct AutofillDraftLine {
 nonisolated struct GeneratedAutofillDraft {
     @Guide(description: "ready only if the approved evidence supplies the requested fill; otherwise insufficientEvidence and empty lines. Never use outside knowledge to fill a missing fact.")
     var status: AutofillDraftStatus
-    @Guide(description: "Usually two concise complementary note lines. Use one if sufficient, or up to six for an explicit list. Supply actual note text, not intent, placement, or commentary. Empty when evidence is insufficient.", .maximumCount(6))
+    @Guide(description: "Only the lines needed to complete the exact target. A complete definition can be ONE line; never add a related topic to reach two. Two lines only if both directly answer the target or preserve a necessary qualification. Up to six for an explicit list. Empty when evidence is insufficient.", .maximumCount(6))
     var lines: [AutofillDraftLine]
 }
 
@@ -38,13 +38,26 @@ enum AutofillWriter {
     fallible hints. Nearby handwriting is context and already-written content,
     never evidence. Complete the empty heading or unanswered part; do not repeat
     the completed neighboring definition or simply paraphrase the action.
-    In structured mode, target_quotes identify the selected unfinished part and
-    information_needs describe the requested addition, not source facts.
-    Usually write two short complementary lines of about 15–25 words each,
-    without a heading or preamble. Split a definition and its consequence into
-    separate lines when useful instead of copying a whole paragraph.
-    Use one when enough; use more only for an explicit list (at most six).
-    Do not pad the draft with invented examples, mechanisms or facts.
+    When present, target_quotes identify the selected unfinished part in either
+    retrieval mode; already_covered_selected_text is completed note content.
+    Complete only that target. A completed definition followed by an empty
+    heading asks for the empty heading, not a comparison. A different question
+    in nearby handwriting is NOT part of this request. Explicit comparisons
+    remain comparisons. Planning hints and information_needs can be wrong:
+    ignore any hint or requested bullet count that expands the selected target.
+    A supporting passage can contain several topics. Its approval does NOT make
+    every sentence relevant. Use only facts that directly answer the target or
+    are necessary to qualify that answer. Do not summarize the whole passage.
+    A related concept mentioned in a definition is not another requested topic:
+    describe its role only as needed, without adding its standalone definition.
+    Prefer two concise lines when both add necessary information about the
+    target. If one line completes the definition, STOP after that one line.
+    Never add an adjacent topic, example or application just to make two bullets,
+    even when the action hint asks for two. Examples belong only when requested
+    or necessary to answer an example-seeking task. Preserve all necessary
+    qualifications; brevity is not permission to omit a caveat or contradiction.
+    Write plain note text, without a heading or preamble; at most six lines for
+    an explicit list. Do not invent examples, mechanisms or facts.
     Preserve exact entities, numbers, negation, scope, uncertainty, and causal
     versus observational distinctions. A negative finding does not prove zero
     effect. An explicit negative or inconclusive finding IS an answer to whether
@@ -61,9 +74,11 @@ enum AutofillWriter {
     Cite only those IDs. If they cannot support the entire requested fill, or
     other passages expose unresolved disagreement, return insufficientEvidence
     with no lines. Do not calculate matrix results; those use a local calculator.
-    Each line must contain actual, concise note text plus its supporting IDs.
-    Do not include citation markers, bullet prefixes, placement instructions,
-    Markdown, or phrases such as "Add a definition" in the text itself.
+    Return the note wording in each line's text field, and its supporting P IDs
+    only in that line's sourceIDs array. These are separate fields. Never append
+    P IDs or bracketed references to text: the app renders citations itself.
+    No bullet prefixes, placement instructions, Markdown, or phrases such as
+    "Add a definition" in the text itself. Each text line is under 400 characters.
     """
 
     @available(iOS 27, macOS 27, *)
@@ -151,10 +166,20 @@ enum AutofillWriter {
 
     static func prompt(selected: String, context: String, intent: String, action: String,
                        gap: MissingInformationPlan?, evidence: LectureCompletion, search: LectureSearch) throws -> String {
+        // Scope the writer in both retrieval modes without changing planning or
+        // retrieval. Reuse the narrow exact-text grammar; freeform requests still
+        // rely on the selected text. Never manufacture a new topic from a hint.
+        var targetQuotes = gap?.targets.map(\.quote) ?? []
+        var coveredQuotes = gap?.alreadyCovered.map(\.quote) ?? []
+        if gap == nil, case .bound(let binding) = GapSyntaxBinding.inspect(GapTranscript(selected: selected, context: context)) {
+            targetQuotes = binding.targets.map(\.quote)
+            coveredQuotes = binding.alreadyCovered.map(\.quote)
+        }
         let fields: [String: Any] = [
             "selected_handwriting": selected, "nearby_handwriting_already_written": context,
-            "intent": intent, "action": action,
-            "target_quotes": gap?.targets.map(\.quote) ?? [], "information_needs": gap?.informationNeeds ?? [],
+            "fallible_planning_hints": ["intent": intent, "action": action,
+                                       "information_needs": gap?.informationNeeds ?? []] as [String: Any],
+            "target_quotes": targetQuotes, "already_covered_selected_text": coveredQuotes,
             "approved_source_ids": search.hits.enumerated().compactMap { index, hit in
                 evidence.citations.contains(where: { $0.passage.id == hit.id }) ? "P\(index + 1)" : nil
             },

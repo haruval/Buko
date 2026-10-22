@@ -19,6 +19,8 @@ import Darwin
         let library = LectureLibrary(root: root)
         let noteID = UUID()
         try await library.importPDF(from: URL(fileURLWithPath: "Buko/Resources/Lectures/programmingLanguages.pdf"), noteID: noteID)
+        try await focusChecks(library: library, noteID: noteID)
+        if CommandLine.arguments.contains("--focus-only") { return }
         for mode in [CircleRetrievalMode.baseline, .structuredGap] {
             let selection = "Static scoping: follows lexical nesting in source code.\nDynamic scoping:"
             let plan = try await CirclePlanner.infer(selected: selection, context: context, mode: mode)
@@ -62,6 +64,71 @@ import Darwin
         do { _ = try await cancelled.value; fatalError("Cancellation was swallowed") }
         catch is CancellationError { }
         print("Live drafting checks passed. These are development cases, not an accuracy benchmark.")
+    }
+
+    @available(macOS 27, *)
+    @MainActor static func focusChecks(library: LectureLibrary, noteID: UUID) async throws {
+        let cases: [(String, String, String, CircleRetrievalMode, Bool)] = [
+            ("parsing-gap", "Lexical analysis: groups characters into tokens.\nParsing:",
+             "Lexical analysis vs parsing:", .baseline, false),
+            ("parsing-gap", "Lexical analysis: groups characters into tokens.\nParsing:",
+             "Lexical analysis vs parsing:", .structuredGap, false),
+            ("explicit-comparison", "Lexical analysis vs parsing:", "", .baseline, false),
+            ("explicit-ast", "Abstract syntax tree (AST):", "Parsing organizes tokens according to a grammar.", .baseline, true)
+        ]
+        var failures = 0
+        for (name, selection, nearby, mode, asksForAST) in cases {
+            let plan = try await CirclePlanner.infer(selected: selection, context: nearby, mode: mode)
+            let search = try await library.search(noteID: noteID, selected: selection, intent: plan.intent, gap: plan.gap)
+            let evidence = try await LectureComposer.complete(selected: selection, context: nearby,
+                intent: plan.intent, action: plan.action, search: search)
+            let result = try await AutofillWriter.draft(selected: selection, context: nearby,
+                intent: plan.intent, action: plan.action, gap: plan.gap?.value, evidence: evidence, search: search)
+            print("FOCUS \(name) / \(mode.rawValue)\nINTENT: \(plan.intent)\nACTION: \(plan.action)")
+            print("EVIDENCE: \(evidence.lines.joined(separator: " | "))")
+            guard let content = result.content, plan.clarification.isEmpty else {
+                print("FAIL: no draft: \(result.explanation) \(plan.clarification)")
+                if evidence.extractive {
+                    // A diagnostic replay only; it cannot replace the failed result.
+                    let prompt = try AutofillWriter.prompt(selected: selection, context: nearby, intent: plan.intent,
+                        action: plan.action, gap: plan.gap?.value, evidence: evidence, search: search)
+                    let session = LanguageModelSession(instructions: AutofillWriter.instructions)
+                    let replay = try await session.respond(to: prompt, generating: GeneratedAutofillDraft.self,
+                        options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 650))
+                    print("DIAGNOSTIC: \(replay.content.status), \(replay.content.lines.map { ($0.text, $0.sourceIDs) })")
+                }
+                failures += 1; continue
+            }
+            print("DRAFT:\n\(content.text)")
+            precondition(!content.text.contains("[P"), "Citation IDs leaked into the fill text")
+            let text = content.text.lowercased()
+            // The PDF puts this independent AST definition beside parsing. It is
+            // appropriate only for the explicit AST case. Mentioning a parser's
+            // syntax-tree output is allowed; these are fixture-specific checks.
+            let definesAST = text.contains("essential") || text.contains("punctuation")
+                || text.contains("abstract syntax trees represent")
+            let repeatsLexing = name == "parsing-gap" && (text.contains("lexer") || text.contains("groups characters"))
+            let relevant = asksForAST ? definesAST : !definesAST && !repeatsLexing && text.contains("token")
+            if !relevant { print("FAIL: draft topic drift or missing requested definition"); failures += 1 }
+        }
+        guard failures == 0 else { print("Focus checks failed: \(failures)"); exit(1) }
+        // Isolate the writer from the baseline planner's separate inline-target
+        // false abstention. Use the real whole PDF passage, not a shortened answer.
+        let search = try await library.search(noteID: noteID, selected: "Parsing:", intent: "Define parsing.", gap: nil)
+        let sourceIndex = search.hits.firstIndex { $0.passage.text.contains("Parsing checks the token sequence") }!
+        let evidence = LectureGroundingPolicy.resolve(status: "supported", sourceIDs: ["P\(sourceIndex + 1)"],
+            selected: "Parsing:", context: "", intent: "Define parsing.", action: "Add two bullets.", search: search)
+        for selection in ["Lexical analysis: groups characters into tokens. Parsing:", "Parsing:"] {
+            let result = try await AutofillWriter.draft(selected: selection, context: "Abstract syntax tree (AST):",
+                intent: "The user wants to define parsing.", action: "Add two concise definition bullets beneath Parsing.",
+                gap: nil, evidence: evidence, search: search)
+            guard let content = result.content else { fatalError(result.explanation) }
+            print("WRITER FOCUS \(selection)\n\(content.text)")
+            let text = content.text.lowercased()
+            precondition(text.contains("token") && !text.contains("essential") && !text.contains("punctuation")
+                         && !text.contains("lexer") && !text.contains("groups characters"))
+        }
+        print("Focus checks passed: parsing gap, isolated inline/heading writer, explicit comparison, and explicit AST target.")
     }
 
     static func makeSearch(_ texts: [String]) -> LectureSearch {
@@ -121,6 +188,20 @@ import Darwin
         precondition(prompt.contains(search.hits[0].passage.text) && prompt.contains(search.hits[1].passage.text))
         let noEvidence = makeSearch([])
         precondition(resolve(valid, search: noEvidence).content == nil)
+        for selection in ["Lexical analysis: groups characters into tokens.\nParsing:",
+                          "Lexical analysis: groups characters into tokens. Parsing:"] {
+            let scoped = try! AutofillWriter.prompt(selected: selection, context: "Abstract syntax tree:",
+                intent: "Compare lexical analysis and parsing.", action: "Add two bullets.", gap: nil,
+                evidence: evidence, search: search)
+            let fields = try! JSONSerialization.jsonObject(with: Data(scoped.utf8)) as! [String: Any]
+            precondition(fields["target_quotes"] as? [String] == ["Parsing:"])
+            precondition(fields["already_covered_selected_text"] as? [String] == ["Lexical analysis: groups characters into tokens."])
+            precondition(scoped.contains(search.hits[0].passage.text) && scoped.contains(search.hits[1].passage.text))
+        }
+        let comparison = try! AutofillWriter.prompt(selected: "Lexical analysis vs parsing:", context: "",
+            intent: "Compare", action: "Compare", gap: nil, evidence: evidence, search: search)
+        let comparisonFields = try! JSONSerialization.jsonObject(with: Data(comparison.utf8)) as! [String: Any]
+        precondition(comparisonFields["target_quotes"] as? [String] == ["Lexical analysis vs parsing:"])
         print("Draft policy checks passed: typed text, provenance, malformed/empty/refused output, source changes and full evidence.")
     }
 }
