@@ -86,7 +86,7 @@ struct CircleIntentOverlay: View {
                     if state.processing {
                         HStack(spacing: 10) {
                             ProgressView().controlSize(.small)
-                            Text(state.phase == .recognizing ? "Reading handwriting…" : state.phase == .retrieving ? "Searching lecture PDFs…" : state.phase == .proposing ? "Checking completion evidence…" : "Inferring intent and action…")
+                            Text(state.progressLabel)
                                 .font(.subheadline)
                         }
                     }
@@ -102,30 +102,16 @@ struct CircleIntentOverlay: View {
                             }
                         }.accessibilityIdentifier("missingInformationPlan")
                     }
+                    proposedFill
+                    if !state.clarification.isEmpty {
+                        Text(state.clarification).font(.subheadline).accessibilityIdentifier("intentClarification")
+                    }
+                    if let issue = state.issue { Text(issue).font(.subheadline).accessibilityIdentifier("intentIssue") }
                     VStack(alignment: .leading, spacing: 6) {
                         Label(state.sourceLabel, systemImage: state.citations.isEmpty ? "info.circle" : "doc.text.magnifyingglass")
                             .font(.subheadline.weight(.semibold)).accessibilityIdentifier("autofillSource")
                         if !state.sourceDetail.isEmpty { Text(state.sourceDetail).font(.caption).foregroundStyle(.secondary) }
                     }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(state.citations.isEmpty ? "3. Proposed action" : "3. Original lecture excerpts").font(.subheadline.weight(.semibold))
-                        if state.proposedLines.isEmpty {
-                            Text(state.processing ? "Waiting for the proposed content…" : "No proposal available.")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        } else {
-                            ForEach(Array(state.proposedLines.enumerated()), id: \.offset) { index, line in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text(state.citations.indices.contains(index) ? "[\(index + 1)]" : "•")
-                                    Text(line).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                                }
-                            }
-                            .accessibilityIdentifier("proposedContent")
-                        }
-                    }
-                    if !state.clarification.isEmpty {
-                        Text(state.clarification).font(.subheadline).accessibilityIdentifier("intentClarification")
-                    }
-                    if let issue = state.issue { Text(issue).font(.subheadline).accessibilityIdentifier("intentIssue") }
                     if !state.citations.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Lecture sources").font(.subheadline.weight(.semibold))
@@ -167,7 +153,7 @@ struct CircleIntentOverlay: View {
                             .font(.caption).accessibilityIdentifier("modelTiming")
                         Text(state.retrievalMode == .baseline ? "Original retrieval" : "Missing-information retrieval · experimental")
                             .font(.caption2)
-                        Text("Intent \(state.intentSeconds, specifier: "%.1f") s · Proposal \(state.proposalSeconds, specifier: "%.1f") s · Recognition \(state.recognitionSeconds, specifier: "%.1f") s")
+                        Text("Intent \(state.intentSeconds, specifier: "%.1f") s · Evidence \(max(0, state.proposalSeconds - state.draftingSeconds), specifier: "%.1f") s · Draft \(state.draftingSeconds, specifier: "%.1f") s · Recognition \(state.recognitionSeconds, specifier: "%.1f") s")
                             .font(.caption2)
                         if !state.retrievalMethod.isEmpty {
                             Text("Retrieval \(state.retrievalSeconds, specifier: "%.2f") s · \(state.retrievedPassageCount) passages · \(state.retrievalMethod)")
@@ -192,6 +178,36 @@ struct CircleIntentOverlay: View {
         .padding(16)
         .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.28)), in: .rect(cornerRadius: 26))
         .accessibilityIdentifier("intentPopup")
+    }
+
+    private var proposedFill: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("3. Proposed fill").font(.subheadline.weight(.semibold))
+            if let proposal = state.proposal {
+                ForEach(Array(proposal.content.lines.enumerated()), id: \.offset) { _, line in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("•")
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(line.text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                            if !line.citationIndices.isEmpty {
+                                Text(line.citationIndices.map { "[\($0 + 1)]" }.joined(separator: " "))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .accessibilityLabel("Lecture sources " + line.citationIndices.map { String($0 + 1) }.joined(separator: ", "))
+                            }
+                        }
+                    }
+                }
+                .accessibilityIdentifier("proposedContent")
+                Text(state.draftDetail).font(.caption).foregroundStyle(.secondary)
+                Text("Preview only · Nothing has been added to your note.")
+                    .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillPreviewOnly")
+            } else {
+                Text(state.processing ? (state.phase == .drafting ? "Drafting the missing text…" : "Waiting for the proposed fill…")
+                     : state.draftDetail.isEmpty ? "No proposed fill available." : state.draftDetail)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("proposedFillStatus")
+            }
+        }
     }
 
     private func pipelineSection(_ title: String, text: String, identifier: String) -> some View {

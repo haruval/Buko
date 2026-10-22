@@ -100,7 +100,7 @@ nonisolated enum LectureGroundingPolicy {
             citations.append(LectureCitation(passage: hit.passage, quote: hit.passage.text))
         }
         return LectureCompletion(lines: citations.map(\.quote), citations: citations, extractive: true,
-            explanation: "Original lecture passages, selected by the model and copied verbatim. Relevance is not independently verified; inspect the linked pages for surrounding context. No synthesized answer was generated.",
+            explanation: "Original lecture passages, selected by the model and copied verbatim. Relevance is not independently verified; inspect the linked pages for surrounding context.",
             evidenceCount: search.hits.count)
     }
 }
