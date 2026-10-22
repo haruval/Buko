@@ -57,6 +57,7 @@ import Darwin
             guard let content = result.content else { fatalError(result.explanation) }
             print("LIVE \(question)\n\(content.text)")
         }
+        try await correctedEvidencePipelineChecks()
         let search = makeSearch([String(repeating: "Dynamic scoping searches active calls. ", count: 2500)])
         let evidence = selectedEvidence(search, ids: ["P1"])
         let oversized = try await AutofillWriter.draft(selected: selected, context: context, intent: intent,
@@ -71,6 +72,36 @@ import Darwin
         do { _ = try await cancelled.value; fatalError("Cancellation was swallowed") }
         catch is CancellationError { }
         print("Live drafting checks passed. These are development cases, not an accuracy benchmark.")
+    }
+
+    @available(macOS 27, *)
+    static func correctedEvidencePipelineChecks() async throws {
+        let query = "How many chambers does Luma have?"
+        let fact = "For this fictional laboratory exercise, the Luma sample has exactly seven chambers."
+        for (name, other, shouldAnswer) in [
+            ("withdrawn value", "The earlier claim that Luma has seven chambers is retracted as incorrect. The correct chamber count has not been determined.", false),
+            ("different entity", "Correction to the Luna exercise: Luna has nine chambers, not seven. This corrects Luna only; it makes no statement about Luma.", true)
+        ] {
+            let search = makeSearch([fact, other])
+            let evidence = try await LectureComposer.complete(selected: query, context: "", intent: query,
+                                                               action: "Write a concise answer.", search: search)
+            let result = try await AutofillWriter.draft(selected: query, context: "", intent: query,
+                action: "Write a concise answer.", gap: nil, evidence: evidence, search: search)
+            if shouldAnswer {
+                precondition(evidence.lines == [fact] && evidence.citations.count == 1)
+                guard let content = result.content else { fatalError(result.explanation) }
+                let words = Set(content.text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
+                precondition(words.contains("seven") || words.contains("7"))
+                precondition(words.isDisjoint(with: ["nine", "9", "luna"]))
+                precondition(content.lines.allSatisfy { $0.citationIndices == [0] })
+                print("LIVE repaired selector → writer (\(name)): \(content.text)")
+            } else {
+                precondition(evidence.lines.isEmpty && evidence.citations.isEmpty)
+                precondition(evidence.explanation == LectureGroundingPolicy.Refusal.insufficient.explanation)
+                precondition(result.content == nil, "A withdrawn value must never reach proposed fill text")
+                print("LIVE repaired selector → writer (\(name)): no proposed fill.")
+            }
+        }
     }
 
     @available(macOS 27, *)
