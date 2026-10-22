@@ -94,7 +94,7 @@ struct CircleIntentOverlay: View {
                     pipelineSection("2. Action that should be taken", text: state.action, identifier: "intentAction")
                     if let gap = state.missingInformation {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Missing information · experimental").font(.subheadline.weight(.semibold))
+                            Text("Missing information").font(.subheadline.weight(.semibold))
                             Text(gap.informationNeeds.joined(separator: " · ")).font(.caption)
                             if !gap.alreadyCovered.isEmpty {
                                 Text("Already written: " + gap.alreadyCovered.map(\.quote).joined(separator: " · "))
@@ -151,7 +151,7 @@ struct CircleIntentOverlay: View {
                             .font(.subheadline).textSelection(.enabled).accessibilityIdentifier("recognizedHandwriting")
                         Text("On-device model · \(state.elapsed, specifier: "%.1f") s")
                             .font(.caption).accessibilityIdentifier("modelTiming")
-                        Text(state.retrievalMode == .baseline ? "Original retrieval" : "Missing-information retrieval · experimental")
+                        Text("Missing-information retrieval")
                             .font(.caption2)
                         Text("Intent \(state.intentSeconds, specifier: "%.1f") s · Evidence \(max(0, state.proposalSeconds - state.draftingSeconds), specifier: "%.1f") s · Draft \(state.draftingSeconds, specifier: "%.1f") s · Recognition \(state.recognitionSeconds, specifier: "%.1f") s")
                             .font(.caption2)

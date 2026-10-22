@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct SettingsPanel: View {
-    @AppStorage(CircleRetrievalMode.preferenceKey) private var structuredGapEnabled = false
     let trashedNotes: [Note]
     let trashedPages: [TrashedPage]
     @Binding var showsTrash: Bool
@@ -89,11 +88,6 @@ struct SettingsPanel: View {
             } else if showsDevelopment {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Toggle("Find missing information", isOn: $structuredGapEnabled)
-                            .font(.subheadline).frame(minHeight: 44)
-                            .accessibilityIdentifier("structuredGapRetrieval")
-                        Text("Experimental lecture retrieval. Off uses the original pipeline. Changes apply to the next circle.")
-                            .font(.caption).foregroundStyle(.secondary)
                         ForEach(SampleLecture.allCases) { lecture in
                             Button { recreateTestNote(lecture) } label: {
                                 Label("Recreate \(lecture.title)", systemImage: "arrow.counterclockwise")
@@ -104,7 +98,7 @@ struct SettingsPanel: View {
                             .buttonStyle(.glass)
                             .accessibilityIdentifier(lecture.resetIdentifier)
                         }
-                        Text("Each example has two pages of editable handwriting. Resetting moves only that example’s previous note to Trash.")
+                        Text("Each example has editable handwriting. Resetting moves only that example’s previous note to Trash.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

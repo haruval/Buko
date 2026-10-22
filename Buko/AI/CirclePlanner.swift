@@ -46,7 +46,7 @@ nonisolated enum CirclePlanner {
     }
 
     @available(iOS 27, macOS 27, *)
-    static func infer(selected: String, context: String, mode: CircleRetrievalMode,
+    static func infer(selected: String, context: String, mode: CircleRetrievalMode = .structuredGap,
                       model: SystemLanguageModel = .default) async throws -> CirclePlan {
         try Task.checkCancellation()
         guard ![selected, context].contains(where: LectureGroundingPolicy.containsInstructionOverride) else {

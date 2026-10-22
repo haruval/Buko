@@ -33,7 +33,6 @@ final class CircleIntentState {
     var selectionBounds = CGRect.zero
     var recognizedText = ""
     var nearbyContext = ""
-    var retrievalMode = CircleRetrievalMode.baseline
     var missingInformation: MissingInformationPlan?
     var intent = ""
     var action = ""
@@ -170,8 +169,6 @@ final class CircleIntentState {
         let id = UUID(); requestID = id
         let capturedNoteID = noteID
         let capturedAt = Date()
-        retrievalMode = UserDefaults.standard.bool(forKey: CircleRetrievalMode.preferenceKey) ? .structuredGap : .baseline
-        let mode = retrievalMode
         phase = .recognizing; issue = nil; intent = ""; evidence = ""; clarification = ""
         let started = ProcessInfo.processInfo.systemUptime
         task = Task { [weak self] in
@@ -224,7 +221,7 @@ final class CircleIntentState {
             modelStartedAt = modelStarted
             var proposalStarted: Double?
             do {
-                let plan = try await CirclePlanner.infer(selected: recognizedText, context: context, mode: mode, model: model)
+                let plan = try await CirclePlanner.infer(selected: recognizedText, context: context, model: model)
                 guard requestID == id, !Task.isCancelled else { return }
                 intent = plan.intent
                 action = plan.action
@@ -234,9 +231,12 @@ final class CircleIntentState {
                 evidence = plan.evidence
                 clarification = plan.clarification
                 if clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // Every app request must identify its missing information.
+                    // Never silently retrieve with the benchmark's baseline path.
+                    guard let gap = plan.gap else { throw GapPlanError.invalidReferences("missingPlan") }
                     phase = .retrieving
                     guard let noteID = capturedNoteID else { throw LectureLibrary.LibraryError.missingDocument }
-                    let search = try await LectureLibrary.shared.search(noteID: noteID, selected: recognizedText, intent: intent, gap: plan.gap)
+                    let search = try await LectureLibrary.shared.search(noteID: noteID, selected: recognizedText, intent: intent, gap: gap)
                     guard requestID == id, !Task.isCancelled else { return }
                     retrievalSeconds = search.seconds
                     retrievedPassageCount = search.hits.count
@@ -275,7 +275,7 @@ final class CircleIntentState {
                             phase = .drafting
                             let draftingStarted = ProcessInfo.processInfo.systemUptime
                             let draft = try await AutofillWriter.draft(selected: recognizedText, context: context,
-                                intent: intent, action: action, gap: plan.gap?.value, evidence: completion,
+                                intent: intent, action: action, gap: gap.value, evidence: completion,
                                 search: search, model: model)
                             guard requestID == id, !Task.isCancelled else { return }
                             guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }

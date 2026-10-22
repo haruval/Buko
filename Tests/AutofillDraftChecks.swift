@@ -20,6 +20,7 @@ import Darwin
         let library = LectureLibrary(root: root)
         let noteID = UUID()
         try await library.importPDF(from: URL(fileURLWithPath: "Buko/Resources/Lectures/programmingLanguages.pdf"), noteID: noteID)
+        try await defaultPipelineChecks(library: library, noteID: noteID)
         try await focusChecks(library: library, noteID: noteID)
         if CommandLine.arguments.contains("--focus-only") { return }
         for mode in [CircleRetrievalMode.baseline, .structuredGap] {
@@ -70,6 +71,31 @@ import Darwin
         do { _ = try await cancelled.value; fatalError("Cancellation was swallowed") }
         catch is CancellationError { }
         print("Live drafting checks passed. These are development cases, not an accuracy benchmark.")
+    }
+
+    @available(macOS 27, *)
+    @MainActor static func defaultPipelineChecks(library: LectureLibrary, noteID: UUID) async throws {
+        let legacyKey = "structuredGapRetrievalEnabled"
+        let previous = UserDefaults.standard.object(forKey: legacyKey)
+        UserDefaults.standard.set(false, forKey: legacyKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: legacyKey) }
+            else { UserDefaults.standard.removeObject(forKey: legacyKey) }
+        }
+        for selection in ["Lexical analysis: groups characters into tokens.\nParsing:", "What does parsing check?"] {
+            let plan = try await CirclePlanner.infer(selected: selection, context: "Lexical analysis vs parsing:")
+            guard let gap = plan.gap, plan.clarification.isEmpty else { fatalError("Default planner skipped missing information") }
+            let search = try await library.search(noteID: noteID, selected: selection, intent: plan.intent, gap: gap)
+            precondition(search.gapTrace != nil && !search.hits.isEmpty)
+            let evidence = try await LectureComposer.complete(selected: selection, context: "", intent: plan.intent,
+                action: plan.action, search: search)
+            let draft = try await AutofillWriter.draft(selected: selection, context: "", intent: plan.intent,
+                action: plan.action, gap: gap.value, evidence: evidence, search: search)
+            guard let content = draft.content else { fatalError(draft.explanation) }
+            precondition(content.text.localizedCaseInsensitiveContains("grammar"))
+            print("DEFAULT PIPELINE: \(plan.intent)\n\(content.text)")
+        }
+        print("Default missing-information pipeline passed with the old preference disabled, including freeform model planning.")
     }
 
     @available(macOS 27, *)

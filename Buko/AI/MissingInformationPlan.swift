@@ -1,9 +1,9 @@
 import Foundation
 import FoundationModels
 
+/// Baseline remains available for offline comparison checks, never as an app setting.
 nonisolated enum CircleRetrievalMode: String, Codable, Sendable {
     case baseline, structuredGap
-    static let preferenceKey = "structuredGapRetrievalEnabled"
 }
 
 /// Request-local transcript lines, not geometric regions or persisted stroke IDs.

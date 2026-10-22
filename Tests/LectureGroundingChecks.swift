@@ -41,21 +41,21 @@ import Darwin
             ("C = [2 1; 0 3], D = [1 4; 2 0]. CD =", "")
         ] {
             let started = ProcessInfo.processInfo.systemUptime
-            let planner = LanguageModelSession(instructions: IntentPrompts.instructions)
-            let plan = try await planner.respond(to: IntentPrompts.request(selected: selected, context: context),
-                generating: InferredCircleIntent.self, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 420))
-            precondition(plan.content.clarification.isEmpty, "Unexpected planner clarification: \(plan.content.clarification)")
-            let search = try await library.search(noteID: noteID, selected: selected, intent: plan.content.intent)
+            let plan = try await CirclePlanner.infer(selected: selected, context: context)
+            precondition(plan.clarification.isEmpty, "Unexpected planner clarification: \(plan.clarification)")
+            guard let gap = plan.gap else { fatalError("The app's default planner omitted missing information") }
+            let search = try await library.search(noteID: noteID, selected: selected, intent: plan.intent, gap: gap)
+            precondition(search.gapTrace != nil)
             precondition(!search.hits.isEmpty)
             switch CircleCompletionRoute.select(for: selected, hasLectureEvidence: !search.hits.isEmpty) {
             case .arithmetic(let result):
                 precondition(result.clarification.isEmpty && result.lines.joined().contains("[4 8; 6 0]"))
                 print("Local matrix route passed with retrieved lecture evidence.")
             case .lecture:
-                let result = try await LectureComposer.complete(selected: selected, context: context, intent: plan.content.intent,
-                    action: plan.content.action, search: search)
+                let result = try await LectureComposer.complete(selected: selected, context: context, intent: plan.intent,
+                    action: plan.action, search: search)
                 assertVerbatim(result, search: search)
-                print("QUERY: \(selected)\nINTENT: \(plan.content.intent)\n\(result.lines.joined(separator: "\n"))")
+                print("QUERY: \(selected)\nINTENT: \(plan.intent)\n\(result.lines.joined(separator: "\n"))")
                 print("CITATIONS: \(result.citations.map { $0.passage.title + ":\($0.passage.page)" }); Mac seconds: \(ProcessInfo.processInfo.systemUptime - started)")
             case .noEvidence: preconditionFailure("Expected lecture evidence")
             }
