@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct NotebookPage: Codable, Identifiable, Equatable {
+nonisolated struct NotebookPage: Codable, Identifiable, Equatable {
     var id = UUID()
     var title = ""
     var isTrashed = false

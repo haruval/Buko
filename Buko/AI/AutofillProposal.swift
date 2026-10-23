@@ -1,7 +1,7 @@
 import Foundation
 
 /// Preview content, kept separate from the verbatim evidence and from canvas edits.
-/// Citation markers are metadata; `text` is the plain text for a future insertion.
+/// Citation markers are metadata; `text` is the plain text for spatial insertion.
 nonisolated struct AutofillContent: Sendable {
     enum Origin: Sendable { case lectureDraft, localArithmetic }
     struct Line: Sendable {
@@ -14,8 +14,8 @@ nonisolated struct AutofillContent: Sendable {
     var text: String { lines.map(\.text).joined(separator: "\n") }
 }
 
-/// Request-scoped handoff for the later spatial-edit stage. This is not an accepted
-/// edit: insertion must revalidate the document and source revisions and support undo.
+/// Request-scoped handoff to spatial insertion. Acceptance revalidates the captured
+/// document and source revision before saving an undoable, attributable edit.
 nonisolated struct AutofillProposal: Sendable {
     let requestID: UUID
     let noteID: UUID
@@ -26,5 +26,15 @@ nonisolated struct AutofillProposal: Sendable {
     let content: AutofillContent
     let citations: [LectureCitation]
 
+    var insertionTarget: String? = nil
+
     var text: String { content.text }
+
+    /// The evidence selector may approve more passages than the writer cites.
+    /// The simple preview credits only passages referenced by the finished lines.
+    var usedCitations: [LectureCitation] {
+        Set(content.lines.flatMap(\.citationIndices)).sorted().compactMap {
+            citations.indices.contains($0) ? citations[$0] : nil
+        }
+    }
 }

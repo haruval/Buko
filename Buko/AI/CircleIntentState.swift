@@ -5,12 +5,15 @@ import SwiftUI
 
 @Observable @MainActor
 final class CircleIntentState {
+    let insertion = AutofillInsertionState()
     enum Phase { case idle, tracing, recognizing, inferring, retrieving, proposing, drafting, finished }
     var phase = Phase.idle
     var noteID: UUID?
     var sourceLabel = "Determining source…"
     var sourceDetail = ""
     var citations: [LectureCitation] = []
+    var retrievedHits: [LectureHit] = []
+    var pipeline = PipelineTrace()
     var retrievalSeconds: Double = 0
     var retrievedPassageCount = 0
     var retrievalMethod = ""
@@ -36,7 +39,9 @@ final class CircleIntentState {
     var missingInformation: MissingInformationPlan?
     var intent = ""
     var action = ""
-    private(set) var proposal: AutofillProposal?
+    private(set) var proposal: AutofillProposal? {
+        didSet { if let proposal { insertion.prepare(proposal) } }
+    }
     var draftDetail = ""
     var draftingSeconds: Double = 0
     var arithmeticChecked = false
@@ -51,6 +56,7 @@ final class CircleIntentState {
     var recognitionMethod = ""
     private var popupAnchor: CGPoint?
     var popupBounds = CGRect.zero
+    @ObservationIgnored var popupHitBounds: CGRect?
     private var requestID = UUID()
     private var task: Task<Void, Never>?
     private var timeout: Task<Void, Never>?
@@ -58,12 +64,13 @@ final class CircleIntentState {
     var processing: Bool { phase == .recognizing || phase == .inferring || phase == .retrieving || phase == .proposing || phase == .drafting }
 
     var progressLabel: String {
+        if let active = pipeline.steps.last(where: { $0.status == .running }) { return active.title + "…" }
         switch phase {
-        case .recognizing: "Reading handwriting…"
-        case .retrieving: "Searching lecture PDFs…"
-        case .proposing: "Checking completion evidence…"
-        case .drafting: "Writing the proposed fill…"
-        default: "Inferring intent and action…"
+        case .recognizing: return "Reading handwriting…"
+        case .retrieving: return "Searching lecture PDFs…"
+        case .proposing: return "Checking completion evidence…"
+        case .drafting: return "Writing the proposed fill…"
+        default: return "Inferring intent and action…"
         }
     }
 
@@ -103,8 +110,12 @@ final class CircleIntentState {
 
     func positionPopup(size: CGSize, viewport: CGSize) {
         if popupAnchor == nil {
+            var occupied = selectionBounds
+            if let preview = insertion.layout {
+                occupied = occupied.union(PageGeometry.screenRect(preview.bounds, scale: captureScale, offset: captureOffset))
+            }
             let initial = CirclePopupPlacement.place(size: size, viewport: viewport,
-                region: selectionBounds.applying(projection))
+                region: occupied.applying(projection))
             popupAnchor = initial.origin.applying(projection.inverted())
         }
         if let popupAnchor {
@@ -112,19 +123,31 @@ final class CircleIntentState {
         }
     }
 
+    func resetPopupAnchor() { popupAnchor = nil }
+
     func cancel() {
+        cancel(animatedReturn: false)
+    }
+
+    func decline() {
+        cancel(animatedReturn: true)
+    }
+
+    private func cancel(animatedReturn: Bool) {
+        insertion.cancel(animatedReturn: animatedReturn)
         requestID = UUID()
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
         arithmeticChecked = false
         citations = []; sourceLabel = "Determining source…"; sourceDetail = ""
+        retrievedHits = []; pipeline = PipelineTrace()
         retrievalSeconds = 0; retrievedPassageCount = 0; retrievalMethod = ""
         nearbyContext = ""
         missingInformation = nil
         modelStartedAt = nil
         action = ""; proposal = nil; draftDetail = ""; draftingSeconds = 0
         intentSeconds = 0; proposalSeconds = 0; recognitionSeconds = 0; elapsed = 0
-        phase = .idle; textBounds = []; popupBounds = .zero; popupAnchor = nil
+        phase = .idle; textBounds = []; popupBounds = .zero; popupHitBounds = nil; popupAnchor = nil
         droplet = nil; tailAnchor = nil; paintedPath = CGMutablePath(); closedBoundary = nil; fittedRectangle = nil
         release = nil; tracedPoints = []; projection = .identity
         closedAt = nil; morphBegan = nil; motionActive = false
@@ -147,6 +170,7 @@ final class CircleIntentState {
 
     func analyze(drawing: PKDrawing, polygon: [CGPoint], screenPolygon: [CGPoint], scale: CGFloat, offset: CGPoint) {
         guard !hasPreview else { return }
+        insertion.capture()
         captureScale = scale; captureOffset = offset; projection = .identity
         selectionBounds = CircleGeometry.path(screenPolygon).boundingBoxOfPath
         closedAt = Date.timeIntervalSinceReferenceDate
@@ -167,9 +191,12 @@ final class CircleIntentState {
         }
         task?.cancel(); timeout?.cancel()
         let id = UUID(); requestID = id
+        let observer: PipelineObserver = { [weak self] event in await self?.record(event, request: id) }
         let capturedNoteID = noteID
         let capturedAt = Date()
         phase = .recognizing; issue = nil; intent = ""; evidence = ""; clarification = ""
+        pipeline.receive(.began(id: "recognition", title: "Read handwriting", instructions: nil,
+            input: "Circled ink and a separate nearby context region from this page."))
         let started = ProcessInfo.processInfo.systemUptime
         task = Task { [weak self] in
             guard let self else { return }
@@ -207,6 +234,7 @@ final class CircleIntentState {
             // Retain exactly the capped text supplied to both model stages.
             let context = String(reading.context.prefix(IntentPrompts.contextCharacterLimit))
             nearbyContext = context
+            pipeline.receive(.completed(id: "recognition", summary: "\(recognitionMethod)\nSelected: \(recognizedText)\nNearby: \(context)"))
             if [recognizedText, context].contains(where: LectureGroundingPolicy.containsInstructionOverride) {
                 sourceLabel = "Completion withheld"
                 sourceDetail = LectureGroundingPolicy.Refusal.instructionRisk.explanation
@@ -221,7 +249,7 @@ final class CircleIntentState {
             modelStartedAt = modelStarted
             var proposalStarted: Double?
             do {
-                let plan = try await CirclePlanner.infer(selected: recognizedText, context: context, model: model)
+                let plan = try await CirclePlanner.infer(selected: recognizedText, context: context, model: model, observer: observer)
                 guard requestID == id, !Task.isCancelled else { return }
                 intent = plan.intent
                 action = plan.action
@@ -235,10 +263,14 @@ final class CircleIntentState {
                     // Never silently retrieve with the benchmark's baseline path.
                     guard let gap = plan.gap else { throw GapPlanError.invalidReferences("missingPlan") }
                     phase = .retrieving
+                    pipeline.receive(.began(id: "retrieval", title: "Search lecture PDFs", instructions: nil,
+                        input: "Selected: \(recognizedText)\nIntent: \(intent)\nTarget: \(gap.targetText)\nNeeds: \(gap.value.informationNeeds.joined(separator: ", "))"))
                     guard let noteID = capturedNoteID else { throw LectureLibrary.LibraryError.missingDocument }
                     let search = try await LectureLibrary.shared.search(noteID: noteID, selected: recognizedText, intent: intent, gap: gap)
                     guard requestID == id, !Task.isCancelled else { return }
                     retrievalSeconds = search.seconds
+                    retrievedHits = search.hits
+                    pipeline.receive(.completed(id: "retrieval", summary: "\(search.hits.count) passages from \(search.documentCount) attached PDFs"))
                     retrievedPassageCount = search.hits.count
                     retrievalMethod = search.hasUnverifiedText ? "Paused · source text needs review"
                         : search.semanticAvailable ? "BM25 + semantic rank fusion" : "BM25 · sentence embedding unavailable"
@@ -246,6 +278,8 @@ final class CircleIntentState {
                     proposalStarted = ProcessInfo.processInfo.systemUptime
                     switch CircleCompletionRoute.select(for: recognizedText, hasLectureEvidence: !search.hits.isEmpty) {
                     case .arithmetic(let checked):
+                        pipeline.receive(.began(id: "arithmetic", title: "Calculate locally", instructions: nil, input: recognizedText))
+                        pipeline.receive(.completed(id: "arithmetic", summary: checked.lines.joined(separator: "\n") + checked.clarification))
                         guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
                         if checked.clarification.isEmpty, !checked.lines.isEmpty {
                             proposal = AutofillProposal(requestID: id, noteID: noteID, capturedAt: capturedAt,
@@ -264,7 +298,7 @@ final class CircleIntentState {
                     case .lecture:
                         sourceLabel = "Assessing lecture evidence…"
                         let completion = try await LectureComposer.complete(selected: recognizedText, context: context,
-                            intent: intent, action: action, search: search, model: model)
+                            intent: intent, action: action, search: search, model: model, observer: observer)
                         guard requestID == id, !Task.isCancelled else { return }
                         guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
                         citations = completion.citations
@@ -276,7 +310,7 @@ final class CircleIntentState {
                             let draftingStarted = ProcessInfo.processInfo.systemUptime
                             let draft = try await AutofillWriter.draft(selected: recognizedText, context: context,
                                 intent: intent, action: action, gap: gap.value, evidence: completion,
-                                search: search, model: model)
+                                search: search, model: model, observer: observer)
                             guard requestID == id, !Task.isCancelled else { return }
                             guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
                             draftingSeconds = ProcessInfo.processInfo.systemUptime - draftingStarted
@@ -284,7 +318,8 @@ final class CircleIntentState {
                             if let content = draft.content {
                                 proposal = AutofillProposal(requestID: id, noteID: noteID, capturedAt: capturedAt,
                                     selectionPolygon: polygon, selectedText: recognizedText, sourceRevision: search.revision,
-                                    content: content, citations: completion.citations)
+                                    content: content, citations: completion.citations,
+                                    insertionTarget: gap.value.targets.count == 1 ? gap.value.targets[0].quote : nil)
                             }
                         } else {
                             draftDetail = completion.explanation
@@ -305,7 +340,7 @@ final class CircleIntentState {
                     sourceDetail = "Confirm the circled request before retrieving a completion."
                 }
                 elapsed = intentSeconds + proposalSeconds
-                phase = .finished; timeout?.cancel()
+                phase = .finished; pipeline.stopRunning(); timeout?.cancel()
             } catch {
                 guard requestID == id, !Task.isCancelled else { return }
                 if let proposalStarted { proposalSeconds = ProcessInfo.processInfo.systemUptime - proposalStarted }
@@ -334,6 +369,11 @@ final class CircleIntentState {
         return true
     }
 
+    private func record(_ event: PipelineEvent, request: UUID) {
+        guard requestID == request, !Task.isCancelled else { return }
+        pipeline.receive(event)
+    }
+
     private func settleMotion(after duration: TimeInterval) {
         motionTask?.cancel()
         motionActive = !UIAccessibility.isReduceMotionEnabled
@@ -346,6 +386,7 @@ final class CircleIntentState {
 
     private func finishIssue(_ message: String, id: UUID) {
         guard requestID == id else { return }
+        pipeline.stopRunning()
         proposal = nil
         if let modelStartedAt, phase == .inferring || phase == .proposing || phase == .drafting {
             elapsed = ProcessInfo.processInfo.systemUptime - modelStartedAt

@@ -41,8 +41,8 @@ xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
 "$BUKO_CHECK_DIR/circle"
 
 xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
-    Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift \
-    Buko/Development/PPLTestNote.swift Buko/Development/LectureHandwriting.swift \
+    Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift Buko/Canvas/MonochromeInk.swift \
+    Buko/AI/HandwritingSamples.swift Buko/AI/HandwrittenFont.swift Buko/Development/PPLTestNote.swift Buko/Development/LectureHandwriting.swift \
     Buko/Development/SampleLecture.swift Tests/SampleLectureChecks.swift \
     -o "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
 "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
@@ -58,7 +58,7 @@ xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
 xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
     Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift Buko/Canvas/MonochromeInk.swift \
     Buko/AI/CircleGeometry.swift Buko/AI/CircleInkReader.swift \
-    Buko/Development/PPLTestNote.swift Buko/Development/LectureHandwriting.swift \
+    Buko/AI/HandwritingSamples.swift Buko/AI/HandwrittenFont.swift Buko/Development/PPLTestNote.swift Buko/Development/LectureHandwriting.swift \
     Buko/Development/SampleLecture.swift Tests/CircleContextChecks.swift \
     -o "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
 "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"

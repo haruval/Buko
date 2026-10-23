@@ -63,7 +63,12 @@ import Darwin
         report["gapPromptSHA256"] = hash(Data(MissingInformationPrompts.instructions.utf8))
         report["explicitSyntaxPlanning"] = "Shared exact-text binding; no model call. See bindingStrategy and planningPasses per request."
         report["selectorPromptSHA256"] = hash(Data(LectureComposer.instructions.utf8))
-        report["gapSchemaSHA256"] = hash(Data(String(describing: MissingInformationPlan.generationSchema).utf8))
+        report["gapSchemaSHA256"] = hash(Data(String(describing: ContextualGapReferences.generationSchema).utf8))
+        report["contextualRolePromptSHA256"] = hash(Data(ContextualScopePrompts.roles.utf8))
+        report["contextualRoleSchemaSHA256"] = hash(Data(String(describing: ContextualRoleMap.generationSchema).utf8))
+        report["scopeChoicePromptSHA256"] = hash(Data(ContextualScopePrompts.choice.utf8))
+        report["collectiveReferencePromptSHA256"] = hash(Data(CollectiveReference.instructions.utf8))
+        report["collectiveReferenceSchemaSHA256"] = hash(Data(String(describing: CollectiveReference.generationSchema).utf8))
         var codeHashes: [String: String] = [:]
         for path in ["Buko/AI/IntentPrompts.swift", "Buko/AI/MissingInformationPlan.swift", "Buko/AI/CirclePlanner.swift",
                      "Buko/Retrieval/LectureRetrieval.swift", "Buko/Retrieval/GapRetrieval.swift",

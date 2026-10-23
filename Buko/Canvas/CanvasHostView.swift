@@ -14,6 +14,13 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private var circleHosting: UIHostingController<CircleIntentOverlay>?
 
     var onPageChange: ((Int, Int) -> Void)?
+    var preparedHandwriting: ((AutofillProposal) -> HandwritingSampler.Result)?
+    var captureAutofillDocument: (() -> AutofillDocument?)?
+    var persistAutofill: ((AutofillDocument, AutofillDocument) throws -> Void)?
+    var onUndoStateChange: (() -> Void)?
+    private let autofillPreview = AutofillCanvasPreview(frame: .zero)
+    private var previewPageCount: Int?
+    private var displayedPageCount: Int { previewPageCount ?? pageCount }
     #if DEBUG
     private var zoomTestArea: UIAccessibilityElement?
     #endif
@@ -59,7 +66,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     private var documentSize: CGSize {
         CGSize(width: PageGeometry.workspaceWidth,
-               height: NotebookPaging.documentHeight(count: pageCount))
+               height: NotebookPaging.documentHeight(count: displayedPageCount))
     }
     private var currentPageRect: CGRect { NotebookPaging.rect(for: pageIndex) }
     private var boundaryRect: CGRect {
@@ -81,7 +88,17 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         addSubview(surface)
         surface.addSubview(backdrop)
         surface.addSubview(canvas)
+        surface.addSubview(autofillPreview)
         surface.addSubview(edgeBlur)
+        circleIntent.insertion.currentDocument = { [weak self] in self?.captureAutofillDocument?() }
+        circleIntent.insertion.preparedHandwriting = { [weak self] proposal in self?.preparedHandwriting?(proposal) ?? HandwritingSampler.Result() }
+        circleIntent.insertion.previewChanged = { [weak self] in self?.showAutofillPreview($0, animatedReturn: $1) }
+        autofillPreview.didSettle = { [weak self] count in self?.finishAutofillReflow(pageCount: count) }
+        circleIntent.insertion.commit = { [weak self] before, after in
+            guard let self else { throw AutofillEditError.unavailable }
+            try self.applyAutofill(from: before, to: after)
+        }
+        circleIntent.insertion.accepted = { [weak self] in self?.circleIntent.cancel() }
         layer.addSublayer(transitionShade)
         for _ in 0..<4 {
             let gradient = CAGradientLayer()
@@ -236,6 +253,74 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         isUpdatingInk = false
     }
 
+    func drawingDidChange() {
+        // The popup is already idle while a declined preview is springing home.
+        // Undo or programmatic edits must still remove that visual immediately.
+        if previewPageCount != nil { circleIntent.cancel() }
+        else { circleIntent.drawingDidChange() }
+    }
+
+    private func showAutofillPreview(_ result: AutofillLayout.Result?, animatedReturn: Bool = false) {
+        if let result {
+            // Retain any temporary pages until moving ink has finished crossing
+            // them. Decline releases them only after the return spring settles.
+            previewPageCount = max(previewPageCount ?? pageCount, result.pageCount)
+            autofillPreview.show(result, style: presentationStyle, from: canvas)
+        } else { autofillPreview.dismiss(animated: animatedReturn) }
+        // An opaque paper preview covers the ink without hiding the real input
+        // view. Its alpha must stay at one for Pencil/touch and accessibility.
+        canvas.contentSize = CGSize(width: documentSize.width * canvas.zoomScale,
+                                    height: documentSize.height * canvas.zoomScale)
+        invalidateEdgeSnapshot()
+        updateViewport()
+    }
+
+    private func finishAutofillReflow(pageCount count: Int?) {
+        let previousCount = displayedPageCount
+        previewPageCount = count
+        canvas.contentSize = CGSize(width: documentSize.width * canvas.zoomScale,
+                                    height: documentSize.height * canvas.zoomScale)
+        if displayedPageCount < previousCount {
+            canvas.contentOffset = clampedOffset(center: viewportCenter(), scale: canvas.zoomScale)
+        }
+        invalidateEdgeSnapshot()
+        updateViewport()
+    }
+
+    private func applyAutofill(from before: AutofillDocument, to after: AutofillDocument) throws {
+        guard let persistAutofill else { throw AutofillEditError.unavailable }
+        // Decode before persisting; a failed decode cannot leave model and canvas apart.
+        let drawing = try AutofillDocument.drawing(after.ink)
+        try persistAutofill(before, after)
+        let manager = canvas.undoManager
+        let registering = manager?.isUndoRegistrationEnabled == true
+        isUpdatingInk = true
+        if registering { manager?.disableUndoRegistration() }
+        canvas.drawing = inkPresentation.refresh(drawing, to: inkColor)
+        if registering { manager?.enableUndoRegistration() }
+        isUpdatingInk = false
+        pageCount = after.pageCount
+        pageIndex = min(pageIndex, max(0, pageCount - 1))
+        showAutofillPreview(nil)
+        syncPageState()
+        registerAutofillUndo(from: after, to: before)
+        onUndoStateChange?()
+    }
+
+    private func registerAutofillUndo(from current: AutofillDocument, to previous: AutofillDocument) {
+        canvas.undoManager?.registerUndo(withTarget: self) { host in
+            host.circleIntent.cancel()
+            do { try host.applyAutofill(from: current, to: previous) }
+            catch {
+                // A failed save leaves both editor and store unchanged. Register the
+                // same direction on the opposite stack so the operation is retryable.
+                host.registerAutofillUndo(from: current, to: previous)
+                UIAccessibility.post(notification: .announcement, argument: error.localizedDescription)
+            }
+        }
+        canvas.undoManager?.setActionName("Autofill")
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         cubeContainer.frame = bounds
@@ -247,6 +332,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         if surface.frame != bounds { surface.frame = bounds }
         if backdrop.frame != bounds { backdrop.frame = bounds }
         if canvas.frame != bounds { canvas.frame = bounds }
+        if autofillPreview.frame != bounds { autofillPreview.frame = bounds }
         if edgeBlur.frame != bounds { edgeBlur.frame = bounds }
         if guides.frame != bounds { guides.frame = bounds }
         if lastViewportSize != bounds.size {
@@ -318,7 +404,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     func didScroll() {
         let offset = canvas.contentOffset.y
         defer { previousScrollOffset = offset; updateViewport() }
-        guard !isUpdatingViewport, !isLayingOut, !isOverview, !isPinching, !isSnapping,
+        guard previewPageCount == nil, !isUpdatingViewport, !isLayingOut, !isOverview, !isPinching, !isSnapping,
               !isPullActive, !canvas.isTracking, !canvas.isDragging, !canvas.isDecelerating else {
             lastWheelInput = CACurrentMediaTime()
             wheelCanCreate = false
@@ -349,6 +435,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let scale = canvas.zoomScale
         let offset = canvas.contentOffset
         circleIntent.updateProjection(scale: scale, offset: offset)
+        autofillPreview.project(from: canvas, style: presentationStyle, showsGrid: backdrop.showsGrid, document: documentSize)
         if cube.visible {
             cube.updateNotebook(bounds: boundaryRect, viewportHeight: bounds.height)
             cube.updateProjection(scale: scale, offset: offset)
@@ -366,7 +453,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         // The dark Gaussian edge is a transition through the fit detent. A settled
         // overview always has crisp pages, including while panning around it.
         let transitionStrength = UIAccessibility.isReduceMotionEnabled ? 0 : bezelProgress
-        let blurStrength = transitionStrength > 0 ? transitionStrength
+        let blurStrength = previewPageCount != nil ? 0 : transitionStrength > 0 ? transitionStrength
             : (isOverview || isTurningPage || isPinching ? 0 : pullStrength)
         let margin: CGFloat = 2 + blurStrength * 94
         let documentFrame = PageGeometry.screenRect(boundaryRect, scale: scale, offset: offset)
@@ -384,7 +471,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         do {
             let path = UIBezierPath()
             let first = max(0, Int(floor(offset.y / scale / NotebookPaging.pageStride)) - 1)
-            let last = min(pageCount - 1, Int(ceil((offset.y + bounds.height) / scale / NotebookPaging.pageStride)) + 1)
+            let last = min(displayedPageCount - 1, Int(ceil((offset.y + bounds.height) / scale / NotebookPaging.pageStride)) + 1)
             if first <= last {
                 for index in first...last {
                     let frame = renderedPageFrame(index, scale: scale, offset: offset)
@@ -413,7 +500,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             let anchorIndex = isTurningPage && pagePull.didCreate ? pageCount - 2 : pageCount - 1
             let lastFrame = PageGeometry.screenRect(NotebookPaging.rect(for: max(0, anchorIndex)), scale: scale, offset: offset)
             pagePull.indicatorCenter = CGPoint(x: lastFrame.midX, y: lastFrame.maxY + 42)
-            pagePull.indicatorVisible = !isOverview && lastFrame.maxY < bounds.maxY && lastFrame.maxY > -100
+            pagePull.indicatorVisible = previewPageCount == nil && !isOverview && lastFrame.maxY < bounds.maxY && lastFrame.maxY > -100
             if isTurningPage && pagePull.didCreate {
                 pagePull.birthFrame = renderedPageFrame(pageCount - 1, scale: scale, offset: offset)
                 pagePull.creationProgress = snapProgress ?? 0
@@ -512,7 +599,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         wheelEnd?.cancel()
         isPullActive = true
         dragStartOffset = canvas.contentOffset.y
-        canCreateFromPull = NotebookPaging.canBeginCreation(offset: dragStartOffset, maximum: maximumScrollOffset)
+        canCreateFromPull = previewPageCount == nil && NotebookPaging.canBeginCreation(offset: dragStartOffset, maximum: maximumScrollOffset)
         wheelCanCreate = false
         lastPull = 0
         wasArmed = false
@@ -539,6 +626,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func reserveAppend() {
+        circleIntent.cancel()
         guard !isPullActive, !pageTurnPending, !isSnapping else { return }
         pageTurnPending = true
         // Leave UIKit's callback before cancelling its pan and growing the document.
@@ -795,6 +883,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     func stopAnimations() {
         cancelCircleInteraction()
+        autofillPreview.settle()
         wheelEnd?.cancel()
         pageTurnPending = false
         isPullActive = false

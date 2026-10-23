@@ -13,6 +13,7 @@ final class Note {
     var pageLayoutVersion: Int = 0
     var pageMetadata: Data = Data()
     @Attribute(.externalStorage) var drawingData: Data
+    @Attribute(.externalStorage) var autofillHistory: Data? = nil
 
     var activePages: [NotebookPage] { (try? pages().filter { !$0.isTrashed }) ?? [] }
 
