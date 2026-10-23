@@ -80,13 +80,27 @@ private struct InsertionHarnessView: UIViewRepresentable {
 
     func preview(source: String? = nil) async throws {
         host.circleIntent.cancel()
+        var citations: [LectureCitation] = []
+        if ProcessInfo.processInfo.arguments.contains("--sourced-preview") {
+            let url = Bundle.main.url(forResource: "programmingLanguages", withExtension: "pdf")!
+            let document = try await LectureLibrary.shared.importPDF(from: url, noteID: note.id)
+            citations = document.passages.prefix(2).map { LectureCitation(passage: $0, quote: $0.text) }
+            host.circleIntent.retrievedHits = citations.map { .init(passage: $0.passage, lexicalScore: 1, semanticScore: 1, score: 1) }
+        }
         let revision = try await LectureLibrary.shared.revision(noteID: note.id)
         let proposal = AutofillProposal(requestID: UUID(), noteID: note.id, capturedAt: .now,
             selectionPolygon: polygon, selectedText: heading, sourceRevision: source ?? revision,
             content: AutofillContent(lines: text.components(separatedBy: .newlines).map {
-                .init(text: $0, citationIndices: [])
-            }, origin: .lectureDraft), citations: [], insertionTarget: heading)
+                .init(text: $0, citationIndices: citations.isEmpty ? [] : [0])
+            }, origin: .lectureDraft), citations: citations, insertionTarget: heading)
         host.circleIntent.insertion.capture()
+        if ProcessInfo.processInfo.arguments.contains("--pipeline-preview") {
+            host.circleIntent.validationBegin(proposal, scale: host.canvas.zoomScale, offset: host.canvas.contentOffset)
+            try await Task.sleep(for: .seconds(6))
+            host.circleIntent.missingInformation = try CirclePlanner.explicitPlan(in: GapTranscript(selected: heading, context: ""), mode: .structuredGap)?.gap?.value
+            host.circleIntent.phase = .retrieving
+            try await Task.sleep(for: .seconds(6))
+        }
         host.circleIntent.validationPreview(proposal, scale: host.canvas.zoomScale, offset: host.canvas.contentOffset)
         for _ in 0..<200 {
             if !host.circleIntent.insertion.isPreparing { break }

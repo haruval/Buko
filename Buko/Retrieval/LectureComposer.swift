@@ -126,7 +126,8 @@ enum LectureComposer {
 
     @available(iOS 27, macOS 27, *)
     static func complete(selected: String, context: String, intent: String, action: String,
-                         search: LectureSearch, model: SystemLanguageModel = .default) async throws -> LectureCompletion {
+                         search: LectureSearch, model: SystemLanguageModel = .default,
+                         observer: PipelineObserver? = nil) async throws -> LectureCompletion {
         try Task.checkCancellation()
         if let refusal = LectureGroundingPolicy.preflight(selected: selected, context: context,
                                                           intent: intent, action: action, search: search) {
@@ -161,9 +162,14 @@ enum LectureComposer {
                     return LectureGroundingPolicy.abstain(.contextLimit, evidenceCount: search.hits.count)
                 }
                 let scopeSession = LanguageModelSession(model: model, instructions: scopeInstructions)
+                await observer?(.began(id: "scope.\(item.id)", title: "Check passage \(item.id) of \(indexedHits.count)",
+                    instructions: scopeInstructions, input: scopeRequest))
+                try Task.checkCancellation()
                 let scope = try await scopeSession.respond(to: scopeRequest, generating: LecturePassageScopeCheck.self,
                     options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 200))
                 try Task.checkCancellation()
+                await observer?(.completed(id: "scope.\(item.id)", summary: scope.content.scope == .potentiallyRelevant
+                    ? "Kept for evidence review" : "Excluded: different target"))
                 if scope.content.scope == .potentiallyRelevant {
                     applicable.append(item)
                     hasWithdrawal = hasWithdrawal || scope.content.withdrawsWithoutReplacement
@@ -186,9 +192,12 @@ enum LectureComposer {
                     return LectureGroundingPolicy.abstain(.contextLimit, evidenceCount: search.hits.count)
                 }
                 let proposalSession = LanguageModelSession(model: model, instructions: proposalInstructions)
+                await observer?(.began(id: "withdrawal", title: "Check withdrawn claims", instructions: proposalInstructions, input: proposalRequest))
+                try Task.checkCancellation()
                 let proposal = try await proposalSession.respond(to: proposalRequest, generating: GroundedLectureProposal.self,
                     options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 240))
                 try Task.checkCancellation()
+                await observer?(.completed(id: "withdrawal", summary: proposal.content.status.rawValue + " · " + proposal.content.sourceIDs.joined(separator: ", ")))
                 let proposed = resolve(GroundedLectureSelection(assessment: "", status: proposal.content.status,
                     sourceIDs: proposal.content.sourceIDs), selected: selected, context: context, intent: intent, action: action,
                     search: search, allowedSourceIDs: allowedIDs)
@@ -203,9 +212,12 @@ enum LectureComposer {
                 return LectureGroundingPolicy.abstain(.contextLimit, evidenceCount: search.hits.count)
             }
             let session = LanguageModelSession(model: model, instructions: instructions)
+            await observer?(.began(id: "evidence", title: "Review evidence and conflicts", instructions: instructions, input: scopedRequest))
+            try Task.checkCancellation()
             let result = try await session.respond(to: scopedRequest, generating: GroundedLectureSelection.self,
                                                   options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
             try Task.checkCancellation()
+            await observer?(.completed(id: "evidence", summary: result.content.status.rawValue + " · " + result.content.sourceIDs.joined(separator: ", ")))
             return resolve(result.content, selected: selected, context: context, intent: intent, action: action, search: search,
                            allowedSourceIDs: allowedIDs)
         } catch is CancellationError { throw CancellationError() }

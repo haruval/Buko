@@ -6,6 +6,7 @@ struct SettingsPanel: View {
     @Binding var showsTrash: Bool
     @Binding var showsDevelopment: Bool
     @Binding var showsGrid: Bool
+    @AppStorage("detailedAutofillPreview") private var detailedPreview = false
     let recreateTestNote: (SampleLecture) -> Void
     let restore: (Note) -> Void
     let restorePage: (TrashedPage) -> Void
@@ -88,6 +89,13 @@ struct SettingsPanel: View {
             } else if showsDevelopment {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Detailed preview", isOn: $detailedPreview)
+                            .font(.subheadline)
+                            .padding(.horizontal, 8).frame(minHeight: 44)
+                            .accessibilityIdentifier("detailedPreview")
+                        Text("Show live pipeline stages, prompt inputs and retrieved evidence in autofill previews.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Divider()
                         ForEach(SampleLecture.allCases) { lecture in
                             Button { recreateTestNote(lecture) } label: {
                                 Label("Recreate \(lecture.title)", systemImage: "arrow.counterclockwise")

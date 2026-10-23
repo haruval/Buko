@@ -90,7 +90,8 @@ enum AutofillWriter {
     @available(iOS 27, macOS 27, *)
     static func draft(selected: String, context: String, intent: String, action: String,
                       gap: MissingInformationPlan?, evidence: LectureCompletion,
-                      search: LectureSearch, model: SystemLanguageModel = .default) async throws -> AutofillDraftResult {
+                      search: LectureSearch, model: SystemLanguageModel = .default,
+                      observer: PipelineObserver? = nil) async throws -> AutofillDraftResult {
         try Task.checkCancellation()
         if let refusal = preflight(selected: selected, context: context, intent: intent,
                                    action: action, gap: gap, evidence: evidence, search: search) { return refusal }
@@ -107,11 +108,15 @@ enum AutofillWriter {
                 return withheld("The complete evidence did not fit the drafting stage. Narrow the selection and try again.")
             }
             let session = LanguageModelSession(model: model, instructions: instructions)
+            await observer?(.began(id: "draft", title: "Write the autofill", instructions: instructions, input: request))
+            try Task.checkCancellation()
             let response = try await session.respond(to: request, generating: GeneratedAutofillDraft.self,
                 options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
             try Task.checkCancellation()
-            return resolve(response.content, selected: selected, context: context, intent: intent,
+            let resolved = resolve(response.content, selected: selected, context: context, intent: intent,
                            action: action, gap: gap, evidence: evidence, search: search)
+            await observer?(.completed(id: "draft", summary: resolved.explanation))
+            return resolved
         } catch is CancellationError { throw CancellationError() }
         catch {
             try Task.checkCancellation()

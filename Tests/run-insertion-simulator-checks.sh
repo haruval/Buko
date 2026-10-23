@@ -21,13 +21,24 @@ project.write_text(project.read_text().replace('"devplaceholder.$(PROJECT_UNIQUE
 with (root / 'Buko/AI/CircleIntentState.swift').open('a') as f:
     f.write('''
 extension CircleIntentState {
-    func validationPreview(_ value: AutofillProposal, scale: CGFloat, offset: CGPoint) {
+    func validationBegin(_ value: AutofillProposal, scale: CGFloat, offset: CGPoint) {
         captureScale = scale; captureOffset = offset; projection = .identity
         selectionBounds = CircleGeometry.path(value.selectionPolygon).boundingBoxOfPath
             .applying(CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: -offset.x, ty: -offset.y))
         closedAt = Date.timeIntervalSinceReferenceDate
         closedBoundary = CircleJellyGeometry.roundedRectangle(selectionBounds)
+        phase = .inferring
+    }
+    func validationPreview(_ value: AutofillProposal, scale: CGFloat, offset: CGPoint) {
+        validationBegin(value, scale: scale, offset: offset)
         phase = .finished; intent = "Complete Parsing"; action = "Insert a short definition after the heading’s colon."
+        recognizedText = value.selectedText; nearbyContext = "Lexical analysis groups characters into tokens."
+        evidence = value.selectedText; citations = value.citations
+        pipeline.receive(.began(id: "intent", title: "Infer intent", instructions: IntentPrompts.instructions,
+            input: IntentPrompts.request(selected: value.selectedText, context: nearbyContext)))
+        pipeline.receive(.completed(id: "intent", summary: intent))
+        pipeline.receive(.began(id: "retrieval", title: "Search lecture PDFs", instructions: nil, input: value.selectedText))
+        pipeline.receive(.completed(id: "retrieval", summary: "Fixture passages retrieved"))
         proposal = value
     }
 }

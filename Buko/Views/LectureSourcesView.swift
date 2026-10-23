@@ -6,6 +6,7 @@ struct LecturePDFDestination: Identifiable {
     let url: URL
     let page: Int
     var quote = ""
+    var title = ""
     var id: String { url.path + ":\(page)" }
 }
 
@@ -17,6 +18,7 @@ struct LectureSourcesView: View {
     @State private var documents: [LectureDocument] = []
     @State private var importing = false
     @State private var busy = false
+    @State private var deleting = false
     @State private var error: String?
     @State private var operation: Task<Void, Never>?
     @State private var removing: LectureDocument?
@@ -30,7 +32,7 @@ struct LectureSourcesView: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Attach lecture PDFs to **\(noteTitle)**. Autofill searches these sources first and shows the pages behind each answer.")
+                    Text("Attach lecture PDFs to **\(noteTitle)**. Autofill uses these sources and shows the exact passages behind each answer.")
                         .font(.subheadline)
                     Button { importing = true } label: { Label("Import lecture PDF", systemImage: "square.and.arrow.down") }
                         .accessibilityIdentifier("importLecturePDF")
@@ -40,56 +42,45 @@ struct LectureSourcesView: View {
                             .accessibilityIdentifier("importMatchingLecture")
                             .disabled(busy)
                     }
-                    Menu("Sample lecture PDFs", systemImage: "books.vertical") {
+                    Menu {
                         ForEach(SampleLecture.allCases) { sample in
                             Button(sample.title.replacingOccurrences(of: "Test ", with: "")) { importSample(sample) }
+                                .accessibilityIdentifier("importSample.\(sample.rawValue)")
                         }
-                    }.disabled(busy)
+                    } label: {
+                        Label("Sample lecture PDFs", systemImage: "books.vertical")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(busy).accessibilityIdentifier("sampleLectureMenu")
                 } footer: {
                     Text("Stored and searched on this device. Sources apply only to this notebook. English retrieval and OCR; up to 12 PDFs, 150 pages and 40 MB each.")
                 }
                 if busy {
                     Section {
-                        HStack { ProgressView(); Text("Reading and indexing PDF…") }
-                        Button("Cancel import", role: .cancel) { operation?.cancel() }
+                        HStack { ProgressView(); Text(deleting ? "Deleting source…" : "Reading and indexing PDF…") }
+                        if !deleting { Button("Cancel import", role: .cancel) { operation?.cancel() } }
                     }
                 }
                 if let error {
                     Section { Text(error).foregroundStyle(.red).accessibilityIdentifier("lectureImportError") }
                 }
-                Section("Attached sources · \(documents.count)") {
+                Section {
                     if documents.isEmpty && !busy { Text("No PDFs attached yet.").foregroundStyle(.secondary) }
-                    ForEach(documents) { document in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Button {
-                                operation = Task {
-                                    do { preview = LecturePDFDestination(url: try await library.pdfURL(noteID: noteID, documentID: document.id),
-                                                                        page: document.textDisagreementPages?.first ?? 1) }
-                                    catch { self.error = error.localizedDescription }
-                                }
-                            } label: {
-                                Label(document.title, systemImage: "doc.richtext").font(.headline)
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityIdentifier("lectureDocument")
-                            Text("\(document.pageCount) pages · \(document.passages.count) passages")
-                                .font(.caption).foregroundStyle(.secondary)
-                            if document.passages.contains(where: \.usedOCR) {
-                                Text("Includes on-device OCR; check scanned text against the original.").font(.caption)
-                            }
-                            if !document.skippedPages.isEmpty {
-                                Text("No readable text on pages: \(document.skippedPages.map(String.init).joined(separator: ", "))").font(.caption)
-                            }
-                            if let pages = document.textDisagreementPages, !pages.isEmpty {
-                                Label("Searchable text and visible OCR disagree on pages: \(pages.map(String.init).joined(separator: ", ")). Lecture answers are paused for this notebook. Inspect the PDF, then replace or remove this source. OCR may be mistaken.",
-                                      systemImage: "exclamationmark.triangle")
-                                    .font(.caption).accessibilityIdentifier("lectureTextDisagreement")
-                            }
-                            Button("Remove source", role: .destructive) { removing = document }
-                                .buttonStyle(.borderless).font(.caption).disabled(busy)
-                        }.padding(.vertical, 4)
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)], alignment: .leading, spacing: 24) {
+                        ForEach(documents) { document in
+                            LectureSourceCard(document: document, noteID: noteID, library: library, busy: busy,
+                                open: { open(document) }, delete: { removing = document })
+                        }
                     }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 12, trailing: 0))
+                } header: {
+                    Text("\(documents.count) attached \(documents.count == 1 ? "source" : "sources")")
+                        .textCase(nil).accessibilityIdentifier("attachedSourcesCount")
                 }
+
             }
             .navigationTitle("Lecture sources")
             .navigationBarTitleDisplayMode(.inline)
@@ -104,20 +95,31 @@ struct LectureSourcesView: View {
                 case .failure(let failure): error = failure.localizedDescription
                 }
             }
-            .sheet(item: $preview) { LecturePDFView(destination: $0) }
-            .confirmationDialog("Remove this PDF from the notebook?", isPresented: Binding(
+            .fullScreenCover(item: $preview) { LecturePDFView(destination: $0) }
+            .confirmationDialog("Delete this source from the notebook?", isPresented: Binding(
                 get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
                 if let removing {
-                    Button("Remove source", role: .destructive) {
+                    Button("Delete source", role: .destructive) {
                         operation = Task {
-                            busy = true
-                            defer { busy = false; self.removing = nil }
+                            busy = true; deleting = true
+                            defer { busy = false; deleting = false; self.removing = nil }
                             do { try await library.remove(documentID: removing.id, noteID: noteID); await refresh() }
                             catch { self.error = error.localizedDescription }
                         }
                     }
                 }
             } message: { Text("The imported copy and its index will be removed. Your original file and handwritten notes stay intact.") }
+        }
+    }
+
+    private func open(_ document: LectureDocument) {
+        Task {
+            do {
+                let url = try await library.pdfURL(noteID: noteID, documentID: document.id)
+                try Task.checkCancellation()
+                preview = LecturePDFDestination(url: url, page: document.textDisagreementPages?.first ?? 1, title: document.title)
+            } catch is CancellationError { }
+            catch { self.error = error.localizedDescription }
         }
     }
 
@@ -143,37 +145,4 @@ struct LectureSourcesView: View {
             catch { self.error = error.localizedDescription }
         }
     }
-}
-
-struct LecturePDFView: View {
-    let destination: LecturePDFDestination
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        NavigationStack {
-            PDFPageView(destination: destination)
-                .navigationTitle("Source · page \(destination.page)")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.accessibilityIdentifier("closeLecturePDF")
-                } }
-        }
-    }
-}
-
-private struct PDFPageView: UIViewRepresentable {
-    let destination: LecturePDFDestination
-    func makeUIView(context: Context) -> PDFView {
-        let view = PDFView()
-        view.autoScales = true; view.displayMode = .singlePageContinuous
-        view.document = PDFDocument(url: destination.url)
-        if let page = view.document?.page(at: destination.page - 1) { view.go(to: page) }
-        if !destination.quote.isEmpty {
-            let selections = view.document?.findString(destination.quote, withOptions: .caseInsensitive)
-                .filter { $0.pages.contains { view.document?.index(for: $0) == destination.page - 1 } } ?? []
-            for selection in selections { selection.color = .systemYellow.withAlphaComponent(0.35) }
-            view.highlightedSelections = selections
-        }
-        return view
-    }
-    func updateUIView(_ uiView: PDFView, context: Context) { }
 }

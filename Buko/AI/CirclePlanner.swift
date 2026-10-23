@@ -47,20 +47,29 @@ nonisolated enum CirclePlanner {
 
     @available(iOS 27, macOS 27, *)
     static func infer(selected: String, context: String, mode: CircleRetrievalMode = .structuredGap,
-                      model: SystemLanguageModel = .default) async throws -> CirclePlan {
+                      model: SystemLanguageModel = .default, observer: PipelineObserver? = nil) async throws -> CirclePlan {
         try Task.checkCancellation()
         guard ![selected, context].contains(where: LectureGroundingPolicy.containsInstructionOverride) else {
             throw GapPlanError.instructionRisk
         }
         let transcript = GapTranscript(selected: selected, context: context)
-        if let explicit = try explicitPlan(in: transcript, mode: mode) { return explicit }
+        if let explicit = try explicitPlan(in: transcript, mode: mode) {
+            await observer?(.began(id: "binding", title: "Identify the unfinished heading", instructions: nil, input: selected))
+            try Task.checkCancellation()
+            await observer?(.completed(id: "binding", summary: "Local syntax check · no model call\n" + explicit.intent + "\n" + explicit.clarification))
+            return explicit
+        }
         switch mode {
         case .baseline:
+            let request = IntentPrompts.request(selected: selected, context: context)
+            await observer?(.began(id: "intent", title: "Infer intent", instructions: IntentPrompts.instructions, input: request))
+            try Task.checkCancellation()
             let session = LanguageModelSession(model: model, instructions: IntentPrompts.instructions)
-            let response = try await session.respond(to: IntentPrompts.request(selected: selected, context: context),
+            let response = try await session.respond(to: request,
                 generating: InferredCircleIntent.self,
                 options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: IntentPrompts.intentTokenLimit))
             try Task.checkCancellation()
+            await observer?(.completed(id: "intent", summary: response.content.intent + "\n" + response.content.action + "\n" + response.content.clarification))
             return CirclePlan(intent: response.content.intent, action: response.content.action,
                 evidence: response.content.evidence, clarification: response.content.clarification,
                 gap: nil, inputTokens: nil, responseTokenLimit: IntentPrompts.intentTokenLimit,
@@ -68,7 +77,7 @@ nonisolated enum CirclePlanner {
         case .structuredGap:
             // Freeform requests still use clarification followed by independently
             // validated target references. Explicit syntax returned above.
-            let preliminary = try await infer(selected: selected, context: context, mode: .baseline, model: model)
+            let preliminary = try await infer(selected: selected, context: context, mode: .baseline, model: model, observer: observer)
             if !preliminary.clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return CirclePlan(intent: preliminary.intent, action: preliminary.action, evidence: preliminary.evidence,
                     clarification: preliminary.clarification, gap: nil, inputTokens: nil,
@@ -87,6 +96,8 @@ nonisolated enum CirclePlanner {
                 throw GapPlanError.contextLimit
             }
             try Task.checkCancellation()
+            await observer?(.began(id: "gap", title: "Identify missing information", instructions: instructions, input: prompt))
+            try Task.checkCancellation()
             let session = LanguageModelSession(model: model, instructions: instructions)
             let response = try await session.respond(to: prompt, generating: MissingInformationPlan.self,
                 options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: MissingInformationPrompts.responseTokens))
@@ -97,6 +108,7 @@ nonisolated enum CirclePlanner {
             catch let error as GapPlanError {
                 throw RejectedGapPlan(proposed: proposed, reason: error, preliminaryIntent: preliminary.intent)
             }
+            await observer?(.completed(id: "gap", summary: gap.intent + "\nNeeds: " + gap.value.informationNeeds.joined(separator: ", ")))
             return CirclePlan(intent: gap.intent, action: gap.action, evidence: gap.targetText,
                 clarification: "", gap: gap,
                 inputTokens: count, responseTokenLimit: IntentPrompts.intentTokenLimit + MissingInformationPrompts.responseTokens,

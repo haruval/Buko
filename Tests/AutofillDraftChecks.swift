@@ -19,9 +19,31 @@ import Darwin
         precondition(AutofillWriter.inlineContinuation("Parsing is different.", selected: "Parsing vs lexing:", gap: nil) == "Parsing is different.")
         policyChecks()
         try plannerChecks()
+        diagnosticChecks()
         guard CommandLine.arguments.contains("--live") else { return }
         guard #available(macOS 27, *), case .available = SystemLanguageModel.default.availability else {
             print("SKIPPED: local model unavailable"); exit(77)
+        }
+        if CommandLine.arguments.contains("--trace-only") {
+            let recorder = TraceRecorder()
+            let observer: PipelineObserver = { event in await recorder.receive(event) }
+            let selection = "What does parsing check?", nearby = "Lexical analysis groups characters into tokens."
+            let plan = try await CirclePlanner.infer(selected: selection, context: nearby, observer: observer)
+            let search = makeSearch(["Parsing checks the token sequence against a grammar and builds a syntax tree."])
+            let evidence = try await LectureComposer.complete(selected: selection, context: nearby,
+                intent: plan.intent, action: plan.action, search: search, observer: observer)
+            let draft = try await AutofillWriter.draft(selected: selection, context: nearby, intent: plan.intent,
+                action: plan.action, gap: plan.gap?.value, evidence: evidence, search: search, observer: observer)
+            precondition(draft.content != nil)
+            let steps = await recorder.trace.steps
+            precondition(steps.map(\.id) == ["intent", "gap", "scope.P1", "evidence", "draft"])
+            precondition(steps.allSatisfy { $0.status == .completed && !$0.input.isEmpty && $0.instructions != nil })
+            precondition(steps[0].input == IntentPrompts.request(selected: selection, context: nearby))
+            let writerInput = try AutofillWriter.prompt(selected: selection, context: nearby, intent: plan.intent,
+                action: plan.action, gap: plan.gap?.value, evidence: evidence, search: search)
+            precondition(steps.last!.input == writerInput && steps.last!.instructions == AutofillWriter.instructions)
+            print("LIVE TRACE PASSED: intent, gap, passage scope, evidence and writing publish ordered stages with exact call inputs; no prompt changes")
+            return
         }
         if CommandLine.arguments.contains("--inline-only") {
             let selection = "Lexical analysis: groups characters into tokens.\nParsing:"
@@ -93,6 +115,30 @@ import Darwin
         do { _ = try await cancelled.value; fatalError("Cancellation was swallowed") }
         catch is CancellationError { }
         print("Live drafting checks passed. These are development cases, not an accuracy benchmark.")
+    }
+
+    actor TraceRecorder {
+        var trace = PipelineTrace()
+        func receive(_ event: PipelineEvent) { trace.receive(event) }
+    }
+
+    static func diagnosticChecks() {
+        var trace = PipelineTrace()
+        trace.receive(.began(id: "one", title: "First", instructions: "Rules", input: "Captured input"))
+        trace.receive(.completed(id: "one", summary: "Ready"))
+        trace.receive(.began(id: "two", title: "Second", instructions: nil, input: "Other input"))
+        trace.stopRunning()
+        trace.receive(.completed(id: "two", summary: "Late response"))
+        precondition(trace.steps[0].input == "Captured input" && trace.steps[0].status == .completed)
+        precondition(trace.steps[1].status == .stopped && trace.steps[1].summary.isEmpty)
+        let search = makeSearch(["Approved but unused passage about one subject.", "The writer uses this exact second passage."])
+        let citations = selectedEvidence(search, ids: ["P1", "P2"]).citations
+        let proposal = AutofillProposal(requestID: UUID(), noteID: UUID(), capturedAt: .now, selectionPolygon: [],
+            selectedText: "Subject:", sourceRevision: "fixture", content: .init(lines: [
+                .init(text: "One line.", citationIndices: [1]), .init(text: "Another line.", citationIndices: [1])
+            ], origin: .lectureDraft), citations: citations)
+        precondition(proposal.usedCitations.count == 1 && proposal.usedCitations[0].quote == citations[1].quote)
+        print("Diagnostic retention and used-passage attribution checks passed")
     }
 
     @available(macOS 27, *)

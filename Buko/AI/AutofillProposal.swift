@@ -29,4 +29,12 @@ nonisolated struct AutofillProposal: Sendable {
     var insertionTarget: String? = nil
 
     var text: String { content.text }
+
+    /// The evidence selector may approve more passages than the writer cites.
+    /// The simple preview credits only passages referenced by the finished lines.
+    var usedCitations: [LectureCitation] {
+        Set(content.lines.flatMap(\.citationIndices)).sorted().compactMap {
+            citations.indices.contains($0) ? citations[$0] : nil
+        }
+    }
 }
