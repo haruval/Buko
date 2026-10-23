@@ -40,7 +40,7 @@ nonisolated struct GeneratedTaskAutofillDraft {
 
 @Generable
 nonisolated struct ContextualAutofillLine {
-    @Guide(description: "The new note content that supplies the missing information, using only approved evidence. Write the ANSWER, never copy the selected question or unfinished clause. Do not repeat already-covered content. Preserve necessary qualifications. No headings, instructions, Markdown or P IDs in this text. Under 400 characters.")
+    @Guide(description: "The new note content that supplies the missing information, using only approved evidence. Write the ANSWER, never copy the selected question or unfinished clause. Do not repeat already-covered content. Preserve necessary qualifications. No headings, instructions, Markdown or P IDs in this text. ONE concise sentence per line, preferably under 240 characters and always under 400. Split longer supported answers across separately cited lines.")
     var text: String
     @Guide(description: "Approved P IDs supporting every claim in this line. At least one; no invented IDs.", .maximumCount(4))
     var sourceIDs: [String]
@@ -158,6 +158,10 @@ enum AutofillWriter {
             passages cannot supply the missing contribution, withhold the draft.
             Write the addition itself, not a quote of the selected question or
             unfinished clause. Do not reproduce already-written note sentences.
+            Keep each line to one concise sentence, aiming below 240 characters.
+            Use another separately cited line when a necessary qualification or
+            relationship would make a line too long. Never exceed 400 characters
+            in a line; do not remove a necessary qualification merely to shorten it.
             """
         }
         return taskInstructions + """
@@ -223,7 +227,11 @@ enum AutofillWriter {
             try Task.checkCancellation()
             let resolved = resolve(generated, selected: selected, context: context, intent: intent,
                            action: action, gap: gap, evidence: evidence, search: search)
-            await observer?(.completed(id: "draft", summary: (assessment.isEmpty ? "" : assessment + "\n") + resolved.explanation))
+            let rejectedShape = resolved.content == nil ? generated.lines.enumerated().map { index, line in
+                "Line \(index + 1): \(line.text.count) characters; source IDs: \(line.sourceIDs.joined(separator: ", ")); embedded newline: \(line.text.contains("\n") || line.text.contains("\r"))"
+            }.joined(separator: "\n") : ""
+            await observer?(.completed(id: "draft", summary: (assessment.isEmpty ? "" : assessment + "\n")
+                + resolved.explanation + (rejectedShape.isEmpty ? "" : "\n" + rejectedShape)))
             return resolved
         } catch is CancellationError { throw CancellationError() }
         catch {

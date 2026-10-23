@@ -178,10 +178,50 @@ import Foundation
             informationNeeds: ["concrete instance"], subjectQuotes: ["Semaphore"])
         let anchoredTerms = try resolvedTerms.subjects(in: contextualTranscript)
         precondition(anchoredTerms == contextualRaw.subjects, "Normalize case by copying actual note text, not inventing it")
+        let parallelTranscript = GapTranscript(selected: "Oak is a hardwood.\nPine is a softwood.", context: "")
+        var parallel = MissingInformationPlan(alreadyCovered: [.init(blockID: "S2", quote: "Pine is a softwood.")],
+            targets: [.init(blockID: "S2", quote: "Pine")], informationNeeds: ["a use"], operation: .continueThought,
+            subjects: [.init(blockID: "S2", quote: "Pine")], completionGoal: "give a use of Pine")
+        _ = try ValidatedGapPlan.validate(parallel, in: parallelTranscript)
+        parallel.targets = [.init(blockID: "S2", quote: "Pine is a softwood.")]
+        rejects(parallel, in: parallelTranscript)
+        parallel.targets = [.init(blockID: "S2", quote: "Pine")]
+        parallel.completionGoal = nil
+        rejects(parallel, in: parallelTranscript)
         let contextualHits = GapRetrieval.search(passages: [passage("sem", "A semaphore initialized to three allows three workers to enter.")],
             selected: contextualTranscript.selected, intent: contextual.intent, originalVector: nil, targetVector: nil,
             gap: contextual, method: .lexical)
         precondition(contextualHits.hits.map(\.id) == ["sem"], "Pronouns must retrieve through the anchored subject even without embeddings")
+        // Generic semantic-role coverage, with all meaning labels supplied by
+        // the model fixture. These checks establish anchors/bounds, not semantics.
+        let parallelNotes = GapTranscript(selected: "Alpha is tall. Alpha shades a patio.\nBeta is small.", context: "Match a use to each meaning.")
+        let parallelCandidate = ContextualGapReferences(alreadyCovered: [], targets: [], informationNeeds: ["use"], subjectQuotes: ["Alpha", "Beta"])
+        let roles = ContextualRoleMap(content: [
+            .init(topic: "Alpha", role: "meaning", quote: "Alpha is tall."),
+            .init(topic: "Alpha", role: "use", quote: "Alpha shades a patio."),
+            .init(topic: "Beta", role: "meaning", quote: "Beta is small."),
+            .init(topic: "Beta", role: "use", quote: "")], requiredRoles: ["meaning", "use"])
+        let focused = ContextualRoleMap.focus(roles, candidate: parallelCandidate, in: parallelNotes)
+        precondition(focused?.subjectQuotes == ["Beta"] && focused?.informationNeeds == ["use"])
+        precondition(focused?.targets == [.init(blockID: "S2", quote: "Beta")])
+        var reordered = roles; reordered.content.reverse()
+        precondition(ContextualRoleMap.focus(reordered, candidate: parallelCandidate, in: parallelNotes)?.subjectQuotes == ["Beta"])
+        var wrongRoles = roles; wrongRoles.content[2].quote = "An invented definition."
+        precondition(ContextualRoleMap.focus(wrongRoles, candidate: parallelCandidate, in: parallelNotes) == nil)
+        wrongRoles = roles; wrongRoles.content[2].quote = "Alpha is tall."
+        precondition(ContextualRoleMap.focus(wrongRoles, candidate: parallelCandidate, in: parallelNotes) == nil, "A quote from another topic's block cannot cover this topic")
+        wrongRoles = roles; wrongRoles.requiredRoles.append("unsupported role")
+        precondition(ContextualRoleMap.focus(wrongRoles, candidate: parallelCandidate, in: parallelNotes) == nil)
+        wrongRoles = roles; wrongRoles.content.remove(at: 1)
+        precondition(ContextualRoleMap.focus(wrongRoles, candidate: parallelCandidate, in: parallelNotes) == nil, "Two incomplete counterparts must not choose one arbitrarily")
+        wrongRoles = roles; wrongRoles.requiredRoles = ["meaning"]
+        precondition(ContextualRoleMap.focus(wrongRoles, candidate: parallelCandidate, in: parallelNotes) == nil, "Complete coverage is not an inferred gap")
+        precondition(ContextualScopeChoice.choices(subjects: ["A", "B", "C"]).count == 7)
+        precondition(ContextualScopeChoice.choices(subjects: ["A", "B", "C", "D"]).isEmpty)
+        precondition(CollectiveReference(selectedCue: "both").isGrounded(in: "Both routes deliver data."))
+        precondition(!CollectiveReference(selectedCue: "both").isGrounded(in: "What would that look like?"))
+        precondition(!CollectiveReference(selectedCue: "each").isGrounded(in: "peaches"))
+        precondition(!CollectiveReference(selectedCue: "").isGrounded(in: "Both routes"))
         let definitions = [passage("process", "A process is an executing program with its own address space."),
                            passage("thread", "A thread is an execution path within a process, with its own stack.")]
         let conjunctive = LectureRetrieval.search(passages: definitions, selected: compare.targetText, intent: compare.intent, queryVector: nil)
