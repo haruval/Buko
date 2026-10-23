@@ -6,12 +6,8 @@ final class AutofillInsertionState {
     private(set) var layout: AutofillLayout.Result?
     private(set) var isAccepting = false
     var issue: String?
-    private(set) var isPreparing = false
-    private var sampling: Task<Void, Never>?
-    private var samplingDeadline: Task<Void, Never>?
     private var sampled = HandwritingSampler.Result()
-    private var sampleDocuments: [AutofillDocument] = []
-    var handwritingDocuments: (() -> [AutofillDocument])?
+    var preparedHandwriting: ((AutofillProposal) -> HandwritingSampler.Result)?
     private var proposal: AutofillProposal?
     private var document: AutofillDocument?
     private var acceptance: Task<Void, Never>?
@@ -20,48 +16,26 @@ final class AutofillInsertionState {
     var commit: ((AutofillDocument, AutofillDocument) throws -> Void)?
     var accepted: (() -> Void)?
 
-    var canAccept: Bool { layout?.missing.isEmpty == true && !isAccepting && !isPreparing }
+    var canAccept: Bool { layout?.missing.isEmpty == true && !isAccepting }
     var missing: [String] { layout?.missing ?? [] }
 
     var handwritingDetail: String {
-        if isPreparing { return "Matching handwriting from your notes…" }
         guard let layout else { return "" }
         if layout.sampledGlyphCount == 0 { return "Handwriting font · matched to the circled text’s size" }
-        return layout.fallbackGlyphCount == 0 ? "Sampled from your notes" : "Your note samples, with a handwriting font for missing letters"
+        return layout.fallbackGlyphCount == 0 ? "Prepared from your notes" : "Prepared note samples, with a handwriting font for missing letters"
     }
 
     func capture() {
         cancel()
         document = currentDocument?()
-        sampleDocuments = document.map { [$0] } ?? []
-        sampleDocuments += (handwritingDocuments?() ?? []).filter { $0.noteID != document?.noteID }.prefix(3)
     }
 
     func prepare(_ proposal: AutofillProposal) {
         self.proposal = proposal
-        sampled = HandwritingSampler.Result()
+        // A stable snapshot of ready samples: no recognition, waiting, or later
+        // handwriting replacement while the user is reviewing the preview.
+        sampled = preparedHandwriting?(proposal) ?? HandwritingSampler.Result()
         rebuild()
-        guard layout != nil, #available(iOS 27, *) else { return }
-        isPreparing = true
-        sampling = Task { [weak self, documents = sampleDocuments] in
-            do {
-                let result = try await HandwritingSampler().sample(documents: documents, proposal: proposal)
-                try Task.checkCancellation()
-                guard let self, self.proposal?.requestID == proposal.requestID, self.isPreparing else { return }
-                self.sampled = result; self.isPreparing = false
-                self.samplingDeadline?.cancel(); self.rebuild()
-            } catch {
-                guard let self, !Task.isCancelled, self.proposal?.requestID == proposal.requestID else { return }
-                self.isPreparing = false; self.samplingDeadline?.cancel()
-            }
-        }
-        // Recognition is optional. A slow or unavailable recognizer must never
-        // hold acceptance hostage or replace a preview after the user accepts it.
-        samplingDeadline = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(8)) } catch { return }
-            guard let self, self.proposal?.requestID == proposal.requestID else { return }
-            self.sampling?.cancel(); self.isPreparing = false
-        }
     }
 
     func rebuild() {
@@ -79,8 +53,7 @@ final class AutofillInsertionState {
 
     func cancel(animatedReturn: Bool = false) {
         acceptance?.cancel(); acceptance = nil
-        sampling?.cancel(); sampling = nil; samplingDeadline?.cancel(); samplingDeadline = nil
-        sampled = HandwritingSampler.Result(); sampleDocuments = []; isPreparing = false
+        sampled = HandwritingSampler.Result()
         proposal = nil; document = nil; layout = nil; issue = nil
         isAccepting = false
         previewChanged?(nil, animatedReturn)

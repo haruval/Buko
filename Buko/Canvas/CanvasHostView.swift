@@ -14,7 +14,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private var circleHosting: UIHostingController<CircleIntentOverlay>?
 
     var onPageChange: ((Int, Int) -> Void)?
-    var captureHandwritingDocuments: (() -> [AutofillDocument])?
+    var preparedHandwriting: ((AutofillProposal) -> HandwritingSampler.Result)?
     var captureAutofillDocument: (() -> AutofillDocument?)?
     var persistAutofill: ((AutofillDocument, AutofillDocument) throws -> Void)?
     var onUndoStateChange: (() -> Void)?
@@ -91,7 +91,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         surface.addSubview(autofillPreview)
         surface.addSubview(edgeBlur)
         circleIntent.insertion.currentDocument = { [weak self] in self?.captureAutofillDocument?() }
-        circleIntent.insertion.handwritingDocuments = { [weak self] in self?.captureHandwritingDocuments?() ?? [] }
+        circleIntent.insertion.preparedHandwriting = { [weak self] proposal in self?.preparedHandwriting?(proposal) ?? HandwritingSampler.Result() }
         circleIntent.insertion.previewChanged = { [weak self] in self?.showAutofillPreview($0, animatedReturn: $1) }
         autofillPreview.didSettle = { [weak self] count in self?.finishAutofillReflow(pageCount: count) }
         circleIntent.insertion.commit = { [weak self] before, after in

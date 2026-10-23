@@ -1,6 +1,19 @@
 import XCTest
 
 final class AutofillInteractionTests: XCTestCase {
+    @MainActor func testColdHandwritingUsesImmediateFallback() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--cold-handwriting", "-detailedAutofillPreview", "NO"]
+        app.launch()
+        XCTAssertTrue(app.buttons["acceptAutofill"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["acceptAutofill"].isEnabled)
+        XCTAssertFalse(app.staticTexts["Matching your handwriting…"].exists)
+        XCTAssertEqual(app.staticTexts["autofillHandwritingSource"].label, "Review the green handwriting in your note.")
+        app.buttons["declineAutofill"].tap()
+        XCTAssertFalse(app.buttons["acceptAutofill"].exists)
+    }
+
     @MainActor func testCompactProgressAndExactSources() {
         continueAfterFailure = false
         let app = XCUIApplication()

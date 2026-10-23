@@ -4,7 +4,7 @@ import SwiftData
 
 @main struct AutofillInsertionChecks {
     enum Injected: Error { case failure }
-    @MainActor static func main() throws {
+    @MainActor static func main() async throws {
         AutofillReflowChecks.run()
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -22,6 +22,7 @@ import SwiftData
         }
         let sample = PKDrawing(strokes: [stroke(100, 60, 45, 65)])
         let samples = ["a": try HandwritingSample(drawing: sample), "b": try HandwritingSample(drawing: sample)]
+        try await PreparedHandwritingChecks.run(root: root, sample: samples["a"]!)
         do { _ = try HandwritingSample(drawing: PKDrawing()); preconditionFailure("Empty samples must fail") }
         catch HandwritingSample.SampleError.invalidInk { }
 

@@ -27,6 +27,7 @@ private struct InsertionHarnessView: UIViewRepresentable {
     let note: Note
     let original: AutofillDocument
     let session = CanvasSession()
+    let handwriting = HandwritingPreparation(idleDelay: .zero)
     var coordinator: NoteCanvas.Coordinator?
     var failSave = false
     var isFlowExample: Bool { ProcessInfo.processInfo.arguments.contains("--flow-preview") }
@@ -68,6 +69,7 @@ private struct InsertionHarnessView: UIViewRepresentable {
         }
         coordinator.host = host; coordinator.hasLoadedDrawing = true
         self.coordinator = coordinator; host.canvas.delegate = coordinator
+        host.preparedHandwriting = { [weak self] in self?.handwriting.prepared(for: $0) ?? HandwritingSampler.Result() }
         host.captureAutofillDocument = { [weak self] in self.map { AutofillDocument($0.note) } }
         host.persistAutofill = { [weak self] before, after in
             guard let self, before.matches(AutofillDocument(self.note)) else { throw AutofillEditError.stale }
@@ -102,12 +104,8 @@ private struct InsertionHarnessView: UIViewRepresentable {
             try await Task.sleep(for: .seconds(6))
         }
         host.circleIntent.validationPreview(proposal, scale: host.canvas.zoomScale, offset: host.canvas.contentOffset)
-        for _ in 0..<200 {
-            if !host.circleIntent.insertion.isPreparing { break }
-            try await Task.sleep(for: .milliseconds(50))
-        }
+        precondition(host.circleIntent.insertion.canAccept, "Prepared or fallback handwriting must be ready immediately")
         try await Task.sleep(for: .milliseconds(200))
-        precondition(!host.circleIntent.insertion.isPreparing)
         precondition(original.matches(AutofillDocument(note)), "Preview mutated persistence")
         precondition(AutofillDocument.sameInk(host.canonicalDrawing, try! AutofillDocument.drawing(original.ink)), "Preview mutated live ink")
     }
@@ -122,11 +120,11 @@ private struct InsertionHarnessView: UIViewRepresentable {
             drawing: ink, bounds: ink.bounds, rendering: "fixture-generated")
         let generated = AutofillDocument(noteID: original.noteID, ink: original.ink, pages: original.pages,
             pageCount: 1, layoutVersion: original.layoutVersion, history: try JSONEncoder().encode([record]))
-        let excluded = try await HandwritingSampler().sample(documents: [generated], proposal: proposal)
+        let excluded = try await HandwritingSampler().prepare(document: generated)
         precondition(excluded.samples.isEmpty, "Never call generated ink a personal handwriting sample")
         let otherNote = AutofillDocument(noteID: UUID(), ink: original.ink, pages: original.pages,
             pageCount: 1, layoutVersion: original.layoutVersion, history: Data())
-        let sampled = try await HandwritingSampler().sample(documents: [generated, otherNote], proposal: proposal)
+        let sampled = try await HandwritingSampler().prepare(document: otherNote)
         precondition(!sampled.samples.isEmpty, "Use existing handwriting from another note without character setup")
     }
 
@@ -235,6 +233,10 @@ private struct InsertionHarnessView: UIViewRepresentable {
                 }, for: .touchUpInside)
                 host.addSubview(button)
             }
+            if !ProcessInfo.processInfo.arguments.contains("--cold-handwriting") {
+                handwriting.update(notes: [note], preferredID: note.id)
+                await handwriting.validationWait()
+            }
             try await preview()
             guard ProcessInfo.processInfo.arguments.contains("--run-checks") else { return }
             precondition(host.circleIntent.insertion.canAccept)
@@ -281,7 +283,7 @@ private struct InsertionHarnessView: UIViewRepresentable {
             original.apply(to: note); try container.mainContext.save()
             try await preview()
             if #available(iOS 27, *) { try await checkOtherNotesAndGeneratedExclusion() }
-            try Data("PASS: automatic current/other-note sampling, generated-ink exclusion, inline placement, preview/decline, failure rollback/retry, native atomic undo/redo, source and document staleness, cancellation".utf8)
+            try Data("PASS: prepared current/other-note sampling, immediate preview acceptance, generated-ink exclusion, inline placement, preview/decline, failure rollback/retry, native atomic undo/redo, source and document staleness, cancellation".utf8)
                 .write(to: URL.documentsDirectory.appendingPathComponent("result.txt"), options: .atomic)
         } catch {
             try? Data("FAIL: \(error)".utf8).write(to: URL.documentsDirectory.appendingPathComponent("result.txt"))

@@ -43,6 +43,12 @@ extension CircleIntentState {
     }
 }
 ''')
+with (root / 'Buko/AI/HandwritingPreparation.swift').open('a') as f:
+    f.write('''
+extension HandwritingPreparation {
+    func validationWait() async { await task?.value }
+}
+''')
 with (root / 'Buko/AI/AutofillCanvasPreview.swift').open('a') as f:
     f.write('''
 extension AutofillCanvasPreview {

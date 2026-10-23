@@ -1,7 +1,6 @@
 import PencilKit
 
-/// Request-local sampling: no training pass, alphabet exercise, profile file, or
-/// network. Complete recognized words can retain joined cursive; ambiguous letter
+/// Idle-time preparation independent of the text an autofill may later generate. Complete recognized words can retain joined cursive; ambiguous letter
 /// matches fall back instead of slicing a stroke into invented glyphs.
 actor HandwritingSampler {
     struct Result: Sendable {
@@ -17,69 +16,83 @@ actor HandwritingSampler {
     }
 
     @available(iOS 27, macOS 27, *)
-    func sample(documents: [AutofillDocument], proposal: AutofillProposal) async throws -> Result {
-        var result = Result()
+    func prepare(document: AutofillDocument) async throws -> PreparedHandwriting {
+        var result = PreparedHandwriting()
         let started = ProcessInfo.processInfo.systemUptime
+        try Task.checkCancellation()
+        guard document.ink.count <= 20_000_000,
+              let drawing = try? AutofillDocument.drawing(document.ink),
+              let history = try? (document.history.isEmpty ? [] : JSONDecoder().decode([AutofillRecord].self, from: document.history)) else { return result }
+        let generated = Set(history.flatMap(\.strokeIDs))
+        let candidates = drawing.strokes.filter { !generated.contains($0.id) }
+        let ordered = AutofillTypography.rows(candidates).sorted { $0.bounds.minY > $1.bounds.minY }
+        var complete: [PKStroke] = []
+        for row in ordered where row.strokes.count <= 1_200 {
+            if complete.count + row.strokes.count > 1_200 { break }
+            complete += row.strokes
+        }
+        guard !complete.isEmpty else { return result }
+        let recognizer = PKStrokeRecognizer(preferredLanguages: [Locale.Language(identifier: "en")])
+        await recognizer.updateDrawing(PKDrawing(strokes: complete))
+        try Task.checkCancellation()
+        let recognized = await recognizer.recognizedText() ?? ""
+        guard !recognized.isEmpty else { return result }
+        // Index possible unfinished headings now so placement never needs a
+        // second recognizer after the model has written its answer.
+        for heading in Self.headings(in: recognized) {
+            if ProcessInfo.processInfo.systemUptime - started > 4 { break }
+            try Task.checkCancellation()
+            let matches = await recognizer.search(heading, fullWordsOnly: false, caseMatchingOnly: false)
+            for match in matches.prefix(4) {
+                let text = await recognizer.recognizedText(strokeIDs: match.strokes) ?? ""
+                if AutofillTypography.normalized(text) == AutofillTypography.normalized(heading) {
+                    result.headings.append(.init(text: heading, bounds: match.bounds))
+                }
+            }
+        }
         var seen = Set<String>()
-        let words = Self.words(in: proposal.text).filter { $0.count > 1 && seen.insert($0).inserted }.prefix(40)
-        let characters = proposal.text.filter { !$0.isWhitespace }.map(String.init)
-            .filter { seen.insert($0).inserted }.prefix(80)
-        let queries = Array(words) + Array(characters)
-        let selectedBounds = CircleGeometry.path(proposal.selectionPolygon).boundingBoxOfPath
-        for (index, document) in documents.prefix(4).enumerated() {
+        // Letters first: they remain useful even when future completions contain
+        // words that have never appeared in the source notes.
+        let characters = recognized.filter { !$0.isWhitespace }.map(String.init)
+            .filter { seen.insert($0).inserted }.prefix(96)
+        let words = Self.words(in: recognized).filter { $0.count > 1 && $0.count <= 128 && seen.insert($0).inserted }.prefix(128)
+        let rows = AutofillTypography.rows(complete)
+        for query in Array(characters) + Array(words) {
+            if ProcessInfo.processInfo.systemUptime - started > 12 { break }
             try Task.checkCancellation()
-            guard document.ink.count <= 20_000_000,
-                  let drawing = try? AutofillDocument.drawing(document.ink) else { continue }
-            // A damaged attribution history cannot identify generated ink safely.
-            guard let history = try? (document.history.isEmpty ? [] : JSONDecoder().decode([AutofillRecord].self, from: document.history)) else { continue }
-            let generated = Set(history.flatMap(\.strokeIDs))
-            let candidates = drawing.strokes.filter { !generated.contains($0.id) }
-            let ordered = AutofillTypography.rows(candidates).sorted { a, b in
-                if index == 0 { return abs(a.bounds.midY - selectedBounds.midY) < abs(b.bounds.midY - selectedBounds.midY) }
-                return a.bounds.minY > b.bounds.minY
-            }
-            var complete: [PKStroke] = []
-            for row in ordered where row.strokes.count <= 1_200 {
-                if complete.count + row.strokes.count > 1_200 { break }
-                complete += row.strokes
-            }
-            let recognizer = PKStrokeRecognizer(preferredLanguages: [Locale.Language(identifier: "en")])
-            await recognizer.updateDrawing(PKDrawing(strokes: complete))
-            try Task.checkCancellation()
-            let recognized = await recognizer.recognizedText() ?? ""
-            guard !recognized.isEmpty else { continue }
-            if index == 0, let target = proposal.insertionTarget, target.hasSuffix(":") {
-                let matches = await recognizer.search(target, fullWordsOnly: false, caseMatchingOnly: false)
-                let inside = matches.filter { selectedBounds.contains($0.bounds) }
-                if inside.count == 1, let match = inside.first {
-                    let text = await recognizer.recognizedText(strokeIDs: match.strokes) ?? ""
-                    if AutofillTypography.normalized(text) == AutofillTypography.normalized(target) {
-                        result.targetBounds = match.bounds
-                    }
-                }
-            }
-            let rows = AutofillTypography.rows(complete)
-            for query in queries where result.samples[query] == nil && recognized.contains(query) {
-                if ProcessInfo.processInfo.systemUptime - started > 6 { return result }
+            let matches = await recognizer.search(query, fullWordsOnly: query.count > 1, caseMatchingOnly: true)
+            for match in matches.prefix(3) {
                 try Task.checkCancellation()
-                let matches = await recognizer.search(query, fullWordsOnly: query.count > 1, caseMatchingOnly: true)
-                for match in matches.prefix(3) {
-                    try Task.checkCancellation()
-                    let strokes = complete.filter { match.strokes.contains($0.id) }
-                    guard Self.isIsolated(strokes: strokes, bounds: match.bounds, all: complete),
-                          let row = rows.first(where: { $0.bounds.contains(CGPoint(x: match.bounds.midX, y: match.bounds.midY)) }) else { continue }
-                    // Substring searches may return the entire connected word's
-                    // stroke IDs. A second reading must identify exactly this token.
-                    let isolated = await recognizer.recognizedText(strokeIDs: match.strokes) ?? ""
-                    guard isolated.trimmingCharacters(in: .whitespacesAndNewlines) == query else { continue }
-                    let style = AutofillTypography.style(row, neighbors: rows)
-                    guard let sample = try? HandwritingSample(drawing: PKDrawing(strokes: strokes),
-                        referenceTop: style.top, referenceHeight: style.height) else { continue }
-                    result.samples[query] = sample
-                    break
+                let strokes = complete.filter { match.strokes.contains($0.id) }
+                guard Self.isIsolated(strokes: strokes, bounds: match.bounds, all: complete),
+                      let row = rows.first(where: { $0.bounds.contains(CGPoint(x: match.bounds.midX, y: match.bounds.midY)) }) else { continue }
+                let isolated = await recognizer.recognizedText(strokeIDs: match.strokes) ?? ""
+                guard isolated.trimmingCharacters(in: .whitespacesAndNewlines) == query else { continue }
+                let style = AutofillTypography.style(row, neighbors: rows)
+                guard let sample = try? HandwritingSample(drawing: PKDrawing(strokes: strokes),
+                    referenceTop: style.top, referenceHeight: style.height) else { continue }
+                result.samples[query] = sample
+                break
+            }
+        }
+        try Task.checkCancellation()
+        return result
+    }
+
+    nonisolated static func headings(in text: String) -> [String] {
+        // Include short suffixes before each colon (e.g. “static scope:”) even
+        // when recognition flattened neighboring lines into one paragraph.
+        var result: [String] = [], seen = Set<String>()
+        let sections = text.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
+        for section in sections {
+            for prefix in section.components(separatedBy: ":").dropLast() {
+                let words = prefix.split(whereSeparator: \.isWhitespace)
+                for count in 1...max(1, min(6, words.count)) where !words.isEmpty {
+                    let heading = words.suffix(count).joined(separator: " ") + ":"
+                    if heading.count <= 100, seen.insert(heading).inserted { result.append(heading) }
+                    if result.count == 32 { return result }
                 }
             }
-            if queries.allSatisfy({ result.samples[$0] != nil }) { break }
         }
         return result
     }

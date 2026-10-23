@@ -31,11 +31,11 @@ struct AutofillPreviewCard: View {
                                 .transition(titleTransition)
                         }
                         .animation(stageAnimation, value: title)
-                        if state.processing || state.insertion.isPreparing {
+                        if state.processing {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
-                                if detailed { Text(state.processing ? state.progressLabel : "Matching handwriting…").font(.caption) }
-                            }.accessibilityLabel(state.processing ? state.progressLabel : "Matching handwriting")
+                                if detailed { Text(state.progressLabel).font(.caption) }
+                            }.accessibilityLabel(state.progressLabel)
                                 .transition(reduceMotion || detailed ? .identity : .opacity)
                         }
                     }
@@ -89,7 +89,6 @@ struct AutofillPreviewCard: View {
             .clipShape(.rect(cornerRadius: 26))
             .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.18)), in: .rect(cornerRadius: 26))
             .animation(stageAnimation, value: AutofillPreviewStage(state))
-            .animation(stageAnimation, value: state.insertion.isPreparing)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("intentPopup")
@@ -146,8 +145,7 @@ struct AutofillPreviewCard: View {
 
     private var acceptance: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(detailed ? state.insertion.handwritingDetail : state.insertion.isPreparing
-                 ? "Matching your handwriting…" : "Review the green handwriting in your note.")
+            Text(detailed ? state.insertion.handwritingDetail : "Review the green handwriting in your note.")
                 .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillHandwritingSource")
             HStack(spacing: 12) {
                 Button(action: state.decline) { Text("Decline").frame(maxWidth: .infinity, minHeight: 44) }
@@ -206,8 +204,7 @@ private struct DetailedAutofillPreview: View {
                 Text("Pipeline").font(.subheadline.weight(.semibold))
                 ForEach(state.pipeline.steps) { step in PipelineStepView(step: step) }
                 if state.proposal != nil {
-                    Label(state.insertion.isPreparing ? "Matching handwriting" : "Handwriting preview ready",
-                          systemImage: state.insertion.isPreparing ? "ellipsis.circle" : "checkmark.circle.fill")
+                    Label("Handwriting preview ready", systemImage: "checkmark.circle.fill")
                         .font(.caption).accessibilityIdentifier("handwritingPipelineStage")
                 }
             }.accessibilityElement(children: .contain).accessibilityIdentifier("autofillPipeline")

@@ -31,6 +31,7 @@ struct ContentView: View {
     @State private var settingsVisible = false
     @State private var showsTrash = false
     @State private var session = CanvasSession()
+    @State private var handwriting = HandwritingPreparation()
     @State private var renamingNote: Note?
     @State private var renamePresented = false
     @State private var newTitle = ""
@@ -44,33 +45,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        workspace
-        .ignoresSafeArea(.keyboard)
-        .tint(.accentColor)
-        .task {
-            normalizeDuplicateTitles()
-            migrateTestLectureTitle()
-            if pplTestNoteID.isEmpty { recreateTestNote(.programmingLanguages) }
-            if selection == nil {
-                if notes.isEmpty && trashedNotes.isEmpty { createNote() }
-                else if let note = notes.first { select(note) }
-            }
-            for lecture in [SampleLecture.operatingSystems, .linearAlgebra, .biology101] {
-                if UserDefaults.standard.string(forKey: lecture.storageKey) == nil {
-                    recreateTestNote(lecture, selectCreated: false)
-                }
-            }
-        }
-        .sheet(item: $lectureSourceNote) { note in
-            LectureSourcesView(noteID: note.id, noteTitle: note.title)
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active { session.host?.circleIntent.cancel(); saveNow() }
-        }
-        .onChange(of: sidebarVisible) { _, _ in titleFocused = false }
-        .onChange(of: settingsVisible) { _, _ in titleFocused = false }
-        .onChange(of: pagesVisible) { _, _ in titleFocused = false }
-        .onChange(of: session.isDrawing) { _, drawing in if drawing { titleFocused = false } }
+        configuredWorkspace
         .alert("Rename note", isPresented: $renamePresented, presenting: renamingNote) { note in
             TextField("Note name", text: $newTitle)
             Button("Cancel", role: .cancel) { renamingNote = nil }
@@ -117,6 +92,46 @@ struct ContentView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(session.loadError ?? "")
+        }
+    }
+
+    private var configuredWorkspace: some View {
+        let handwritingStamps = notes.map { HandwritingPreparation.Stamp($0) }
+        return workspace
+        .ignoresSafeArea(.keyboard)
+        .tint(.accentColor)
+        .task {
+            normalizeDuplicateTitles()
+            migrateTestLectureTitle()
+            if pplTestNoteID.isEmpty { recreateTestNote(.programmingLanguages) }
+            if selection == nil {
+                if notes.isEmpty && trashedNotes.isEmpty { createNote() }
+                else if let note = notes.first { select(note) }
+            }
+            for lecture in [SampleLecture.operatingSystems, .linearAlgebra, .biology101] {
+                if UserDefaults.standard.string(forKey: lecture.storageKey) == nil {
+                    recreateTestNote(lecture, selectCreated: false)
+                }
+            }
+        }
+        .onAppear { refreshHandwriting() }
+        .onChange(of: handwritingStamps) { _, _ in refreshHandwriting() }
+        .onChange(of: selectedNote?.id) { _, _ in refreshHandwriting() }
+        .onChange(of: session.host?.circleIntent.phase) { _, _ in refreshHandwriting() }
+        .onDisappear { handwriting.setPaused(true) }
+        .sheet(item: $lectureSourceNote) { note in
+            LectureSourcesView(noteID: note.id, noteTitle: note.title)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { session.host?.circleIntent.cancel(); saveNow() }
+            refreshHandwriting()
+        }
+        .onChange(of: sidebarVisible) { _, _ in titleFocused = false }
+        .onChange(of: settingsVisible) { _, _ in titleFocused = false }
+        .onChange(of: pagesVisible) { _, _ in titleFocused = false }
+        .onChange(of: session.isDrawing) { _, drawing in
+            if drawing { titleFocused = false }
+            refreshHandwriting()
         }
     }
 
@@ -185,9 +200,11 @@ struct ContentView: View {
             guard revision == canvasRevision else { return }
             note.drawingData = data
             note.updatedAt = .now
+            handwriting.invalidate(noteID: note.id)
+            refreshHandwriting()
             scheduleSave()
-        }, handwritingDocuments: {
-            notes.lazy.filter { $0.id != note.id && $0.deletedAt == nil }.prefix(3).map { AutofillDocument($0) }
+        }, preparedHandwriting: { proposal in
+            handwriting.prepared(for: proposal)
         }, onAutofillCommit: { before, after in
             guard revision == canvasRevision, selectedNote?.id == note.id,
                   note.deletedAt == nil, !session.isDrawing,
@@ -195,6 +212,8 @@ struct ContentView: View {
             guard saveNow() else { throw AutofillEditError.unavailable }
             do {
                 try NotebookEdits.commit(in: modelContext, notes: [note]) { after.apply(to: note) }
+                handwriting.invalidate(noteID: note.id)
+                refreshHandwriting()
             } catch {
                 persistenceError = error.localizedDescription
                 throw error
@@ -487,6 +506,13 @@ struct ContentView: View {
             }
         }
         saveNow()
+    }
+
+    private func refreshHandwriting() {
+        var available = notes
+        if let selectedNote, !available.contains(where: { $0.id == selectedNote.id }) { available.insert(selectedNote, at: 0) }
+        handwriting.setPaused(scenePhase != .active || session.isDrawing || (session.host?.circleIntent.phase ?? .idle) != .idle)
+        handwriting.update(notes: available, preferredID: selectedNote?.id)
     }
 
     private func scheduleSave() {

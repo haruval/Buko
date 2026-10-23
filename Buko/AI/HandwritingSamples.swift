@@ -1,7 +1,7 @@
 import Foundation
 import PencilKit
 
-nonisolated struct HandwritingSample: Sendable {
+nonisolated struct HandwritingSample: Codable, Sendable {
     static let baseline: CGFloat = 126
     static let capHeight: CGFloat = 72
     let drawingData: Data
