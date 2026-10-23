@@ -39,6 +39,27 @@ final class LectureSourceTests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Page 1 of'")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertLessThan(app.buttons["closeLecturePDF"].frame.midX, app.frame.midX)
         XCTAssertLessThan(app.buttons["closeLecturePDF"].frame.maxY, app.frame.height * 0.15)
+        let close = app.buttons["closeLecturePDF"]
+        XCTAssertEqual(close.frame.width, close.frame.height, accuracy: 2)
+        let pdf = app.descendants(matching: .any)["pdfZoomTestArea"].firstMatch
+        Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertEqual(pdf.value as? String, "1.000")
+        pdf.pinch(withScale: 0.4, velocity: -1)
+        Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertEqual(pdf.value as? String, "1.000", "Pinching out cannot shrink below the opening fit")
+        pdf.pinch(withScale: 1.6, velocity: 1)
+        Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertGreaterThan(Double(pdf.value as? String ?? "0") ?? 0, 1.1)
+        pdf.pinch(withScale: 0.3, velocity: -1)
+        Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertEqual(pdf.value as? String, "1.000")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        Thread.sleep(forTimeInterval: 1)
+        pdf.pinch(withScale: 0.4, velocity: -1)
+        Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertEqual(pdf.value as? String, "1.000", "Rotation recomputes the fitted zoom floor")
+        XCUIDevice.shared.orientation = .portrait
+        Thread.sleep(forTimeInterval: 1)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Imported lecture PDF source viewer"
         shot.lifetime = .keepAlways; add(shot)

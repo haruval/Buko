@@ -12,13 +12,15 @@ struct CircleIntentOverlay: View {
     let state: CircleIntentState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
+    @State private var measuredHeight: CGFloat = 76
 
     var body: some View {
         GeometryReader { geometry in
+            let maximumHeight = max(120, min(620, geometry.size.height - 160))
             let popupSize = CGSize(
                 width: min(detailedPreview ? 390 : 330, CirclePopupPlacement.preferredWidth(
                     viewport: geometry.size, region: state.selectionBounds.applying(state.projection))),
-                height: min(popupHeight, geometry.size.height - 160))
+                height: min(measuredHeight, maximumHeight))
             let layout = PopupLayout(size: popupSize, viewport: geometry.size,
                 insertedBounds: state.insertion.layout?.bounds, stage: AutofillPreviewStage(state), detailed: detailedPreview)
             ZStack(alignment: .topLeading) {
@@ -28,15 +30,19 @@ struct CircleIntentOverlay: View {
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: state.insertion.layout != nil)
                         .allowsHitTesting(false)
                     if state.phase == .finished || state.processing {
-                        AutofillPreviewCard(state: state, detailed: detailedPreview)
+                        AutofillPreviewCard(state: state, detailed: detailedPreview, maximumHeight: maximumHeight) { size in
+                            measuredHeight = size.height
+                        }
+                            .frame(width: popupSize.width, alignment: .topLeading)
+                            .transaction { $0.animation = nil }
                             .modifier(PopupPresentation(bounds: CGRect(origin: state.popupBounds.origin, size: popupSize), state: state))
-                            .animation(stageAnimation, value: AutofillPreviewStage(state))
+                            .animation(stageAnimation, value: popupSize)
                             .onAppear { positionPopup(popupSize, viewport: geometry.size) }
                             .onChange(of: layout) { previous, current in
                                 // Choose the destination once, never from intermediate spring sizes.
                                 // Camera/viewport changes remain direct; only pipeline changes spring.
                                 let animate = previous.viewport == current.viewport && previous.detailed == current.detailed
-                                    && (previous.stage != current.stage || previous.insertedBounds != current.insertedBounds)
+                                    && (previous.size != current.size || previous.stage != current.stage || previous.insertedBounds != current.insertedBounds)
                                 repositionPopup(popupSize, viewport: geometry.size, animated: animate)
                             }
                             .transition(reduceMotion ? .identity : .scale(scale: 0.75).combined(with: .opacity))
@@ -46,7 +52,9 @@ struct CircleIntentOverlay: View {
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .ignoresSafeArea()
-
+        .onChange(of: state.phase) { _, phase in
+            if phase == .idle { measuredHeight = 76 }
+        }
     }
 
     private func jelly(in viewport: CGSize) -> some View {
@@ -77,12 +85,6 @@ struct CircleIntentOverlay: View {
                                             startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
                     .opacity(state.processing ? 0.7 + 0.25 * wave : 0.75)
             }
-    }
-
-    private var popupHeight: CGFloat {
-        if detailedPreview { return 620 }
-        if let proposal = state.proposal { return proposal.usedCitations.isEmpty ? 220 : 390 }
-        return state.processing ? (state.missingInformation == nil ? 132 : 164) : 250
     }
 
     private func positionPopup(_ size: CGSize, viewport: CGSize) {
@@ -127,7 +129,9 @@ private struct PopupPresentation: ViewModifier, Animatable {
         // This non-observed cache has no layout/state feedback. Updating it from
         // the interpolated value keeps moving controls from leaking taps to ink.
         state.popupHitBounds = bounds
-        return content.frame(width: bounds.width, height: bounds.height)
+        return content.frame(width: bounds.width, height: bounds.height, alignment: .topLeading)
+            .clipShape(.rect(cornerRadius: 26))
+            .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.18)), in: .rect(cornerRadius: 26))
             .offset(x: bounds.minX, y: bounds.minY)
     }
 }

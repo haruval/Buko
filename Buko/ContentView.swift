@@ -17,6 +17,7 @@ struct ContentView: View {
     @AppStorage("pplTestNoteID") private var pplTestNoteID = ""
     @AppStorage("testPPLLectureTitleMigrated") private var testPPLLectureTitleMigrated = false
     @State private var showsDevelopment = false
+    @State private var showsHandwritingPreview = false
     @State private var lectureSourceNote: Note?
     @State private var canvasRevision = UUID()
     @State private var pagesVisible = false
@@ -121,6 +122,9 @@ struct ContentView: View {
         .onDisappear { handwriting.setPaused(true) }
         .sheet(item: $lectureSourceNote) { note in
             LectureSourcesView(noteID: note.id, noteTitle: note.title)
+        }
+        .sheet(isPresented: $showsHandwritingPreview) {
+            HandwritingPreviewView(preparation: handwriting, noteID: selectedNote?.id)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { session.host?.circleIntent.cancel(); saveNow() }
@@ -306,7 +310,10 @@ struct ContentView: View {
                     SettingsPanel(
                         trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash,
                         showsDevelopment: $showsDevelopment, showsGrid: $showsGrid,
-                        recreateTestNote: { lecture in
+                        previewHandwriting: {
+                            session.host?.circleIntent.cancel()
+                            showsHandwritingPreview = true
+                        }, recreateTestNote: { lecture in
                             recreateTestNote(lecture)
                             if settingsVisible { toggleSettings() }
                         }, restore: restore, restorePage: restorePage,

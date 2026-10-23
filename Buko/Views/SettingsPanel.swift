@@ -7,6 +7,7 @@ struct SettingsPanel: View {
     @Binding var showsDevelopment: Bool
     @Binding var showsGrid: Bool
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
+    let previewHandwriting: () -> Void
     let recreateTestNote: (SampleLecture) -> Void
     let restore: (Note) -> Void
     let restorePage: (TrashedPage) -> Void
@@ -95,6 +96,12 @@ struct SettingsPanel: View {
                             .accessibilityIdentifier("detailedPreview")
                         Text("Show live pipeline stages, prompt inputs and retrieved evidence in autofill previews.")
                             .font(.caption).foregroundStyle(.secondary)
+                        Button(action: previewHandwriting) {
+                            Label("Handwriting samples", systemImage: "textformat.abc")
+                                .font(.subheadline.weight(.medium))
+                                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                                .padding(.horizontal, 8)
+                        }.buttonStyle(.glass).accessibilityIdentifier("previewHandwriting")
                         Divider()
                         ForEach(SampleLecture.allCases) { lecture in
                             Button { recreateTestNote(lecture) } label: {

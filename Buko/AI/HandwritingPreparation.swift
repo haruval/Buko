@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import PencilKit
+import Observation
 
 /// Derived from a bounded snapshot of one note, independently of any autofill.
 nonisolated struct PreparedHandwriting: Codable, Sendable {
@@ -43,13 +44,13 @@ actor HandwritingCache {
         self.directory = directory; self.build = build
     }
 
-    func prepared(for document: AutofillDocument) async throws -> PreparedHandwriting {
+    func prepared(for document: AutofillDocument, ignoringCache: Bool = false) async throws -> PreparedHandwriting {
         try Task.checkCancellation()
         var hash = SHA256()
         hash.update(data: document.ink); hash.update(data: document.history)
         let revision = hash.finalize().map { String(format: "%02x", $0) }.joined()
         let url = directory?.appendingPathComponent(document.noteID.uuidString + ".json")
-        if let url, let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= Self.byteLimit,
+        if !ignoringCache, let url, let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= Self.byteLimit,
            let data = try? Data(contentsOf: url), let saved = try? JSONDecoder().decode(Envelope.self, from: data),
            saved.version == 1, saved.revision == revision, Self.valid(saved.handwriting) {
             try Task.checkCancellation()
@@ -93,6 +94,19 @@ actor HandwritingCache {
     }
 }
 
+/// Only the inspector observes these coarse changes; ink input never publishes
+/// preparation progress or thumbnail work through the canvas view hierarchy.
+@Observable @MainActor final class HandwritingPreparationStatus {
+    fileprivate(set) var revision = 0
+    fileprivate(set) var message = "Waiting for notes"
+    fileprivate(set) var isRebuilding = false
+}
+
+nonisolated struct HandwritingInspectionSample: Sendable {
+    let sample: HandwritingSample
+    let source: String
+}
+
 /// One workspace-owned scheduler. Nothing here observes or mutates live ink, and
 /// autofill only reads completed profiles; it never starts or waits for this work.
 @MainActor final class HandwritingPreparation {
@@ -102,6 +116,8 @@ actor HandwritingCache {
         init(_ note: Note) { id = note.id; updatedAt = note.updatedAt }
     }
     private struct Entry { let stamp: Stamp; let handwriting: PreparedHandwriting }
+    let status = HandwritingPreparationStatus()
+    private var resetRequested = false
     private let cache: HandwritingCache
     private let idleDelay: Duration
     private var notes: [Note] = []
@@ -123,6 +139,7 @@ actor HandwritingCache {
         guard stamps != nextStamps else { return }
         notes = next; stamps = nextStamps
         entries = entries.filter { nextStamps.contains($0.value.stamp) }
+        status.revision += 1
         restart()
     }
 
@@ -134,32 +151,66 @@ actor HandwritingCache {
 
     func invalidate(noteID: UUID) {
         entries[noteID] = nil
+        status.revision += 1
         // Called synchronously on edits, before SwiftUI delivers query changes.
         task?.cancel(); generation = UUID()
         stamps = []
+    }
+
+    func rebuild() {
+        entries.removeAll()
+        resetRequested = true
+        status.isRebuilding = true
+        status.revision += 1
+        restart()
+    }
+
+    func inspection(preferredID: UUID?) -> [String: HandwritingInspectionSample] {
+        var result: [String: HandwritingInspectionSample] = [:]
+        let ids = preferredID.map { [$0] } ?? []
+        for id in ids + stamps.map(\.id).filter({ $0 != preferredID }) {
+            guard let entry = entries[id], let note = notes.first(where: { $0.id == id }),
+                  note.deletedAt == nil, Stamp(note) == entry.stamp else { continue }
+            for (key, sample) in entry.handwriting.samples where result[key] == nil {
+                result[key] = HandwritingInspectionSample(sample: sample, source: note.title)
+            }
+        }
+        return result
     }
 
     private func restart() {
         task?.cancel()
         let token = UUID(); generation = token
         let ids = Set(stamps.map(\.id)), cache = cache, delay = idleDelay
+        status.message = notes.isEmpty ? "No active notes to sample" : paused ? "Paused · resumes when you’re idle" : "Waiting for an idle moment"
         task = Task(priority: .utility) { [weak self] in
-            await cache.prune(keeping: ids)
-            guard let self, !self.paused, !Task.isCancelled else { return }
+            guard let self else { return }
+            await cache.prune(keeping: self.resetRequested ? [] : ids)
+            guard token == self.generation, !Task.isCancelled else { return }
+            self.resetRequested = false
+            guard !self.paused else { return }
             do {
                 try await Task.sleep(for: delay)
-                for note in self.notes {
+                for (index, note) in self.notes.enumerated() {
                     try Task.checkCancellation()
                     guard token == self.generation, note.deletedAt == nil else { return }
                     let stamp = Stamp(note)
                     if self.entries[note.id]?.stamp == stamp { continue }
+                    self.status.message = "Preparing \(index + 1) of \(self.notes.count) · \(note.title)"
                     let document = AutofillDocument(note)
-                    let handwriting = try await cache.prepared(for: document)
+                    let handwriting = try await cache.prepared(for: document, ignoringCache: self.status.isRebuilding)
                     try Task.checkCancellation()
                     guard token == self.generation, note.deletedAt == nil, Stamp(note) == stamp else { return }
                     self.entries[note.id] = Entry(stamp: stamp, handwriting: handwriting)
+                    self.status.revision += 1
                 }
-            } catch { /* Optional preparation retries after the next edit/activation. */ }
+                self.status.message = self.notes.isEmpty ? "No active notes to sample" : "Ready · \(self.entries.count) notes prepared"
+                self.status.isRebuilding = false
+            } catch {
+                guard token == self.generation, !Task.isCancelled else { return }
+                self.status.message = "Preparation couldn’t finish. Try rebuilding."
+                self.status.isRebuilding = false
+            }
         }
     }
 

@@ -42,6 +42,19 @@ import PencilKit
         for _ in 0..<20 { precondition(preparation.prepared(for: proposal).samples.count == 2) }
         let reusedCount = await builds.count
         precondition(reusedCount == 1, "Reading ready samples for any number of previews must never invoke recognition")
+        let inspected = preparation.inspection(preferredID: note.id)
+        precondition(inspected["a"]?.sample.drawingData == sample.drawingData && inspected["a"]?.source == "Renamed")
+        precondition(inspected["z"] == nil, "The inspector must distinguish missing letters from prepared ink")
+        preparation.rebuild()
+        precondition(preparation.prepared(for: proposal).samples.isEmpty && preparation.status.isRebuilding)
+        for _ in 0..<200 {
+            if !preparation.status.isRebuilding { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let rebuiltCount = await builds.count
+        precondition(rebuiltCount == 2 && !preparation.status.isRebuilding,
+            "Manual rebuild must rerun preparation even when source ink is unchanged")
+        precondition(preparation.inspection(preferredID: note.id)["a"] != nil)
         preparation.setPaused(true)
         preparation.invalidate(noteID: note.id)
         note.drawingData = Data(); note.updatedAt = .now
@@ -49,18 +62,18 @@ import PencilKit
         precondition(preparation.prepared(for: proposal).samples.isEmpty, "Edits invalidate old samples immediately")
         try await Task.sleep(for: .milliseconds(40))
         let pausedCount = await builds.count
-        precondition(pausedCount == 1, "Drawing/background/autofill must pause preparation")
+        precondition(pausedCount == 2, "Drawing/background/autofill must pause preparation")
         preparation.setPaused(false)
         for _ in 0..<200 {
             if preparation.prepared(for: proposal).samples["a"] != nil { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         let updatedCount = await builds.count
-        precondition(updatedCount == 2, "Changed ink must rebuild during idle time")
+        precondition(updatedCount == 3, "Changed ink must rebuild during idle time")
         note.autofillHistory = Data("changed provenance".utf8)
         _ = try await cache.prepared(for: AutofillDocument(note))
         let historyCount = await builds.count
-        precondition(historyCount == 3, "Generated-ink exclusions belong in the cache identity")
+        precondition(historyCount == 4, "Generated-ink exclusions belong in the cache identity")
         note.deletedAt = .now
         preparation.update(notes: [note], preferredID: note.id)
         precondition(preparation.prepared(for: proposal).samples.isEmpty)
@@ -79,7 +92,7 @@ import PencilKit
         try Data("broken cache".utf8).write(to: file)
         _ = try await cache.prepared(for: document)
         let repairedCount = await builds.count
-        precondition(repairedCount == 4, "A corrupt derivative should rebuild without affecting the source")
+        precondition(repairedCount == 5, "A corrupt derivative should rebuild without affecting the source")
         precondition(document.ink == sample.drawingData)
         print("Prepared handwriting checks passed: persisted reuse, revision/provenance invalidation, idle pause/resume, immediate lookups, deletion, cancellation, corrupt-cache repair and unchanged source ink")
     }

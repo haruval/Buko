@@ -31,7 +31,8 @@ struct LecturePDFView: View {
                 .toolbarBackground(.visible, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                        Button("Close PDF preview", systemImage: "xmark") { dismiss() }
+                            .labelStyle(.iconOnly).buttonBorderShape(.circle)
                             .accessibilityLabel("Close PDF preview").accessibilityIdentifier("closeLecturePDF")
                     }
                     ToolbarItem(placement: .principal) {
@@ -100,8 +101,77 @@ private struct PDFPageView: UIViewRepresentable {
 
 private final class SourcePDFView: PDFView {
     var firstLayout: (() -> Void)?
+    private var fittedSize = CGSize.zero
+    private var fitScale: CGFloat = 0
+    private var updatingFit = false
+    private weak var observedPinch: UIPinchGestureRecognizer?
+    private weak var documentScroll: UIScrollView?
+    private var pinchStartScale: CGFloat = 1
+    private var pinchStartGestureScale: CGFloat = 1
+    private var pinchAnchor: CGPoint?
+
+    // Keep PDFKit's own recognizer, pan coordination and text interaction. On
+    // iPadOS 27 it can report a growing pinch without updating its zoom scale;
+    // apply that recognizer's ratio through PDFView's public scaling API.
+    private func observeDocumentPinch() {
+        var ancestor = documentView?.superview
+        while let view = ancestor, view !== self {
+            if let scroll = view as? UIScrollView, let pinch = scroll.pinchGestureRecognizer {
+                guard pinch !== observedPinch else { return }
+                observedPinch?.removeTarget(self, action: #selector(documentPinched(_:)))
+                documentScroll = scroll; observedPinch = pinch
+                pinch.addTarget(self, action: #selector(documentPinched(_:)))
+                return
+            }
+            ancestor = view.superview
+        }
+    }
+
+    @objc private func documentPinched(_ recognizer: UIPinchGestureRecognizer) {
+        guard let content = documentView, let scroll = documentScroll else { return }
+        switch recognizer.state {
+        case .began:
+            pinchStartScale = scaleFactor
+            pinchStartGestureScale = max(0.001, recognizer.scale)
+            pinchAnchor = content.convert(recognizer.location(in: self), from: self)
+        case .changed:
+            guard let anchor = pinchAnchor else { return }
+            let requested = pinchStartScale * recognizer.scale / pinchStartGestureScale
+            guard requested.isFinite else { return }
+            let target = min(maxScaleFactor, max(minScaleFactor, requested))
+            if abs(scaleFactor - target) > 0.0001 { scaleFactor = target }
+            // Keep the same spot in the PDF underneath the moving fingers.
+            let actual = content.convert(anchor, to: scroll)
+            let desired = recognizer.location(in: scroll)
+            let inset = scroll.adjustedContentInset
+            let maximum = CGPoint(x: max(-inset.left, scroll.contentSize.width - scroll.bounds.width + inset.right),
+                                  y: max(-inset.top, scroll.contentSize.height - scroll.bounds.height + inset.bottom))
+            scroll.contentOffset = CGPoint(
+                x: min(maximum.x, max(-inset.left, scroll.contentOffset.x + actual.x - desired.x)),
+                y: min(maximum.y, max(-inset.top, scroll.contentOffset.y + actual.y - desired.y)))
+        case .ended, .cancelled, .failed:
+            pinchAnchor = nil
+        default: break
+        }
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
+        observeDocumentPinch()
+        if !updatingFit, document != nil, bounds.width > 0, bounds.height > 0, bounds.size != fittedSize {
+            updatingFit = true
+            let relativeZoom = fitScale > 0 ? max(1, scaleFactor / fitScale) : 1
+            let fit = scaleFactorForSizeToFit
+            if fit.isFinite, fit > 0 {
+                fittedSize = bounds.size; fitScale = fit
+                // This is the same default fit-width scale PDFKit uses for a
+                // continuous document. It is also the zoom-out floor.
+                maxScaleFactor = fit * 6
+                minScaleFactor = fit
+                scaleFactor = min(maxScaleFactor, fit * relativeZoom)
+            }
+            updatingFit = false
+        }
         guard window != nil, bounds.width > 0, bounds.height > 0, let action = firstLayout else { return }
         firstLayout = nil
         // Presentation can resize the representable during its initial layout.

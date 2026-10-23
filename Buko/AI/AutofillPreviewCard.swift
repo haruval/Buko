@@ -13,6 +13,11 @@ enum AutofillPreviewStage {
 struct AutofillPreviewCard: View {
     let state: CircleIntentState
     let detailed: Bool
+    let maximumHeight: CGFloat
+    let sizeChanged: (CGSize) -> Void
+    @State private var headerHeight: CGFloat = 44
+    @State private var contentHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 44
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sourcePreview: LecturePDFDestination?
     @State private var sourceError: String?
@@ -21,79 +26,107 @@ struct AutofillPreviewCard: View {
     var body: some View {
         GlassEffectContainer(spacing: 12) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ZStack(alignment: .topLeading) {
-                            Text(detailed ? "Autofill preview" : title)
-                                .font(.headline).lineLimit(detailed ? nil : 3).fixedSize(horizontal: false, vertical: true)
-                                .accessibilityIdentifier("autofillPreviewTitle")
-                                .id(detailed ? "Autofill preview" : title)
-                                .transition(titleTransition)
-                        }
-                        .animation(stageAnimation, value: title)
-                        if state.processing {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                if detailed { Text(state.progressLabel).font(.caption) }
-                            }.accessibilityLabel(state.progressLabel)
-                                .transition(reduceMotion || detailed ? .identity : .opacity)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    Button(action: state.decline) {
-                        Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(.rect)
-                    }.buttonStyle(.plain).accessibilityLabel("Dismiss autofill")
-                }
-                if detailed {
+                header
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { ceil($0.size.height) } action: { headerHeight = $0 }
+                if hasContent {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
-                            DetailedAutofillPreview(state: state)
-                            if !state.citations.isEmpty { sources(state.citations, title: "Approved lecture evidence") }
-                            if !state.retrievedHits.isEmpty {
-                                DisclosureGroup("Retrieved lecture passages (\(state.retrievedHits.count))") {
-                                    ForEach(Array(state.retrievedHits.enumerated()), id: \.element.id) { index, hit in
-                                        source(hit.passage, quote: hit.passage.text, prefix: "P\(index + 1) · ")
-                                            .padding(.top, 8)
-                                    }
-                                }.font(.subheadline.weight(.medium))
-                                    .accessibilityElement(children: .contain).accessibilityIdentifier("retrievedLecturePassages")
-                            }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.scrollBounceBehavior(.basedOnSize)
-                } else if let proposal = state.proposal {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if !proposal.usedCitations.isEmpty { sources(proposal.usedCitations, title: "Sources") }
-                            else if proposal.content.origin == .localArithmetic {
-                                Text("Calculated on this iPad from the matrices in your notes.").font(.subheadline).foregroundStyle(.secondary)
-                            }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.scrollBounceBehavior(.basedOnSize)
-                        .transition(resultTransition)
-                } else if !state.processing {
-                    ScrollView {
-                        Text(finishedMessage).font(.subheadline).textSelection(.enabled)
+                        previewContent
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityIdentifier("autofillUnavailable")
-                    }.scrollBounceBehavior(.basedOnSize)
-                        .transition(resultTransition)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .onGeometryChange(for: CGFloat.self) { ceil($0.size.height) } action: { contentHeight = $0 }
+                    }
+                    .frame(height: min(contentHeight, max(44, maximumHeight - fixedHeight)))
+                    .scrollBounceBehavior(.basedOnSize)
+                    .transition(resultTransition)
                 }
-                if let sourceError { Text(sourceError).font(.caption).foregroundStyle(.red) }
-                if let issue = state.insertion.issue {
-                    Text(issue).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillInsertionIssue")
+                if hasFooter {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let sourceError { Text(sourceError).font(.caption).foregroundStyle(.red) }
+                        if let issue = state.insertion.issue {
+                            Text(issue).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillInsertionIssue")
+                        }
+                        if state.proposal != nil { acceptance }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { ceil($0.size.height) } action: { footerHeight = $0 }
+                    .transition(resultTransition)
                 }
-                if state.proposal != nil { acceptance.transition(resultTransition) }
             }
             .padding(16)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .clipShape(.rect(cornerRadius: 26))
-            .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.18)), in: .rect(cornerRadius: 26))
-            .animation(stageAnimation, value: AutofillPreviewStage(state))
+            .fixedSize(horizontal: false, vertical: true)
+            // Measure the destination content, independent of the glass spring.
+            .onGeometryChange(for: CGSize.self) { CGSize(width: $0.size.width, height: ceil($0.size.height)) } action: { sizeChanged($0) }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("intentPopup")
         .fullScreenCover(item: $sourcePreview) { LecturePDFView(destination: $0) }
         .onDisappear { sourceTask?.cancel() }
+    }
+
+    private var hasContent: Bool {
+        if detailed { return true }
+        if let proposal = state.proposal { return !proposal.usedCitations.isEmpty || proposal.content.origin == .localArithmetic }
+        return !state.processing
+    }
+    private var hasFooter: Bool { state.proposal != nil || sourceError != nil || state.insertion.issue != nil }
+    private var fixedHeight: CGFloat {
+        32 + headerHeight + (hasContent ? 12 : 0) + (hasFooter ? footerHeight + 12 : 0)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 10) {
+            if state.processing && !detailed {
+                ProgressView().controlSize(.small).frame(width: 20)
+                    .accessibilityLabel(state.progressLabel)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: .leading) {
+                    Text(detailed ? "Autofill preview" : title)
+                        .font(.headline).lineLimit(detailed ? nil : 3).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("autofillPreviewTitle")
+                        .id(detailed ? "Autofill preview" : title)
+                        .transition(titleTransition)
+                }
+                .animation(stageAnimation, value: title)
+                if detailed && state.processing {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(state.progressLabel).font(.caption)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            Button(action: state.decline) {
+                Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(.rect)
+            }.buttonStyle(.plain).accessibilityLabel("Dismiss autofill")
+        }
+    }
+
+    @ViewBuilder private var previewContent: some View {
+        if detailed {
+            VStack(alignment: .leading, spacing: 18) {
+                DetailedAutofillPreview(state: state)
+                if !state.citations.isEmpty { sources(state.citations, title: "Approved lecture evidence") }
+                if !state.retrievedHits.isEmpty {
+                    DisclosureGroup("Retrieved lecture passages (\(state.retrievedHits.count))") {
+                        ForEach(Array(state.retrievedHits.enumerated()), id: \.element.id) { index, hit in
+                            source(hit.passage, quote: hit.passage.text, prefix: "P\(index + 1) · ")
+                                .padding(.top, 8)
+                        }
+                    }.font(.subheadline.weight(.medium))
+                        .accessibilityElement(children: .contain).accessibilityIdentifier("retrievedLecturePassages")
+                }
+            }
+        } else if let proposal = state.proposal {
+            if !proposal.usedCitations.isEmpty { sources(proposal.usedCitations, title: "Sources") }
+            else if proposal.content.origin == .localArithmetic {
+                Text("Calculated on this iPad from the matrices in your notes.").font(.subheadline).foregroundStyle(.secondary)
+            }
+        } else {
+            Text(finishedMessage).font(.subheadline).textSelection(.enabled)
+                .accessibilityIdentifier("autofillUnavailable")
+        }
     }
 
     private var stageAnimation: Animation? {
@@ -103,7 +136,7 @@ struct AutofillPreviewCard: View {
     private var titleTransition: AnyTransition {
         guard !detailed, !reduceMotion else { return .identity }
         return .asymmetric(
-            insertion: .opacity.combined(with: .offset(y: 8)).combined(with: .scale(scale: 0.98, anchor: .topLeading)),
+            insertion: .opacity.combined(with: .offset(y: 8)).combined(with: .scale(scale: 0.98, anchor: .leading)),
             removal: .opacity.combined(with: .offset(y: -5)))
     }
 
@@ -145,8 +178,10 @@ struct AutofillPreviewCard: View {
 
     private var acceptance: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(detailed ? state.insertion.handwritingDetail : "Review the green handwriting in your note.")
-                .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillHandwritingSource")
+            if detailed {
+                Text(state.insertion.handwritingDetail)
+                    .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillHandwritingSource")
+            }
             HStack(spacing: 12) {
                 Button(action: state.decline) { Text("Decline").frame(maxWidth: .infinity, minHeight: 44) }
                     .buttonStyle(.plain).bukoGlass(interactive: true).accessibilityIdentifier("declineAutofill")
