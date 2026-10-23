@@ -17,32 +17,65 @@ import Darwin
             precondition(AutofillWriter.inlineContinuation(sentence, selected: heading, gap: nil) == sentence)
         }
         precondition(AutofillWriter.inlineContinuation("Parsing is different.", selected: "Parsing vs lexing:", gap: nil) == "Parsing is different.")
+        precondition(AutofillWriter.repeatsExistingText(["It keeps working because"], selected: "It keeps working because", context: ""))
+        precondition(AutofillWriter.repeatsExistingText(["A closure captures variables."], selected: "Show this in use.", context: "A closure captures variables."))
+        precondition(!AutofillWriter.repeatsExistingText(["7"], selected: "How many chambers?", context: "A different sample has 7 chambers."))
+        precondition(!AutofillWriter.repeatsExistingText(["makeAdder(3) remembers n = 3."], selected: "A closure captures variables.", context: ""))
         policyChecks()
+        let mixed = "A closure captures a lexical environment. An example of a race condition is two lost updates."
+        precondition(LectureComposer.answerScopeExcerpt(mixed, selected: "Example of a closure:") == "An example of a race condition is two lost updates.")
+        precondition(LectureComposer.answerScopeExcerpt(mixed, selected: "Closure:") == mixed)
+        precondition(LectureComposer.hasDifferentExampleLabel(mixed, selected: "Example of a closure:"))
+        precondition(!LectureComposer.hasDifferentExampleLabel("An example of a closure is makeAdder(3).", selected: "Example of a closure:"))
+        precondition(!LectureComposer.hasDifferentExampleLabel("makeAdder(3) remembers n = 3.", selected: "Example of a closure:"))
+        let sourceSpan = "Parsing checks grammar. This applies to the token sequence. Parsing builds a syntax tree."
+        precondition(LectureComposer.sourceAnswerSpan("Parsing checks grammar. Parsing builds a syntax tree.", in: sourceSpan) == sourceSpan)
+        precondition(LectureComposer.sourceAnswerSpan("Parsing checks grammar.", in: sourceSpan) == "Parsing checks grammar.")
+        precondition(LectureComposer.sourceAnswerSpan("Parsing builds a syntax tree. Parsing checks grammar.", in: sourceSpan) == nil)
+        precondition(LectureComposer.sourceAnswerSpan("Parsing checks types. Parsing builds a syntax tree.", in: sourceSpan) == nil)
+        precondition(LectureComposer.sourceAnswerSpan("The trial improved recall. Results were limited.",
+            in: "The trial did not improve recall. Results were limited.") == nil)
         try plannerChecks()
         diagnosticChecks()
         guard CommandLine.arguments.contains("--live") else { return }
         guard #available(macOS 27, *), case .available = SystemLanguageModel.default.availability else {
             print("SKIPPED: local model unavailable"); exit(77)
         }
+        if CommandLine.arguments.contains("--corrections-only") {
+            try await correctedEvidencePipelineChecks()
+            return
+        }
+        if CommandLine.arguments.contains("--answer-form-only") {
+            try await answerFormChecks(root: URL(fileURLWithPath: CommandLine.arguments[1]))
+            return
+        }
         if CommandLine.arguments.contains("--trace-only") {
             let recorder = TraceRecorder()
-            let observer: PipelineObserver = { event in await recorder.receive(event) }
+            let observer: PipelineObserver = { event in
+                await recorder.receive(event)
+                if case .began(let id, _, _, _) = event { print("TRACE STAGE: \(id)") }
+            }
             let selection = "What does parsing check?", nearby = "Lexical analysis groups characters into tokens."
             let plan = try await CirclePlanner.infer(selected: selection, context: nearby, observer: observer)
-            let search = makeSearch(["Parsing checks the token sequence against a grammar and builds a syntax tree."])
+            var search = makeSearch(["Parsing checks the token sequence against a grammar and builds a syntax tree."])
+            search.gapPlan = plan.gap
             let evidence = try await LectureComposer.complete(selected: selection, context: nearby,
                 intent: plan.intent, action: plan.action, search: search, observer: observer)
             let draft = try await AutofillWriter.draft(selected: selection, context: nearby, intent: plan.intent,
                 action: plan.action, gap: plan.gap?.value, evidence: evidence, search: search, observer: observer)
-            precondition(draft.content != nil)
             let steps = await recorder.trace.steps
-            precondition(steps.map(\.id) == ["intent", "gap", "scope.P1", "evidence", "draft"])
+            if draft.content == nil {
+                print("TRACE DRAFT REFUSAL: \(draft.explanation)")
+                for step in steps { print("\(step.id): \(step.summary)") }
+            }
+            precondition(draft.content != nil)
+            precondition(steps.map(\.id) == ["intent", "gap", "scope.P1", "evidence", "answerScope", "draft"])
             precondition(steps.allSatisfy { $0.status == .completed && !$0.input.isEmpty && $0.instructions != nil })
             precondition(steps[0].input == IntentPrompts.request(selected: selection, context: nearby))
             let writerInput = try AutofillWriter.prompt(selected: selection, context: nearby, intent: plan.intent,
                 action: plan.action, gap: plan.gap?.value, evidence: evidence, search: search)
-            precondition(steps.last!.input == writerInput && steps.last!.instructions == AutofillWriter.instructions)
-            print("LIVE TRACE PASSED: intent, gap, passage scope, evidence and writing publish ordered stages with exact call inputs; no prompt changes")
+            precondition(steps.last!.input == writerInput && steps.last!.instructions?.contains("contextually inferred gap") == true)
+            print("LIVE TRACE PASSED: contextual intent, gap, passage scope, evidence, answer scope and writing retain ordered stages and exact call inputs")
             return
         }
         if CommandLine.arguments.contains("--inline-only") {
@@ -306,6 +339,17 @@ import Darwin
             let unrelated = try CirclePlanner.explicitPlan(in: GapTranscript(
                 selected: "Thread: an execution path with its own stack.\nProcess:", context: "Thread vs process:"), mode: mode)
             precondition(unrelated?.intent == "The user wants to define Process.", "Binding must be topic-independent")
+            for selection in ["Example of a closure:", "Closure: a function with a captured environment.\nExample of a closure:",
+                              "A closure stores a function and its\nlexical environment, even after return.\nExample of a closure:"] {
+                let plan = try CirclePlanner.explicitPlan(in: GapTranscript(selected: selection, context: "Define closures."), mode: mode)!
+                precondition(plan.planningPasses == 0 && plan.intent == "The user wants a concrete example of closure.")
+                precondition(plan.action.contains("example") && !plan.action.contains("definition"))
+                if mode == .structuredGap { precondition(plan.gap?.value.operation == .giveExample) }
+                let sentence = "The closure returned by makeAdder(n) remembers n."
+                precondition(AutofillWriter.inlineContinuation(sentence, selected: selection, gap: plan.gap?.value) == sentence)
+                precondition(AutofillWriter.inlineContinuation("Example of a closure: " + sentence,
+                    selected: selection, gap: plan.gap?.value) == sentence)
+            }
             let ambiguous = try CirclePlanner.explicitPlan(in: GapTranscript(selected: "Lexical analysis:\nParsing:", context: "Parsing:"), mode: mode)
             precondition(ambiguous?.clarification.isEmpty == false && ambiguous?.gap == nil)
             for selection in ["Why does parsing need a grammar?", "A = [1 ?; 3 4]. Find its determinant.",
@@ -317,6 +361,62 @@ import Darwin
             }
         }
         print("Planner focus checks passed: exact unfinished target, context isolation, comparison, ambiguity and freeform routing in both modes.")
+    }
+
+    @available(macOS 27, *)
+    @MainActor static func answerFormChecks(root: URL) async throws {
+        let library = LectureLibrary(root: root)
+        let noteID = UUID()
+        try await library.importPDF(from: URL(fileURLWithPath: "Buko/Resources/Lectures/programmingLanguages.pdf"), noteID: noteID)
+        let surrounding = "A closure stores a function and its\nlexical environment, even after return."
+        for (selection, context) in [
+            ("Example of a closure:", surrounding),
+            (surrounding + "\nExample of a closure:", ""),
+            ("Can you give an example of a closure?", surrounding)
+        ] {
+            let plan = try await CirclePlanner.infer(selected: selection, context: context)
+            print("EXAMPLE PLAN: \(plan.intent) | \(plan.gap?.value.operation.rawValue ?? "none") | \(plan.clarification)")
+            precondition(plan.clarification.isEmpty && (plan.gap?.value.operation == .giveExample || plan.gap?.value.completionGoal != nil),
+                         "Example intent must survive heading, wrapped selection and question forms")
+            let search = try await library.search(noteID: noteID, selected: selection, intent: plan.intent, gap: plan.gap)
+            precondition(search.hits.contains { $0.passage.text.contains("makeAdder") })
+            let evidence = try await LectureComposer.complete(selected: selection, context: context,
+                intent: plan.intent, action: plan.action, search: search)
+            precondition(evidence.extractive, evidence.explanation)
+            precondition(evidence.requestedContent?.selectedText == selection)
+            let result = try await AutofillWriter.draft(selected: selection, context: context,
+                intent: plan.intent, action: plan.action, gap: plan.gap?.value, evidence: evidence, search: search)
+            guard let content = result.content else { fatalError(result.explanation) }
+            print("LIVE EXAMPLE \(selection)\n\(content.text)")
+            let text = content.text.lowercased()
+            precondition(text.contains("makeadder") && (text.contains("remembers") || text.contains("captures") || text.contains("retains") || text.contains("n = 3")))
+            precondition(content.lines.allSatisfy { !$0.citationIndices.isEmpty })
+        }
+        let selection = "Example of a closure:"
+        let definition = makeSearch(["A closure pairs a function with its captured lexical environment."])
+        let plan = try CirclePlanner.explicitPlan(in: GapTranscript(selected: selection, context: surrounding), mode: .structuredGap)!
+        let evidence = try await LectureComposer.complete(selected: selection, context: surrounding,
+            intent: plan.intent, action: plan.action, search: definition)
+        precondition(!evidence.extractive, "Definition-only sources must not answer an example request")
+        // Independently exercise the writer if an earlier fallible review were
+        // to approve a definition-only passage, including the old incorrect hints.
+        let result = try await AutofillWriter.draft(selected: selection, context: surrounding,
+            intent: "Define closure.", action: "Add a concise definition.", gap: plan.gap?.value,
+            evidence: selectedEvidence(definition, ids: ["P1"]), search: definition, observer: { event in
+                if case .completed(_, let summary) = event { print("WRITER ASSESSMENT: \(summary)") }
+            })
+        print("DEFINITION-ONLY WRITER: \(result.content?.text ?? result.explanation)")
+        precondition(result.content == nil, "Writer must withhold a definition masquerading as an example")
+        let instance = makeSearch(["A closure pairs a function with its captured lexical environment. makeAdder(n) returns a closure computing n + x. The add3 closure from makeAdder(3) remembers n = 3 after makeAdder returns."])
+        let instanceEvidence = try await LectureComposer.complete(selected: selection, context: surrounding,
+            intent: plan.intent, action: plan.action, search: instance)
+        let corrected = try await AutofillWriter.draft(selected: selection, context: surrounding,
+            intent: "Define closure.", action: "Add two definition bullets.", gap: nil,
+            evidence: instanceEvidence, search: instance)
+        guard let text = corrected.content?.text else { fatalError(corrected.explanation) }
+        print("LIVE MISLEADING HINT CONTROL: \(text)")
+        precondition(text.localizedCaseInsensitiveContains("makeAdder"))
+        print("Answer-form pipeline checks passed: actual lecture example, wrapped notes, freeform question, definition-only refusal and misleading hints. Development cases only.")
     }
 
     static func makeSearch(_ texts: [String]) -> LectureSearch {
@@ -332,6 +432,20 @@ import Darwin
     }
 
     static func policyChecks() {
+        let exampleSelection = "Example of a closure:"
+        let exampleSearch = makeSearch(["makeAdder(3) returns a closure that remembers n = 3."])
+        var exampleEvidence = selectedEvidence(exampleSearch, ids: ["P1"])
+        func examplePreflight(_ evidence: LectureCompletion) -> AutofillDraftResult? {
+            AutofillWriter.preflight(selected: exampleSelection, context: "", intent: "Give an example.",
+                action: "Add an example.", gap: nil, evidence: evidence, search: exampleSearch)
+        }
+        precondition(examplePreflight(exampleEvidence) != nil, "Example writing requires the checked content handoff")
+        exampleEvidence.requestedContent = .init(selectedText: exampleSelection, passageID: "s0", excerpt: exampleSearch.hits[0].passage.text)
+        precondition(examplePreflight(exampleEvidence) == nil)
+        exampleEvidence.requestedContent = .init(selectedText: "Another selection", passageID: "s0", excerpt: exampleSearch.hits[0].passage.text)
+        precondition(examplePreflight(exampleEvidence) != nil)
+        exampleEvidence.requestedContent = .init(selectedText: exampleSelection, passageID: "s0", excerpt: "An invented example")
+        precondition(examplePreflight(exampleEvidence) != nil)
         let search = makeSearch(["Static scope follows lexical blocks.",
                                  "Dynamic scoping resolves names by searching active function calls."])
         let evidence = selectedEvidence(search, ids: ["P2"])

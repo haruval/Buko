@@ -110,7 +110,7 @@ actor LectureLibrary {
         let hits: [LectureHit]
         if let gap {
             let result = GapRetrieval.search(passages: passages, selected: selected, intent: intent,
-                originalVector: vector, targetVector: embedding?.vector(for: String(gap.targetText.prefix(1000))),
+                originalVector: vector, targetVector: embedding?.vector(for: String(gap.retrievalText.prefix(1000))),
                 gap: gap, componentVectors: gap.componentQueries.map { embedding?.vector(for: String($0.prefix(1000))) },
                 method: method)
             hits = result.hits; trace = result.trace
@@ -120,7 +120,7 @@ actor LectureLibrary {
         try Task.checkCancellation()
         return LectureSearch(hits: hits, documentCount: documents.count, revision: try revision(noteID: noteID),
                              semanticAvailable: vector != nil, seconds: ProcessInfo.processInfo.systemUptime - start,
-                             gapTrace: trace)
+                             gapTrace: trace, gapPlan: gap)
     }
 
     /// Stages the PDF and complete index together, then atomically renames the directory.

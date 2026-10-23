@@ -43,6 +43,9 @@ nonisolated struct LectureSearch: Sendable {
     var seconds: Double
     var hasUnverifiedText = false
     var gapTrace: GapRetrievalTrace? = nil
+    // Request-local validated inference, carried through retrieval to the
+    // evidence reviewer. Never persisted with the PDF index or note.
+    var gapPlan: ValidatedGapPlan? = nil
 }
 
 nonisolated enum LectureRetrieval {

@@ -29,16 +29,22 @@ nonisolated enum CirclePlanner {
                 gap: nil, inputTokens: nil, responseTokenLimit: 0, planningPasses: 0,
                 preliminaryIntent: nil, bindingStrategy: "ambiguousHeadings")
         case .bound(let binding):
-            let needs: [String]
             let format: String
             switch binding.operation {
-            case .define: needs = ["definition"]; format = "definition"
-            case .compare: needs = ["difference"]; format = "comparison"
+            case .define: format = "definition"
+            case .giveExample: format = binding.headingRequest?.need ?? "concrete example"
+            case .compare: format = "comparison"
+            case .explain: format = "explanation of \(binding.informationNeeds.joined(separator: ", "))"
             default: return nil
             }
-            let gap = try ValidatedGapPlan.validate(binding.plan(needs: needs), in: transcript)
+            let gap = try ValidatedGapPlan.validate(binding.plan(needs: binding.informationNeeds), in: transcript)
             let target = gap.targetText.hasSuffix(":") ? String(gap.targetText.dropLast()) : gap.targetText
-            return CirclePlan(intent: "The user wants to \(binding.operation.verb) \(target).",
+            let subject = binding.headingRequest?.subject ?? target
+            let intent = binding.operation == .giveExample
+                ? "The user wants a \(format) of \(subject)."
+                : binding.operation == .explain ? "The user wants an \(format) for \(subject)."
+                : "The user wants to \(binding.operation.verb) \(subject)."
+            return CirclePlan(intent: intent,
                 action: "Add a concise \(format) beneath \(target).", evidence: gap.targetText, clarification: "",
                 gap: mode == .structuredGap ? gap : nil, inputTokens: nil, responseTokenLimit: 0,
                 planningPasses: 0, preliminaryIntent: nil, bindingStrategy: "explicitSyntax")
@@ -75,45 +81,41 @@ nonisolated enum CirclePlanner {
                 gap: nil, inputTokens: nil, responseTokenLimit: IntentPrompts.intentTokenLimit,
                 planningPasses: 1, preliminaryIntent: nil)
         case .structuredGap:
-            // Freeform requests still use clarification followed by independently
-            // validated target references. Explicit syntax returned above.
-            let preliminary = try await infer(selected: selected, context: context, mode: .baseline, model: model, observer: observer)
-            if !preliminary.clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return CirclePlan(intent: preliminary.intent, action: preliminary.action, evidence: preliminary.evidence,
-                    clarification: preliminary.clarification, gap: nil, inputTokens: nil,
-                    responseTokenLimit: IntentPrompts.intentTokenLimit, planningPasses: 1, preliminaryIntent: preliminary.intent)
-            }
+            // Carry the first interpretation into a coverage/reference review.
+            // It is a hypothesis, not permission to repeat already-written content.
+            let preliminary = try await infer(selected: transcript.selected, context: transcript.context,
+                mode: .baseline, model: model, observer: observer)
+            if !preliminary.clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return preliminary }
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            let blocks = try JSONSerialization.jsonObject(with: encoder.encode(transcript.blocks))
-            let fields: [String: Any] = ["blocks": blocks]
+            let blocks = ["selected_handwriting": transcript.blocks.filter(\.selected),
+                          "nearby_context_only": transcript.blocks.filter { !$0.selected }]
+            let fields: [String: Any] = ["blocks": try JSONSerialization.jsonObject(with: encoder.encode(blocks)),
+                "preliminary_hypothesis": ["intent": preliminary.intent, "action": preliminary.action]]
             let prompt = String(decoding: try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys]), as: UTF8.self)
             let instructions = MissingInformationPrompts.instructions
-            let instructionCount = try await model.tokenCount(for: Instructions(instructions))
-            let schemaCount = try await model.tokenCount(for: MissingInformationPlan.generationSchema)
-            let promptCount = try await model.tokenCount(for: Prompt(prompt))
-            let count = instructionCount + schemaCount + promptCount
-            guard count + MissingInformationPrompts.responseTokens + 128 <= model.contextSize else {
-                throw GapPlanError.contextLimit
-            }
+            let count = try await model.tokenCount(for: Instructions(instructions))
+                + model.tokenCount(for: ContextualGapReferences.generationSchema) + model.tokenCount(for: Prompt(prompt))
+            guard count + MissingInformationPrompts.responseTokens + 128 <= model.contextSize else { throw GapPlanError.contextLimit }
             try Task.checkCancellation()
-            await observer?(.began(id: "gap", title: "Identify missing information", instructions: instructions, input: prompt))
+            await observer?(.began(id: "gap", title: "Infer what the notes are missing", instructions: instructions, input: prompt))
             try Task.checkCancellation()
-            let session = LanguageModelSession(model: model, instructions: instructions)
-            let response = try await session.respond(to: prompt, generating: MissingInformationPlan.self,
+            let response = try await LanguageModelSession(model: model, instructions: instructions).respond(to: prompt,
+                generating: ContextualGapReferences.self,
                 options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: MissingInformationPrompts.responseTokens))
-            let proposed = response.content
             try Task.checkCancellation()
+            let bound = response.content
+            let subjects = try bound.subjects(in: transcript)
+            let explicitOperation = bound.targets.count == 1 ? GapHeadingRequest.inspect(bound.targets[0].quote)?.operation : nil
+            let proposed = MissingInformationPlan(alreadyCovered: bound.alreadyCovered, targets: bound.targets,
+                informationNeeds: bound.informationNeeds, operation: explicitOperation ?? .continueThought, subjects: subjects,
+                completionGoal: "supply \(bound.informationNeeds.joined(separator: ", ")) for \(subjects.map(\.quote).joined(separator: " and "))")
             let gap: ValidatedGapPlan
             do { gap = try ValidatedGapPlan.validate(proposed, in: transcript) }
-            catch let error as GapPlanError {
-                throw RejectedGapPlan(proposed: proposed, reason: error, preliminaryIntent: preliminary.intent)
-            }
+            catch let error as GapPlanError { throw RejectedGapPlan(proposed: proposed, reason: error, preliminaryIntent: preliminary.intent) }
             await observer?(.completed(id: "gap", summary: gap.intent + "\nNeeds: " + gap.value.informationNeeds.joined(separator: ", ")))
-            return CirclePlan(intent: gap.intent, action: gap.action, evidence: gap.targetText,
-                clarification: "", gap: gap,
+            return CirclePlan(intent: gap.intent, action: gap.action, evidence: gap.targetText, clarification: "", gap: gap,
                 inputTokens: count, responseTokenLimit: IntentPrompts.intentTokenLimit + MissingInformationPrompts.responseTokens,
-                planningPasses: 2, preliminaryIntent: preliminary.intent,
-                bindingStrategy: "modelReferences")
+                planningPasses: 2, preliminaryIntent: preliminary.intent, bindingStrategy: "contextualInference")
         }
     }
 }

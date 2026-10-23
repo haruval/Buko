@@ -60,7 +60,19 @@ import Darwin
         Case(name: "correction-other-property-first", query: "How many chambers does Luma have?", passages: ["Correction to Luma's outer-layer label: the label is amber, not cerulean. This correction concerns the color only. The chamber count is unchanged.", original], expectedIndices: [1]),
         Case(name: "retraction-other-entity", query: "How many chambers does Luma have?", passages: [original, "The claim that Luna has seven chambers is retracted as incorrect. Luna's correct chamber count has not been determined. This retraction concerns Luna only, not Luma."], expectedIndices: [0])
     ]
-    static let cases = frozenCases + regressionCases
+    static let answerFormCases: [Case] = [
+        Case(name: "example-definition-only", query: "Example of a closure:", passages: ["A closure pairs a function with its captured lexical environment."], refusal: .insufficient),
+        Case(name: "example-with-instance", query: "Example of a closure:", passages: ["A closure pairs a function with its captured lexical environment. For example, makeAdder(n) returns a function computing n + x. The returned closure remembers n after makeAdder returns."], expectedIndices: [0]),
+        Case(name: "example-unlabeled-instance", query: "Example of a race condition:", passages: ["In this race condition, two threads each read counter = 0, then each writes 1. One of the two increments is lost."], expectedIndices: [0]),
+        Case(name: "example-other-topic", query: "Example of a closure:", passages: ["A closure captures a lexical environment. An example of a race condition is two threads overwriting each other's increment."], refusal: .insufficient),
+        Case(name: "definition-still-supported", query: "Closure:", passages: ["A closure pairs a function with its captured lexical environment."], expectedIndices: [0]),
+        Case(name: "steps-definition-only", query: "Steps in parsing:", passages: ["Parsing checks a token sequence against a grammar."], refusal: .insufficient),
+        Case(name: "steps-procedure", query: "Steps in the Vela parser:", passages: ["The Vela parser first reads the next token, then selects a grammar rule, then builds the corresponding tree node. It repeats these steps until the input ends."], expectedIndices: [0]),
+        Case(name: "reason-definition-only", query: "Reasons for synchronization:", passages: ["Synchronization is a concept in concurrent programming."], refusal: .insufficient),
+        Case(name: "reason-purpose-statement", query: "Reasons for synchronization:", passages: ["Synchronization coordinates access to shared state."], expectedIndices: [0]),
+        Case(name: "reason-supported", query: "Reasons for synchronization:", passages: ["Synchronization is needed because unsynchronized read-modify-write operations can overwrite another thread's changes and lose updates."], expectedIndices: [0])
+    ]
+    static let cases = frozenCases + regressionCases + answerFormCases
 
     @MainActor static func main() async throws {
         setbuf(stdout, nil)
@@ -70,6 +82,10 @@ import Darwin
         }
         var records: [[String: Any]] = []
         var failures = 0
+        let requestedCase = CommandLine.arguments.first { $0.hasPrefix("--case=") }.map { String($0.dropFirst(7)) }
+        let cases = (CommandLine.arguments.contains("--answer-form-only") ? answerFormCases : Self.cases)
+            .filter { requestedCase == nil || $0.name == requestedCase }
+        precondition(!cases.isEmpty, "Unknown evidence case")
         for item in cases {
             let hits = item.passages.enumerated().map { i, text in
                 LectureHit(passage: LecturePassage(id: "passage-\(i)", documentID: "document-\(i)",
@@ -79,7 +95,13 @@ import Darwin
             let search = LectureSearch(hits: hits, documentCount: hits.count, revision: "isolated-test",
                                        semanticAvailable: false, seconds: 0)
             let result = try await LectureComposer.complete(selected: item.query, context: "",
-                intent: "Answer the selected question using supplied evidence.", action: "Provide the relevant evidence.", search: search)
+                intent: "Answer the selected question using supplied evidence.", action: "Provide the relevant evidence.", search: search,
+                observer: { event in
+                    if requestedCase != nil, case .began(let id, _, _, let input) = event, id == "answerScope" { print(input) }
+                    if CommandLine.arguments.contains("--answer-form-only"), case .completed(let id, let summary) = event {
+                        print("STAGE \(id): \(summary)")
+                    }
+                })
             let indices = result.citations.compactMap { citation in hits.firstIndex { $0.id == citation.passage.id } }
             let verbatim = !result.lines.isEmpty && result.extractive && result.lines.count == result.citations.count
                 && zip(result.lines, result.citations).allSatisfy { line, citation in

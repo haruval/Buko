@@ -153,11 +153,14 @@ struct AutofillPreviewCard: View {
         }
         if state.processing {
             guard let gap = state.missingInformation else { return "Thinking…" }
-            let target = gap.targets.map(\.quote).joined(separator: " and ")
+            let target = gap.subjects?.map(\.quote).joined(separator: " and ")
+                ?? (gap.targets.count == 1 ? GapHeadingRequest.inspect(gap.targets[0].quote)?.subject : nil)
+                ?? gap.targets.map(\.quote).joined(separator: " and ")
                 .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ":")))
             let verb: String
             switch gap.operation {
             case .define: verb = "Defining"
+            case .giveExample: verb = "Illustrating"
             case .compare: verb = "Comparing"
             case .explain: verb = "Explaining"
             case .continueThought: verb = "Completing"

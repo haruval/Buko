@@ -23,7 +23,7 @@ nonisolated struct GapRetrievalTrace: Codable, Sendable {
 /// at most three branches (20 candidates total). Final context remains bounded
 /// to four hits / 4,800 characters. Branch coverage is not semantic completeness.
 nonisolated enum GapRetrieval {
-    static let version = 2
+    static let version = 4
     static let targetWeight = 2.0
     static let originalWeight = 1.0
     static let componentWeight = 2.0
@@ -34,7 +34,7 @@ nonisolated enum GapRetrieval {
                        method: LectureRetrieval.Method = .hybrid) -> (hits: [LectureHit], trace: GapRetrievalTrace) {
         let original = LectureRetrieval.search(passages: passages, selected: selected, intent: intent,
                                                queryVector: originalVector, method: method)
-        let targeted = LectureRetrieval.search(passages: passages, selected: gap.targetText, intent: gap.expansion,
+        let targeted = LectureRetrieval.search(passages: passages, selected: gap.retrievalText, intent: gap.expansion,
                                                queryVector: targetVector, method: method)
         let queries = gap.componentQueries
         let vectors = queries.indices.map { componentVectors.indices.contains($0) ? componentVectors[$0] : nil }
@@ -87,7 +87,7 @@ nonisolated enum GapRetrieval {
                 componentRanks: componentRanks.map { $0[hit.id] }, fusedScore: hit.score, retained: included,
                 selectionReason: reasons[hit.id], exclusion: exclusion)
         }
-        return (retained, GapRetrievalTrace(targetQuery: gap.targetText, informationNeeds: gap.expansion,
+        return (retained, GapRetrievalTrace(targetQuery: gap.retrievalText, informationNeeds: gap.expansion,
             targetSemanticAvailable: targetVector != nil, componentQueries: queries,
             componentSemanticAvailable: vectors.map { $0 != nil }, candidates: trace))
     }

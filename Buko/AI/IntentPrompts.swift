@@ -19,10 +19,15 @@ nonisolated enum IntentPrompts {
     means complete the EMPTY heading, using the finished definition as context.
     A colon, unfinished comparison, question, or incomplete equation often marks
     missing content. Name that target precisely. Do not replace completed notes.
+    Preserve the requested answer form: an example needs a concrete instance,
+    steps need a procedure, and reasons need an explanation of why. A colon
+    alone does not request a definition. "Example of X:" asks for an example
+    of X even when the surrounding notes already define X. Do not repeat that
+    definition. Keep the request's form in both intent and action.
     The action should describe the format and placement: e.g. "Add two concise
     definition bullets beneath Dynamic Scoping." Placement is a proposal only.
-    Usually plan two concise bullets. Use a different count only when the
-    selected task calls for it, such as an explicit list or a worked problem.
+    Plan only the amount needed to complete the target; do not impose a bullet
+    count. A worked example may need a setup and its source-supported behavior.
     Already complete notes may invite an explanation or example; if the desired
     action is unclear, ask one specific clarification instead of guessing.
     For mathematics preserve recognized numbers, signs, row/column order and
@@ -71,7 +76,7 @@ nonisolated enum IntentPrompts {
 nonisolated struct InferredCircleIntent {
     @Guide(description: "One specific sentence beginning The user wants to, identifying the missing topic or problem.")
     var intent: String
-    @Guide(description: "The concrete action, output format and placement, naming the target heading. No answer content yet.")
+    @Guide(description: "The minimal addition and its format, naming the target concept. A heading is not required. No answer content yet.")
     var action: String
     @Guide(description: "A short exact phrase from the selected handwriting supporting the inference.")
     var evidence: String

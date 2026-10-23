@@ -1,11 +1,18 @@
 import Foundation
 
 nonisolated struct LectureCompletion: Sendable {
+    struct RequestedContent: Sendable {
+        let selectedText: String
+        let passageID: String
+        let excerpt: String
+    }
     var lines: [String]
     var citations: [LectureCitation]
     var extractive: Bool
     var explanation: String
     var evidenceCount: Int
+    // Request-local evidence handoff, not proof of semantic accuracy or storage.
+    var requestedContent: RequestedContent? = nil
 }
 
 /// The model may select source IDs, but cannot supply displayed answer prose or quotes.
