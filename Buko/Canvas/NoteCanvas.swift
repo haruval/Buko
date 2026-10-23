@@ -81,7 +81,7 @@ struct NoteCanvas: UIViewRepresentable {
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             guard hasLoadedDrawing, let host, !host.isUpdatingInk else { return }
-            host.circleIntent.drawingDidChange()
+            host.drawingDidChange()
             // Undo may restore strokes created under another appearance.
             host.normalizeDisplayedInk()
             onDrawingChange(host.canonicalDrawing.dataRepresentation())

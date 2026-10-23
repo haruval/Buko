@@ -16,5 +16,6 @@ xcrun swiftc -module-cache-path "$BUKO_INSERTION_DIR/modules" \
     Buko/AI/AutofillDocument.swift Buko/AI/AutofillProposal.swift \
     Buko/AI/IntentPrompts.swift Buko/AI/MissingInformationPlan.swift \
     Buko/Retrieval/GapRetrieval.swift Buko/Retrieval/LectureRetrieval.swift Buko/Retrieval/LectureGroundingPolicy.swift \
+    Buko/AI/AutofillReflowSpring.swift Tests/AutofillReflowChecks.swift \
     Tests/AutofillInsertionChecks.swift -o "$BUKO_INSERTION_DIR/Checks.app/Contents/MacOS/checks"
 "$BUKO_INSERTION_DIR/Checks.app/Contents/MacOS/checks" "$BUKO_INSERTION_DIR/data"

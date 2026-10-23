@@ -5,6 +5,7 @@ import SwiftData
 @main struct AutofillInsertionChecks {
     enum Injected: Error { case failure }
     @MainActor static func main() throws {
+        AutofillReflowChecks.run()
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         func stroke(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat = 60, _ height: CGFloat = 20) -> PKStroke {

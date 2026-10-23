@@ -124,10 +124,87 @@ private struct InsertionHarnessView: UIViewRepresentable {
         preconditionFailure("Acceptance timed out")
     }
 
+    func motionChecks() async throws {
+        let drawing = try AutofillDocument.drawing(original.ink)
+        func layout(_ text: String) throws -> AutofillLayout.Result {
+            try AutofillLayout.stage(text: text, drawing: drawing, selection: polygon,
+                pageCount: 1, samples: [:], selectedText: heading, target: heading)
+        }
+        func saveFrame(_ name: String) throws {
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let image = UIGraphicsImageRenderer(bounds: host.bounds, format: format).image { _ in
+                host.drawHierarchy(in: host.bounds, afterScreenUpdates: true)
+            }
+            try image.pngData()!.write(to: URL.documentsDirectory.appendingPathComponent(name + ".png"))
+        }
+        func checkUnchanged() {
+            precondition(original.matches(AutofillDocument(note)))
+            precondition(AutofillDocument.sameInk(host.canonicalDrawing, drawing))
+            precondition(host.canvas.undoManager?.canUndo == false)
+        }
+        let fill = try layout(text + "\n" + text)
+        try saveFrame("reflow-start")
+        host.validationShow(fill)
+        precondition(host.validationMotion.visible && host.validationMotion.targets.max()! > 20)
+        precondition(host.validationMotion.positions.max()! < 2, "Starts at the original ink, not the destination")
+        try await Task.sleep(for: .milliseconds(110))
+        let down = host.validationMotion
+        precondition(down.positions.max()! > 5 && down.positions.max()! < down.targets.max()!)
+        try saveFrame("reflow-moving-down")
+        checkUnchanged()
+        let before = host.validationMotion.positions.max()!
+        host.circleIntent.decline()
+        let after = host.validationMotion
+        precondition(after.visible && after.targets.allSatisfy { $0 == 0 })
+        precondition(abs(before - after.positions.max()!) < 3, "Early decline must not jump to either endpoint")
+        try await Task.sleep(for: .milliseconds(160))
+        precondition(host.validationMotion.velocities.min()! < 0, "Ink reverses upward")
+        try saveFrame("reflow-returning")
+        try await Task.sleep(for: .milliseconds(1200))
+        precondition(!host.validationMotion.visible && host.validationDisplayedPages == 1)
+        try saveFrame("reflow-restored")
+        checkUnchanged()
+
+        host.validationShow(fill)
+        try await Task.sleep(for: .milliseconds(1300))
+        try saveFrame("reflow-settled")
+        precondition(abs(host.validationMotion.positions.max()! - host.validationMotion.targets.max()!) < 0.01)
+        host.circleIntent.decline()
+        try await Task.sleep(for: .milliseconds(80))
+        coordinator?.canvasViewDidBeginUsingTool(host.canvas)
+        precondition(!host.validationMotion.visible, "Drawing interrupts even after the popup has been declined")
+        coordinator?.canvasViewDidEndUsingTool(host.canvas)
+        checkUnchanged()
+
+        host.validationShow(fill)
+        host.circleIntent.decline()
+        coordinator?.canvasViewDrawingDidChange(host.canvas)
+        precondition(!host.validationMotion.visible, "Undo/programmatic edits also interrupt a declined preview")
+        checkUnchanged()
+
+        let long = try layout(String(repeating: "The parser groups tokens into syntax trees. ", count: 80))
+        precondition(long.pageCount > 1)
+        host.validationShow(long)
+        try await Task.sleep(for: .milliseconds(140))
+        let moving = host.validationMotion.positions.max()!
+        host.validationShow(fill)
+        precondition(abs(host.validationMotion.positions.max()! - moving) < 6, "New metrics retain the current displacement")
+        precondition(host.validationDisplayedPages == long.pageCount, "Keep page masks while ink is moving back across them")
+        try await Task.sleep(for: .milliseconds(1300))
+        precondition(host.validationDisplayedPages == fill.pageCount)
+        host.circleIntent.decline()
+        try await Task.sleep(for: .milliseconds(1300))
+        precondition(!host.validationMotion.visible)
+        checkUnchanged()
+        try Data("PASS: visible downward motion, momentum-preserving early decline, upward return, exact settlement, drawing interruption, page-crossing retarget and unchanged persisted/live ink/undo".utf8)
+            .write(to: URL.documentsDirectory.appendingPathComponent("result.txt"), options: .atomic)
+    }
+
     func run() async {
         do {
             try await Task.sleep(for: .seconds(1))
             host.canvas.undoManager?.removeAllActions()
+            if ProcessInfo.processInfo.arguments.contains("--motion-checks") { try await motionChecks(); return }
             if ProcessInfo.processInfo.arguments.contains("--undo-controls") {
                 let status = UILabel(frame: CGRect(x: 240, y: host.bounds.height - 64, width: 300, height: 44))
                 status.accessibilityIdentifier = "validationUndoStatus"

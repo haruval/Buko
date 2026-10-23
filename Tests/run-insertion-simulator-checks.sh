@@ -32,6 +32,26 @@ extension CircleIntentState {
     }
 }
 ''')
+with (root / 'Buko/AI/AutofillCanvasPreview.swift').open('a') as f:
+    f.write('''
+extension AutofillCanvasPreview {
+    var validationMotion: (visible: Bool, positions: [CGFloat], velocities: [CGFloat], targets: [CGFloat], alpha: CGFloat) {
+        let now = CACurrentMediaTime()
+        return (!isHidden, bands.map { $0.spring.sample(at: now).position },
+                bands.map { $0.spring.sample(at: now).velocity }, bands.map { $0.spring.target }, insertedCanvas.alpha)
+    }
+}
+''')
+with (root / 'Buko/Canvas/CanvasHostView.swift').open('a') as f:
+    f.write('''
+extension CanvasHostView {
+    var validationMotion: (visible: Bool, positions: [CGFloat], velocities: [CGFloat], targets: [CGFloat], alpha: CGFloat) {
+        autofillPreview.validationMotion
+    }
+    var validationDisplayedPages: Int { displayedPageCount }
+    func validationShow(_ value: AutofillLayout.Result) { showAutofillPreview(value) }
+}
+''')
 PY
 if [[ "$BUKO_INSERTION_MODE" == "--ui-checks" ]]; then
     xcodebuild -project "$BUKO_INSERTION_HARNESS/Buko.xcodeproj" -scheme BukoValidation -configuration Debug \
@@ -50,10 +70,14 @@ BUKO_INSERTION_DATA="$(xcrun simctl get_app_container "$BUKO_INSERTION_SIM" dev.
 rm -f "$BUKO_INSERTION_DATA/Documents/result.txt"
 xcrun simctl launch --terminate-running-process "$BUKO_INSERTION_SIM" dev.buko.InsertionValidation "$BUKO_INSERTION_MODE"
 printf 'Harness: %s\nData: %s\n' "$BUKO_INSERTION_HARNESS" "$BUKO_INSERTION_DATA"
-if [[ "$BUKO_INSERTION_MODE" == "--run-checks" ]]; then
+if [[ "$BUKO_INSERTION_MODE" == "--run-checks" || "$BUKO_INSERTION_MODE" == "--motion-checks" ]]; then
     for attempt in {1..120}; do
         if [[ -f "$BUKO_INSERTION_DATA/Documents/result.txt" ]]; then
             cat "$BUKO_INSERTION_DATA/Documents/result.txt"
+            if [[ "$BUKO_INSERTION_MODE" == "--motion-checks" ]]; then
+                mkdir -p "$BUKO_INSERTION_HARNESS/frames"
+                cp "$BUKO_INSERTION_DATA"/Documents/reflow-*.png "$BUKO_INSERTION_HARNESS/frames/"
+            fi
             if [[ "$(head -c 4 "$BUKO_INSERTION_DATA/Documents/result.txt")" == "PASS" ]]; then exit 0; else exit 1; fi
         fi
         sleep 1

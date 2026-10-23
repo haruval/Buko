@@ -16,7 +16,7 @@ final class AutofillInsertionState {
     private var document: AutofillDocument?
     private var acceptance: Task<Void, Never>?
     var currentDocument: (() -> AutofillDocument?)?
-    var previewChanged: ((AutofillLayout.Result?) -> Void)?
+    var previewChanged: ((AutofillLayout.Result?, Bool) -> Void)?
     var commit: ((AutofillDocument, AutofillDocument) throws -> Void)?
     var accepted: (() -> Void)?
 
@@ -73,17 +73,17 @@ final class AutofillInsertionState {
                 selectedText: proposal.selectedText, target: proposal.insertionTarget, targetBounds: sampled.targetBounds)
             layout = result
             issue = result.missing.isEmpty ? nil : "Some symbols couldn’t be rendered as ink. Try a shorter fill."
-            previewChanged?(result)
-        } catch { issue = error.localizedDescription; layout = nil; previewChanged?(nil) }
+            previewChanged?(result, false)
+        } catch { issue = error.localizedDescription; layout = nil; previewChanged?(nil, false) }
     }
 
-    func cancel() {
+    func cancel(animatedReturn: Bool = false) {
         acceptance?.cancel(); acceptance = nil
         sampling?.cancel(); sampling = nil; samplingDeadline?.cancel(); samplingDeadline = nil
         sampled = HandwritingSampler.Result(); sampleDocuments = []; isPreparing = false
         proposal = nil; document = nil; layout = nil; issue = nil
         isAccepting = false
-        previewChanged?(nil)
+        previewChanged?(nil, animatedReturn)
     }
 
     func accept() {
@@ -107,7 +107,7 @@ final class AutofillInsertionState {
                 guard self.proposal?.requestID == proposal.requestID, !Task.isCancelled else { return }
                 issue = error.localizedDescription; isAccepting = false
                 if let edit = error as? AutofillEditError, edit == .stale || edit == .sourcesChanged {
-                    self.layout = nil; previewChanged?(nil)
+                    self.layout = nil; previewChanged?(nil, false)
                 }
             }
         }

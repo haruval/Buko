@@ -9,6 +9,7 @@ nonisolated enum AutofillLayout {
         let frame: CGRect
     }
     struct Result {
+        let original: PKDrawing
         let existing: PKDrawing
         let inserted: PKDrawing
         let lines: [Line]
@@ -196,7 +197,7 @@ nonisolated enum AutofillLayout {
         let finalBottom = max(lines.last?.frame.maxY ?? 0, moved.reduce(CGFloat.zero) { max($0, $1.renderBounds.maxY) })
         let count = max(pageCount, Int(floor(max(0, finalBottom - 0.001) / NotebookPaging.pageStride)) + 1)
         guard count <= pageCount + 32 else { throw LayoutError.tooMuchText }
-        return Result(existing: PKDrawing(strokes: moved), inserted: PKDrawing(strokes: missing.isEmpty ? ink : []),
+        return Result(original: drawing, existing: PKDrawing(strokes: moved), inserted: PKDrawing(strokes: missing.isEmpty ? ink : []),
                       lines: lines, pageCount: count, missing: missing, letterHeight: size,
                       sampledGlyphCount: sampledCount, fallbackGlyphCount: fallbackCount)
     }

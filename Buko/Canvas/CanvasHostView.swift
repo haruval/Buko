@@ -92,7 +92,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         surface.addSubview(edgeBlur)
         circleIntent.insertion.currentDocument = { [weak self] in self?.captureAutofillDocument?() }
         circleIntent.insertion.handwritingDocuments = { [weak self] in self?.captureHandwritingDocuments?() ?? [] }
-        circleIntent.insertion.previewChanged = { [weak self] in self?.showAutofillPreview($0) }
+        circleIntent.insertion.previewChanged = { [weak self] in self?.showAutofillPreview($0, animatedReturn: $1) }
+        autofillPreview.didSettle = { [weak self] count in self?.finishAutofillReflow(pageCount: count) }
         circleIntent.insertion.commit = { [weak self] before, after in
             guard let self else { throw AutofillEditError.unavailable }
             try self.applyAutofill(from: before, to: after)
@@ -252,15 +253,34 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         isUpdatingInk = false
     }
 
-    private func showAutofillPreview(_ result: AutofillLayout.Result?) {
-        let wasPreviewing = previewPageCount != nil
-        previewPageCount = result?.pageCount
-        autofillPreview.show(result, style: presentationStyle)
+    func drawingDidChange() {
+        // The popup is already idle while a declined preview is springing home.
+        // Undo or programmatic edits must still remove that visual immediately.
+        if previewPageCount != nil { circleIntent.cancel() }
+        else { circleIntent.drawingDidChange() }
+    }
+
+    private func showAutofillPreview(_ result: AutofillLayout.Result?, animatedReturn: Bool = false) {
+        if let result {
+            // Retain any temporary pages until moving ink has finished crossing
+            // them. Decline releases them only after the return spring settles.
+            previewPageCount = max(previewPageCount ?? pageCount, result.pageCount)
+            autofillPreview.show(result, style: presentationStyle, from: canvas)
+        } else { autofillPreview.dismiss(animated: animatedReturn) }
         // An opaque paper preview covers the ink without hiding the real input
         // view. Its alpha must stay at one for Pencil/touch and accessibility.
         canvas.contentSize = CGSize(width: documentSize.width * canvas.zoomScale,
                                     height: documentSize.height * canvas.zoomScale)
-        if wasPreviewing && result == nil {
+        invalidateEdgeSnapshot()
+        updateViewport()
+    }
+
+    private func finishAutofillReflow(pageCount count: Int?) {
+        let previousCount = displayedPageCount
+        previewPageCount = count
+        canvas.contentSize = CGSize(width: documentSize.width * canvas.zoomScale,
+                                    height: documentSize.height * canvas.zoomScale)
+        if displayedPageCount < previousCount {
             canvas.contentOffset = clampedOffset(center: viewportCenter(), scale: canvas.zoomScale)
         }
         invalidateEdgeSnapshot()
@@ -415,7 +435,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let scale = canvas.zoomScale
         let offset = canvas.contentOffset
         circleIntent.updateProjection(scale: scale, offset: offset)
-        autofillPreview.project(from: canvas, style: presentationStyle, showsGrid: backdrop.showsGrid)
+        autofillPreview.project(from: canvas, style: presentationStyle, showsGrid: backdrop.showsGrid, document: documentSize)
         if cube.visible {
             cube.updateNotebook(bounds: boundaryRect, viewportHeight: bounds.height)
             cube.updateProjection(scale: scale, offset: offset)
@@ -863,6 +883,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     func stopAnimations() {
         cancelCircleInteraction()
+        autofillPreview.settle()
         wheelEnd?.cancel()
         pageTurnPending = false
         isPullActive = false

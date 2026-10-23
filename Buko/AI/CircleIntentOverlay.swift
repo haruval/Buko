@@ -90,7 +90,7 @@ struct CircleIntentOverlay: View {
                     }
                     .buttonStyle(.plain).accessibilityLabel(showsDetails ? "Hide autofill details" : "Show autofill details and sources")
                 }
-                Button(action: state.cancel) {
+                Button(action: state.decline) {
                     Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(.rect)
                 }
                 .buttonStyle(.plain).accessibilityLabel("Dismiss intent")
@@ -241,7 +241,7 @@ struct CircleIntentOverlay: View {
                 }
             }
             HStack(spacing: 12) {
-                Button(action: state.cancel) {
+                Button(action: state.decline) {
                     Text("Decline").frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.plain).bukoGlass(interactive: true)

@@ -122,7 +122,15 @@ final class CircleIntentState {
     func resetPopupAnchor() { popupAnchor = nil }
 
     func cancel() {
-        insertion.cancel()
+        cancel(animatedReturn: false)
+    }
+
+    func decline() {
+        cancel(animatedReturn: true)
+    }
+
+    private func cancel(animatedReturn: Bool) {
+        insertion.cancel(animatedReturn: animatedReturn)
         requestID = UUID()
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
