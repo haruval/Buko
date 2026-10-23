@@ -9,6 +9,7 @@ struct NoteCanvas: UIViewRepresentable {
     let onPageChange: (Int, Int) -> Void
     let onDrawingChange: (Data) -> Void
     let preparedHandwriting: (AutofillProposal) -> HandwritingSampler.Result
+    var onBandSelection: ((PKDrawing, CGRect) -> Void)? = nil
     let onAutofillCommit: (AutofillDocument, AutofillDocument) throws -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -42,6 +43,7 @@ struct NoteCanvas: UIViewRepresentable {
             }
             host.preparedHandwriting = preparedHandwriting
             host.persistAutofill = onAutofillCommit
+            host.onBandSelection = onBandSelection
             host.onUndoStateChange = { [weak session] in session?.refreshUndoState() }
         }
         host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid,
@@ -54,6 +56,7 @@ struct NoteCanvas: UIViewRepresentable {
         host.onPageChange = context.coordinator.hasLoadedDrawing ? onPageChange : nil
         host.preparedHandwriting = context.coordinator.hasLoadedDrawing ? preparedHandwriting : nil
         host.persistAutofill = context.coordinator.hasLoadedDrawing ? onAutofillCommit : nil
+        host.onBandSelection = context.coordinator.hasLoadedDrawing ? onBandSelection : nil
         host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid,
                        colorScheme: colorScheme)
     }
