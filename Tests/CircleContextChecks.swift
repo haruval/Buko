@@ -3,6 +3,7 @@ import PencilKit
 
 @main struct CircleContextChecks {
     static func main() async throws {
+        lineBreaks()
         let page = NotebookPaging.rect(for: 1)
         let selected = CGRect(x: page.minX + 65, y: page.minY + 145 + 20 * 48 - 10,
                               width: 440, height: 46)
@@ -24,4 +25,22 @@ import PencilKit
         precondition(result.boxes.allSatisfy { $0.intersects(selected) }, "Highlight only selected handwriting")
         print("Nearby context checks passed: page bounds, real handwriting recognition, separate context and selected-only geometry.")
     }
+    static func lineBreaks() {
+        let text = "Keep appointment. Topic:"
+        let boxes = ["Keep": [CGRect(x: 70, y: 140, width: 50, height: 25)],
+                     "appointment.": [CGRect(x: 135, y: 142, width: 130, height: 23)],
+                     "Topic:": [CGRect(x: 70, y: 190, width: 70, height: 25)]]
+        precondition(CircleInkReader.restoringLineBreaks(in: text, wordBounds: boxes) == "Keep appointment.\nTopic:")
+        let structured = "Keep appointment.\nTopic:"
+        precondition(CircleInkReader.restoringLineBreaks(in: structured, wordBounds: [:]) == structured)
+        var missing = boxes; missing["Topic:"] = []
+        precondition(CircleInkReader.restoringLineBreaks(in: text, wordBounds: missing) == text)
+        var ambiguous = boxes; ambiguous["Keep"]!.append(CGRect(x: 80, y: 300, width: 50, height: 25))
+        precondition(CircleInkReader.restoringLineBreaks(in: text, wordBounds: ambiguous) == text)
+        precondition(CircleInkReader.restoringLineBreaks(in: "Keep Keep", wordBounds: boxes) == "Keep Keep")
+        var inline = boxes; inline["Topic:"] = [CGRect(x: 280, y: 190, width: 70, height: 25)]
+        precondition(CircleInkReader.restoringLineBreaks(in: text, wordBounds: inline) == text, "Vertical annotations are not row resets")
+        print("Line-break checks passed: preserve tokens/order, retain existing rows, decline incomplete/duplicate geometry.")
+    }
+
 }

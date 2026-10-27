@@ -13,6 +13,7 @@ struct ContentView: View {
     @Query(filter: #Predicate<Note> { $0.deletedAt != nil }, sort: \Note.deletedAt, order: .reverse)
     private var trashedNotes: [Note]
     @Query(sort: \TrashedPage.deletedAt, order: .reverse) private var trashedPages: [TrashedPage]
+    @Query(sort: \NoteFolder.createdAt, order: .reverse) private var folders: [NoteFolder]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
     @AppStorage("pplTestNoteID") private var pplTestNoteID = ""
     @AppStorage("testPPLLectureTitleMigrated") private var testPPLLectureTitleMigrated = false
@@ -127,7 +128,9 @@ struct ContentView: View {
             HandwritingPreviewView(preparation: handwriting, noteID: selectedNote?.id)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { session.host?.circleIntent.cancel(); saveNow() }
+            if phase != .active {
+                session.host?.circleIntent.cancel(); saveNow()
+            }
             refreshHandwriting()
         }
         .onChange(of: sidebarVisible) { _, _ in titleFocused = false }
@@ -271,18 +274,28 @@ struct ContentView: View {
             HStack(alignment: .top) {
                 ExpandingGlassPanel(
                     isExpanded: sidebarVisible,
-                    size: CGSize(width: min(272, size.width - 104), height: max(220, min(640, size.height - 120))),
+                    size: CGSize(width: min(max(320, size.width / 3), size.width - 84), height: max(220, size.height - 124)),
                     alignment: .topLeading, anchor: .topLeading,
                     expandedBackingOpacity: 0.5
                 ) {
                     NotesSidebar(
-                        notes: notes, selectedID: selectedNote?.id,
-                        select: select, create: createNote, hide: toggleSidebar,
+                        notes: notes, folders: folders, selectedID: selectedNote?.id,
+                        select: select, create: { createNote(in: $0) }, hide: toggleSidebar,
                         rename: { note in
                             newTitle = note.title
                             renamingNote = note
                             renamePresented = true
-                        }, trash: moveToTrash
+                        }, trash: moveToTrash,
+                        group: { source, target in
+                            guard source.id != target.id else { return false }
+                            return organize { try LibraryOrganization.group(source, with: target, in: modelContext) }
+                        }, move: { note, folder in
+                            organize { try LibraryOrganization.move(note, to: folder, in: modelContext) }
+                        }, renameFolder: { folder, title in
+                            _ = organize { try LibraryOrganization.rename(folder, to: title, in: modelContext) }
+                        }, ungroup: { folder in
+                            _ = organize { try LibraryOrganization.ungroup(folder, in: modelContext) }
+                        }
                     )
                 } compact: {
                     ShelfButton(title: "Show notes", symbol: "sidebar.left", action: toggleSidebar)
@@ -412,10 +425,11 @@ struct ContentView: View {
         } catch { persistenceError = error.localizedDescription }
     }
 
-    private func createNote() {
+    private func createNote(in folderID: UUID? = nil) {
         if settingsVisible { toggleSettings() }
         guard flushDrawing() else { return }
         let note = Note(title: availableTitle("Untitled"))
+        note.folderID = folderID
         guard performEdit({
             modelContext.insert(note)
             try NotebookEdits.prepare(note)
@@ -515,6 +529,12 @@ struct ContentView: View {
         saveNow()
     }
 
+    private func organize(_ edit: () throws -> Void) -> Bool {
+        guard flushDrawing() else { return false }
+        do { try edit(); return true }
+        catch { persistenceError = error.localizedDescription; return false }
+    }
+
     private func refreshHandwriting() {
         var available = notes
         if let selectedNote, !available.contains(where: { $0.id == selectedNote.id }) { available.insert(selectedNote, at: 0) }
@@ -548,5 +568,5 @@ struct ContentView: View {
 
 #Preview("Blank canvas") {
     ContentView()
-        .modelContainer(for: [Note.self, TrashedPage.self], inMemory: true)
+        .modelContainer(for: [Note.self, TrashedPage.self, NoteFolder.self, BulletinItem.self], inMemory: true)
 }

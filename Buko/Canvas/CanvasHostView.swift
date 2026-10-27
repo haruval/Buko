@@ -435,6 +435,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let scale = canvas.zoomScale
         let offset = canvas.contentOffset
         circleIntent.updateProjection(scale: scale, offset: offset)
+
         autofillPreview.project(from: canvas, style: presentationStyle, showsGrid: backdrop.showsGrid, document: documentSize)
         if cube.visible {
             cube.updateNotebook(bounds: boundaryRect, viewportHeight: bounds.height)
@@ -880,6 +881,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
         circleIntent.cancelTracing()
     }
+
 
     func stopAnimations() {
         cancelCircleInteraction()

@@ -8,6 +8,7 @@ final class Note {
     var createdAt: Date
     var updatedAt: Date
     var deletedAt: Date? = nil
+    var folderID: UUID? = nil
     var pageCount: Int = 1
     var currentPageIndex: Int = 0
     var pageLayoutVersion: Int = 0

@@ -189,6 +189,7 @@ enum NotebookEdits {
         let title: String
         let updatedAt: Date
         let deletedAt: Date?
+        let folderID: UUID?
         let count: Int
         let index: Int
         let version: Int
@@ -198,6 +199,7 @@ enum NotebookEdits {
 
         init(_ note: Note) {
             self.note = note; title = note.title; updatedAt = note.updatedAt; deletedAt = note.deletedAt
+            folderID = note.folderID
             count = note.pageCount; index = note.currentPageIndex; version = note.pageLayoutVersion
             metadata = note.pageMetadata; ink = note.drawingData
             autofillHistory = note.autofillHistory
@@ -205,6 +207,7 @@ enum NotebookEdits {
 
         func restore() {
             note.title = title; note.updatedAt = updatedAt; note.deletedAt = deletedAt
+            note.folderID = folderID
             note.pageCount = count; note.currentPageIndex = index; note.pageLayoutVersion = version
             note.pageMetadata = metadata; note.drawingData = ink
             note.autofillHistory = autofillHistory

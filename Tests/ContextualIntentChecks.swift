@@ -7,7 +7,11 @@ import Darwin
 @main struct ContextualIntentChecks {
     actor Recorder {
         var trace = PipelineTrace()
-        func receive(_ event: PipelineEvent) { trace.receive(event) }
+        var beganIDs: [String] = []
+        func receive(_ event: PipelineEvent) {
+            if case .began(let id, _, _, _) = event { beganIDs.append(id) }
+            trace.receive(event)
+        }
     }
     struct Fixture {
         let id: String
@@ -42,13 +46,25 @@ import Darwin
         .init(id: "missing-operand", selected: "A = [1 ?; 3 4]. Find its determinant.", context: "", needs: [], subjects: [], clarify: true),
         .init(id: "ambiguous-reversed", selected: "What would that look like in practice?", context: "Semaphores coordinate access to a shared resource. Closures capture lexical variables.", needs: [], subjects: [], clarify: true, clarificationSubjects: ["closure", "semaphore"]),
         .init(id: "collective-reference", selected: "What would both look like in practice?", context: "Closures capture lexical variables. Semaphores coordinate access to a shared resource.", needs: ["instance", "example", "illustration", "practice"], subjects: ["closure", "semaphore"]),
-        .init(id: "disambiguated-reference", selected: "For the second concept, what would that look like in practice?", context: "Closures capture lexical variables.\nSemaphores coordinate access to a shared resource.", excludedSubjects: ["closure"], needs: ["instance", "example", "illustration", "practice"], subjects: ["semaphore"]),
+        .init(id: "disambiguated-reference", selected: "For the second concept, what would that look like in practice?", context: "Closures capture lexical variables.\nSemaphores coordinate access to a shared resource.", excludedSubjects: ["closure"], needs: ["instance", "example", "illustration", "practice"], subjects: ["semaphore"], evidence: ["A semaphore coordinates access to a shared resource. For example, a binary semaphore initialized to one guards a printer: a task waits before printing and signals when it finishes, so another task can acquire it."], draftTerms: ["printer", "wait|acquire", "signal"]),
         .init(id: "comparison-reversed", selected: "They both find variable bindings. The difference is", context: "Dynamic scoping follows the calling sequence. Static scoping follows lexical nesting.", needs: ["difference", "contrast", "comparison", "lookup"], subjects: ["static", "dynamic"]),
         .init(id: "comparison-transfer", selected: "Both transport data, but they differ in delivery", context: "TCP and UDP are transport protocols.", needs: ["difference", "contrast", "comparison", "delivery"], subjects: ["tcp", "udp"], evidence: ["TCP provides an ordered, reliable byte stream.", "UDP provides datagrams without guaranteed delivery or ordering."], draftTerms: ["tcp", "udp", "reliable|guarantee", "order"]),
-        .init(id: "pattern-reversed", selected: "Evaporation changes liquid into vapor.\nCondensation changes vapor into liquid. A cold glass gets wet.", context: "Pair each process with an everyday situation that shows it happening.", excludedSubjects: ["condensation"], needs: ["instance", "example", "situation"], subjects: ["evaporation"], expectedTargets: ["Evaporation"]),
+        .init(id: "pattern-reversed", selected: "Evaporation changes liquid into vapor.\nCondensation changes vapor into liquid. A cold glass gets wet.", context: "Pair each process with an everyday situation that shows it happening.", excludedSubjects: ["condensation"], needs: ["instance", "example", "situation"], subjects: ["evaporation"], expectedTargets: ["Evaporation"], evidence: ["Evaporation changes liquid into vapor. For example, a wet towel dries as liquid water evaporates into the air.", "Condensation changes vapor into liquid. A cold glass gets wet when water vapor condenses on it."], draftTerms: ["towel", "water"]),
         .init(id: "pattern-swapped", selected: "Evaporation changes liquid into vapor. A wet towel dries.\nCondensation changes vapor into liquid.", context: "Pair each process with an everyday situation that shows it happening.", excludedSubjects: ["evaporation"], needs: ["instance", "example", "situation"], subjects: ["condensation"], expectedTargets: ["Condensation"]),
         .init(id: "pattern-transfer", selected: "A conductor lets current flow. Copper wiring carries current in a lamp.\nAn insulator resists current flow.", context: "Give a use alongside each meaning.", excludedSubjects: ["conductor"], needs: ["use", "application", "instance", "example"], subjects: ["insulator"], expectedTargets: ["insulator"], evidence: ["An insulator resists electrical current. Rubber insulation around a wire helps prevent current from passing to a person touching the wire."], draftTerms: ["rubber", "wire"]),
-        .init(id: "complete-pattern", selected: "Evaporation changes liquid into vapor. A wet towel dries.\nCondensation changes vapor into liquid. A cold glass gets wet.", context: "Pair each process with an everyday situation that shows it happening.", needs: [], subjects: [], clarify: true)
+        .init(id: "complete-pattern", selected: "Evaporation changes liquid into vapor. A wet towel dries.\nCondensation changes vapor into liquid. A cold glass gets wet.", context: "Pair each process with an everyday situation that shows it happening.", needs: [], subjects: [], clarify: true),
+        .init(id: "reference-first", selected: "For the first concept, what would that look like in practice?", context: "Closures capture lexical variables.\nSemaphores coordinate access to a shared resource.", excludedSubjects: ["semaphore"], needs: ["example", "instance", "illustration", "practice"], subjects: ["closure"]),
+        .init(id: "reference-order-transfer", selected: "For the second concept, what would that look like in practice?", context: "Semaphores coordinate access to a shared resource.\nClosures capture lexical variables.", excludedSubjects: ["semaphore"], needs: ["example", "instance", "illustration", "practice"], subjects: ["closure"]),
+        .init(id: "reference-description", selected: "What would that look like in practice? I mean the one coordinating access.", context: "Closures capture lexical variables. Semaphores coordinate access to a shared resource.", excludedSubjects: ["closure"], needs: ["example", "instance", "illustration", "practice"], subjects: ["semaphore"]),
+        .init(id: "reference-three-ambiguous", selected: "What would that look like in practice?", context: "Closures capture variables. Semaphores control access. Recursion involves self-calls.", needs: [], subjects: [], clarify: true),
+        .init(id: "pattern-transfer-reversed", selected: "An insulator resists current flow.\nA conductor lets current flow. Copper wiring carries current in a lamp.", context: "Give a use alongside each meaning.", excludedSubjects: ["conductor"], needs: ["use", "application", "instance", "example"], subjects: ["insulator"], expectedTargets: ["insulator"], evidence: ["An insulator resists electrical current. Rubber insulation around a wire helps prevent current from passing to a person touching the wire."], draftTerms: ["rubber", "wire"]),
+        .init(id: "pattern-without-heading", selected: "A queue serves items in arrival order. A printer handles waiting jobs this way.\nA stack serves the newest item first.", context: "", excludedSubjects: ["queue"], needs: ["use", "application", "instance", "example", "situation"], subjects: ["stack"], expectedTargets: ["stack"], evidence: ["A stack serves the newest item first. For example, an editor puts completed edits on a stack; Undo removes the newest edit first."], draftTerms: ["editor|undo", "newest|recent"]),
+        .init(id: "pattern-three-members", selected: "A stack serves the newest item first.\nA queue serves items in arrival order. Printers use queues for waiting jobs.\nA set keeps distinct items. A guest list uses a set to avoid duplicate names.", context: "Give a use alongside each meaning.", excludedSubjects: ["queue", "set"], needs: ["use", "application", "instance", "example"], subjects: ["stack"], expectedTargets: ["stack"], evidence: ["A stack serves the newest item first. For example, an editor puts completed edits on a stack; Undo removes the newest edit first."], draftTerms: ["editor|undo", "newest|recent"]),
+        .init(id: "pattern-transfer-complete", selected: "An insulator resists current flow. Rubber coats wires to protect people.\nA conductor lets current flow. Copper wiring carries current in a lamp.", context: "Give a use alongside each meaning.", needs: [], subjects: [], clarify: true),
+        // Frozen review regression: identical content must retain its missing
+        // counterpart when a supplied example occupies a separate ink row.
+        .init(id: "pattern-wrapped", selected: "A queue removes the oldest entry first.\nPrint jobs wait in a queue.\nA stack removes the newest entry first.", context: "", excludedSubjects: ["queue"], needs: ["example", "instance", "application", "use", "situation"], subjects: ["stack"], expectedTargets: ["stack"], evidence: ["A stack serves the newest item first. For example, an editor puts completed edits on a stack; Undo removes the newest edit first."], draftTerms: ["editor|undo", "newest|recent"])
+
     ]
 
     @MainActor static func main() async throws {
@@ -62,8 +78,15 @@ import Darwin
             print("SKIPPED: local model unavailable"); exit(77)
         }
         let output = URL(fileURLWithPath: option("--output") ?? "/private/tmp/BukoContextualIntent.json")
+        if args.contains("--cancel-repair") {
+            try await cancellationChecks(output: output)
+            return
+        }
         let subset = option("--case")?.split(separator: ",").map(String.init)
         let selectedFixtures = fixtures.filter { subset == nil || subset!.contains($0.id) }
+        if let subset, subset.isEmpty || !Set(subset).isSubset(of: Set(fixtures.map(\.id))) {
+            print("ERROR: --case requires known fixture IDs"); exit(2)
+        }
         precondition(!selectedFixtures.isEmpty)
         let libraryRoot = FileManager.default.temporaryDirectory.appendingPathComponent("BukoContextualPipeline-" + UUID().uuidString)
         let library = LectureLibrary(root: libraryRoot)
@@ -107,7 +130,7 @@ import Darwin
                 passed = passed && item.clarificationSubjects.allSatisfy { result.clarification.localizedCaseInsensitiveContains($0) }
                 record["planPassed"] = passed
                 let pipelineCase = ["instance-after-definition", "pronoun-instance", "picture-instance",
-                    "causal-continuation", "implicit-comparison", "explicit-question-control"].contains(item.id) || !item.evidence.isEmpty
+                    "causal-continuation", "implicit-comparison", "explicit-question-control", "reference-order-transfer"].contains(item.id) || !item.evidence.isEmpty
                 if args.contains("--pipeline"), pipelineCase, let gap = result.gap {
                     let search: LectureSearch
                     if item.evidence.isEmpty {
@@ -151,6 +174,9 @@ import Darwin
                 record["error"] = String(describing: error)
             }
             record["seconds"] = ProcessInfo.processInfo.systemUptime - started
+            let stageIDs = await recorder.beganIDs
+            precondition(Set(stageIDs).count == stageIDs.count, "Every review must remain visible in request-local diagnostics")
+            precondition(stageIDs.filter { $0 == "referenceRepair" }.count <= 1, "Reference repair must remain bounded to one attempt")
             record["trace"] = await recorder.trace.steps.map { ["id": $0.id, "input": $0.input, "summary": $0.summary] }
             records.append(record)
             try JSONSerialization.data(withJSONObject: records, options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)
@@ -159,5 +185,31 @@ import Darwin
         let count = records.filter { $0["passed"] as? Bool == true }.count
         print("Contextual intent: \(count)/\(records.count). Report: \(output.path)")
         if count != records.count { exit(1) }
+    }
+
+    @available(macOS 27, *)
+    static func cancellationChecks(output: URL) async throws {
+        let fixture = fixtures.first { $0.id == "disambiguated-reference" }!
+        var reports: [[String: Any]] = []
+        for stage in ["referenceRepair", "referenceRepair.scopeBinding"] {
+            let recorder = Recorder()
+            let task = Task {
+                let observer: PipelineObserver = { event in
+                    await recorder.receive(event)
+                    if case .completed(let id, _) = event, id == stage {
+                        withUnsafeCurrentTask { $0?.cancel() }
+                    }
+                }
+                return try await CirclePlanner.infer(selected: fixture.selected, context: fixture.context, observer: observer)
+            }
+            do { _ = try await task.value; preconditionFailure("Cancellation after \(stage) must not return a plan") }
+            catch is CancellationError { }
+            let steps = await recorder.trace.steps
+            precondition(steps.last?.id == stage && steps.last?.status == .completed,
+                         "Cancellation must occur at the real review boundary and prevent later stages")
+            reports.append(["cancelledAfter": stage, "stages": steps.map(\.id), "passed": true])
+            print("PASS cancellation after \(stage): no subsequent stage or plan")
+        }
+        try JSONSerialization.data(withJSONObject: reports, options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)
     }
 }

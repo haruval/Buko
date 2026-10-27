@@ -14,11 +14,11 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
     private var releasedFingers: Set<UITouch> = []
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        guard touches.allSatisfy({ $0.type == .direct }) else { state = .failed; return }
+        guard touches.allSatisfy({ $0.type == .direct }) else { reject(); return }
         guard !lifting else { state = .cancelled; return }
         fingers.append(contentsOf: touches)
         let required = singleFinger ? 1 : 2
-        guard fingers.count <= required else { state = .failed; return }
+        guard fingers.count <= required else { reject(); return }
         guard fingers.count == required else { points = [center]; return }
         initialSeparation = separation
         points = [center]
@@ -78,8 +78,12 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
         } else { state = .failed }
     }
 
+    private func reject() { state = state == .possible ? .failed : .cancelled }
+
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .cancelled }
-    override func reset() { fingers = []; points = []; travel = 0; initialSeparation = 0; lifting = false; releasedFingers = [] }
+    override func reset() {
+        fingers = []; points = []; travel = 0; initialSeparation = 0; lifting = false; releasedFingers = []
+    }
     private var center: CGPoint {
         let positions = fingers.map { $0.location(in: view) }
         return CGPoint(x: positions.map(\.x).reduce(0, +) / CGFloat(positions.count),

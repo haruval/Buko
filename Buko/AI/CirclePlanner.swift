@@ -51,18 +51,30 @@ nonisolated enum CirclePlanner {
         }
     }
 
+    /// The planner owns this boundary now that circles have a single purpose.
+    /// Do not silently truncate a selection or promote nearby text into its place.
+    static func checkInput(selected: String, context: String) throws {
+        guard !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw GapPlanError.invalidReferences("emptySelection")
+        }
+        guard selected.count <= IntentPrompts.selectedCharacterLimit,
+              context.count <= IntentPrompts.contextCharacterLimit else { throw GapPlanError.contextLimit }
+        guard ![selected, context].contains(where: LectureGroundingPolicy.containsInstructionOverride) else {
+            throw GapPlanError.instructionRisk
+        }
+    }
+
     @available(iOS 27, macOS 27, *)
     static func infer(selected: String, context: String, mode: CircleRetrievalMode = .structuredGap,
                       model: SystemLanguageModel = .default, observer: PipelineObserver? = nil) async throws -> CirclePlan {
         try Task.checkCancellation()
-        guard ![selected, context].contains(where: LectureGroundingPolicy.containsInstructionOverride) else {
-            throw GapPlanError.instructionRisk
-        }
+        try checkInput(selected: selected, context: context)
         let transcript = GapTranscript(selected: selected, context: context)
         if let explicit = try explicitPlan(in: transcript, mode: mode) {
             await observer?(.began(id: "binding", title: "Identify the unfinished heading", instructions: nil, input: selected))
             try Task.checkCancellation()
             await observer?(.completed(id: "binding", summary: "Local syntax check · no model call\n" + explicit.intent + "\n" + explicit.clarification))
+            try Task.checkCancellation()
             return explicit
         }
         switch mode {
@@ -104,50 +116,100 @@ nonisolated enum CirclePlanner {
                 options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: MissingInformationPrompts.responseTokens))
             try Task.checkCancellation()
             let candidate = response.content
-            await observer?(.completed(id: "gap", summary: "Proposed needs: " + candidate.informationNeeds.joined(separator: ", ")))
-            let resolution = try await resolveScope(candidate, transcript: transcript, model: model, observer: observer)
-            if let question = resolution.question {
-                return CirclePlan(intent: preliminary.intent, action: "Clarify the intended addition before retrieving evidence.",
-                    evidence: "", clarification: question, gap: nil, inputTokens: count,
-                    responseTokenLimit: IntentPrompts.intentTokenLimit + MissingInformationPrompts.responseTokens + resolution.responseTokens,
-                    planningPasses: 2 + resolution.calls, preliminaryIntent: preliminary.intent, bindingStrategy: "contextualClarification")
-            }
-            let bound = resolution.plan
-            let subjects = try bound.subjects(in: transcript)
-            let explicitOperation = bound.targets.count == 1 ? GapHeadingRequest.inspect(bound.targets[0].quote)?.operation : nil
-            let proposed = MissingInformationPlan(alreadyCovered: bound.alreadyCovered, targets: bound.targets,
-                informationNeeds: bound.informationNeeds, operation: explicitOperation ?? .continueThought, subjects: subjects,
-                completionGoal: "supply \(bound.informationNeeds.joined(separator: ", ")) for \(subjects.map(\.quote).joined(separator: " and "))")
-            let gap: ValidatedGapPlan
-            do { gap = try ValidatedGapPlan.validate(proposed, in: transcript) }
-            catch let error as GapPlanError {
-                if case .invalidReferences(let reason) = error {
-                    await observer?(.began(id: "planValidation", title: "Check the inferred references", instructions: nil,
-                        input: String(decoding: try encoder.encode(proposed), as: UTF8.self)))
-                    await observer?(.completed(id: "planValidation", summary: "No validated addition; clarification required: " + reason))
-                    return CirclePlan(intent: preliminary.intent, action: "Clarify the intended addition before retrieving evidence.",
-                        evidence: "", clarification: "What would you like to add to the selected notes?", gap: nil, inputTokens: count,
-                        responseTokenLimit: IntentPrompts.intentTokenLimit + MissingInformationPrompts.responseTokens + resolution.responseTokens,
-                        planningPasses: 2 + resolution.calls, preliminaryIntent: preliminary.intent, bindingStrategy: "unresolvedContextualPlan")
+            await observer?(.completed(id: "gap", summary: String(decoding: try encoder.encode(candidate), as: UTF8.self)))
+            var checked = try await checkCandidate(candidate, transcript: transcript, model: model, observer: observer)
+            var calls = 2 + checked.calls
+            var tokens = IntentPrompts.intentTokenLimit + MissingInformationPrompts.responseTokens + checked.responseTokens
+            if checked.canRepair {
+                let instructions = GroundedReferenceRepair.instructions
+                let request = String(decoding: try encoder.encode(transcript.blocks), as: UTF8.self)
+                let repairCount = try await model.tokenCount(for: Instructions(instructions))
+                    + model.tokenCount(for: GroundedReferenceRepair.generationSchema) + model.tokenCount(for: Prompt(request))
+                guard repairCount + GroundedReferenceRepair.responseTokens + 128 <= model.contextSize else { throw GapPlanError.contextLimit }
+                await observer?(.began(id: "referenceRepair", title: "Re-anchor the inferred references", instructions: instructions, input: request))
+                try Task.checkCancellation()
+                let repair = try await LanguageModelSession(model: model, instructions: instructions).respond(to: request,
+                    generating: GroundedReferenceRepair.self,
+                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: GroundedReferenceRepair.responseTokens)).content
+                try Task.checkCancellation()
+                calls += 1; tokens += GroundedReferenceRepair.responseTokens
+                await observer?(.completed(id: "referenceRepair", summary: String(decoding: try encoder.encode(repair), as: UTF8.self)))
+                try Task.checkCancellation()
+                if let anchored = try? repair.anchored(in: transcript) {
+                    // Exactly one repair. It cannot bypass scope or final grounding.
+                    let repairObserver: PipelineObserver = { event in
+                        switch event {
+                        case let .began(id, title, instructions, input):
+                            await observer?(.began(id: "referenceRepair." + id, title: title, instructions: instructions, input: input))
+                        case let .completed(id, summary):
+                            await observer?(.completed(id: "referenceRepair." + id, summary: summary))
+                        }
+                    }
+                    checked = try await checkCandidate(anchored, transcript: transcript, model: model, observer: repairObserver, explainScope: true)
+                    calls += checked.calls; tokens += checked.responseTokens
                 }
-                throw RejectedGapPlan(proposed: proposed, reason: error, preliminaryIntent: preliminary.intent)
             }
-            return CirclePlan(intent: gap.intent, action: gap.action, evidence: gap.targetText, clarification: "", gap: gap,
-                inputTokens: count, responseTokenLimit: IntentPrompts.intentTokenLimit + MissingInformationPrompts.responseTokens + resolution.responseTokens,
-                planningPasses: 2 + resolution.calls, preliminaryIntent: preliminary.intent, bindingStrategy: "reviewedContextualInference")
+            try Task.checkCancellation()
+            if let gap = checked.gap {
+                return CirclePlan(intent: gap.intent, action: gap.action, evidence: gap.targetText, clarification: "", gap: gap,
+                    inputTokens: count, responseTokenLimit: tokens, planningPasses: calls,
+                    preliminaryIntent: preliminary.intent, bindingStrategy: "reviewedContextualInference")
+            }
+            return CirclePlan(intent: preliminary.intent, action: "Clarify the intended addition before retrieving evidence.",
+                evidence: "", clarification: checked.question, gap: nil, inputTokens: count,
+                responseTokenLimit: tokens, planningPasses: calls, preliminaryIntent: preliminary.intent,
+                bindingStrategy: "contextualClarification")
         }
+    }
+
+    private struct CandidateCheck {
+        var gap: ValidatedGapPlan? = nil
+        var question = "What would you like to add to the selected notes?"
+        var canRepair = false
+        var calls = 0
+        var responseTokens = 0
+    }
+
+    @available(iOS 27, macOS 27, *)
+    private static func checkCandidate(_ candidate: ContextualGapReferences, transcript: GapTranscript,
+                                       model: SystemLanguageModel, observer: PipelineObserver?, explainScope: Bool = false) async throws -> CandidateCheck {
+        let resolution = try await resolveScope(candidate, transcript: transcript, model: model, observer: observer, explainScope: explainScope)
+        var result = CandidateCheck(calls: resolution.calls, responseTokens: resolution.responseTokens)
+        if let question = resolution.question {
+            result.question = question
+            result.canRepair = resolution.unanchored && !candidate.targets.isEmpty && !candidate.informationNeeds.isEmpty
+            return result
+        }
+        let bound = resolution.plan
+        let subjects = try bound.subjects(in: transcript)
+        let explicitOperation = bound.targets.count == 1 ? GapHeadingRequest.inspect(bound.targets[0].quote)?.operation : nil
+        let proposed = MissingInformationPlan(alreadyCovered: bound.alreadyCovered, targets: bound.targets,
+            informationNeeds: bound.informationNeeds, operation: explicitOperation ?? .continueThought, subjects: subjects,
+            completionGoal: "supply \(bound.informationNeeds.joined(separator: ", ")) for \(subjects.map(\.quote).joined(separator: " and "))")
+        do { result.gap = try ValidatedGapPlan.validate(proposed, in: transcript) }
+        catch let error as GapPlanError {
+            guard case .invalidReferences(let reason) = error else { throw error }
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            await observer?(.began(id: "planValidation", title: "Check the inferred references", instructions: nil,
+                input: String(decoding: try encoder.encode(proposed), as: UTF8.self)))
+            await observer?(.completed(id: "planValidation", summary: "No validated addition: " + reason))
+            // Overlap, missing targets and other final validation failures are
+            // not permission to invent an addition to already complete notes.
+        }
+        return result
     }
 
     private struct ScopeResolution {
         var plan: ContextualGapReferences
         var question: String? = nil
+        var unanchored = false
         var calls = 0
         var responseTokens = 0
     }
 
     @available(iOS 27, macOS 27, *)
     private static func resolveScope(_ candidate: ContextualGapReferences, transcript: GapTranscript,
-                                     model: SystemLanguageModel, observer: PipelineObserver?) async throws -> ScopeResolution {
+                                     model: SystemLanguageModel, observer: PipelineObserver?, explainScope: Bool) async throws -> ScopeResolution {
         var result = ScopeResolution(plan: candidate)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let subjects: [GapTextReference]
@@ -156,8 +218,9 @@ nonisolated enum CirclePlanner {
             guard case .invalidReferences(let reason) = error else { throw error }
             await observer?(.began(id: "planValidation", title: "Check the inferred references", instructions: nil,
                 input: String(decoding: try encoder.encode(candidate), as: UTF8.self)))
-            await observer?(.completed(id: "planValidation", summary: "Unanchored subject; clarification required: " + reason))
+            await observer?(.completed(id: "planValidation", summary: "Unanchored subject: " + reason))
             result.question = ContextualScopeChoice.unresolvedQuestion(in: transcript)
+            result.unanchored = true
             return result
         }
         let notes = "Selected notes:\n" + transcript.selected + "\nNearby notes:\n" + transcript.context
@@ -165,21 +228,26 @@ nonisolated enum CirclePlanner {
         // with one incomplete selected topic and a shared established pattern.
         let selectedBlocks = transcript.blocks.filter(\.selected)
         if (2...4).contains(selectedBlocks.count) && subjects.contains(where: { $0.blockID.hasPrefix("S") }) {
-            let request = notes
+            let request = String(decoding: try encoder.encode(transcript.blocks), as: UTF8.self)
             let instructions = ContextualScopePrompts.roles
             let count = try await model.tokenCount(for: Instructions(instructions))
-                + model.tokenCount(for: ContextualRoleMap.generationSchema) + model.tokenCount(for: Prompt(request))
-            guard count + 700 + 128 <= model.contextSize else { throw GapPlanError.contextLimit }
+                + model.tokenCount(for: GroundedPatternMap.generationSchema) + model.tokenCount(for: Prompt(request))
+            guard count + 950 + 128 <= model.contextSize else { throw GapPlanError.contextLimit }
             await observer?(.began(id: "structure", title: "Check the pattern in the notes", instructions: instructions, input: request))
             try Task.checkCancellation()
-            let map = try await LanguageModelSession(model: model, instructions: instructions).respond(to: request,
-                generating: ContextualRoleMap.self, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 700)).content
+            let pattern = try await LanguageModelSession(model: model, instructions: instructions).respond(to: request,
+                generating: GroundedPatternMap.self, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 950)).content
+            let map = pattern.map
             try Task.checkCancellation()
-            result.calls += 1; result.responseTokens += 700
-            await observer?(.completed(id: "structure", summary: String(decoding: try encoder.encode(map), as: UTF8.self)))
+            result.calls += 1; result.responseTokens += 950
+            await observer?(.completed(id: "structure", summary: String(decoding: try encoder.encode(pattern), as: UTF8.self)))
             var mappedCandidate = candidate
             mappedCandidate.subjectQuotes = map.content.map(\.topic).reduce(into: [String]()) { names, name in
                 if !names.contains(name) { names.append(name) }
+            }
+            if ContextualRoleMap.isComplete(map, candidate: mappedCandidate, in: transcript) {
+                result.question = "These notes already supply the shared pattern. What would you like to add?"
+                return result
             }
             if let focused = ContextualRoleMap.focus(map, candidate: mappedCandidate, in: transcript) {
                 result.plan = focused
@@ -198,16 +266,29 @@ nonisolated enum CirclePlanner {
         let request = notes + "\nPossible scopes:\n" + choiceText
             + "\nDo the student's words or the completed-versus-missing pattern distinguish ONE of these scopes from the other possibilities, without guessing?"
         let selectionInstructions = ContextualScopePrompts.choice
-        let selectionRequest = request + "\nReturn only the uniquely supported candidate ID, or NONE if there is no unique supported scope."
-        let selectionCount = try await model.tokenCount(for: Instructions(selectionInstructions)) + model.tokenCount(for: Prompt(selectionRequest))
-        guard selectionCount + 40 + 128 <= model.contextSize else { throw GapPlanError.contextLimit }
+        let selectionRequest = explainScope ? request + "\nExplain the reference before selecting the uniquely supported candidate ID. Return NONE if there is no unique supported scope."
+            : request + "\nReturn only the uniquely supported candidate ID, or NONE if there is no unique supported scope."
+        let schemaTokens = explainScope ? try await model.tokenCount(for: GroundedScopeSelection.generationSchema) : 0
+        let responseTokens = explainScope ? 250 : 40
+        let selectionCount = try await model.tokenCount(for: Instructions(selectionInstructions)) + model.tokenCount(for: Prompt(selectionRequest)) + schemaTokens
+        guard selectionCount + responseTokens + 128 <= model.contextSize else { throw GapPlanError.contextLimit }
         await observer?(.began(id: "scopeBinding", title: "Resolve the intended subjects", instructions: selectionInstructions, input: selectionRequest))
         try Task.checkCancellation()
-        let id = try await LanguageModelSession(model: model, instructions: selectionInstructions).respond(to: selectionRequest,
-            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 40)).content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let session = LanguageModelSession(model: model, instructions: selectionInstructions)
+        let id: String, summary: String
+        if explainScope {
+            let selection = try await session.respond(to: selectionRequest, generating: GroundedScopeSelection.self,
+                options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: responseTokens)).content
+            id = selection.scopeID.trimmingCharacters(in: .whitespacesAndNewlines)
+            summary = selection.reasoning + "\n" + id
+        } else {
+            id = try await session.respond(to: selectionRequest,
+                options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: responseTokens)).content.trimmingCharacters(in: .whitespacesAndNewlines)
+            summary = id
+        }
         try Task.checkCancellation()
-        result.calls += 1; result.responseTokens += 40
-        await observer?(.completed(id: "scopeBinding", summary: id))
+        result.calls += 1; result.responseTokens += responseTokens
+        await observer?(.completed(id: "scopeBinding", summary: summary))
         guard let choice = choices.first(where: { $0.id == id }) else {
             result.question = ContextualScopeChoice.question(subjects: subjects.map(\.quote)); return result
         }

@@ -7,6 +7,7 @@ struct SettingsPanel: View {
     @Binding var showsDevelopment: Bool
     @Binding var showsGrid: Bool
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
+    @AppStorage("showsGestureTestTools") private var showsGestureTestTools = true
     let previewHandwriting: () -> Void
     let recreateTestNote: (SampleLecture) -> Void
     let restore: (Note) -> Void
@@ -90,6 +91,12 @@ struct SettingsPanel: View {
             } else if showsDevelopment {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Circle test tool", isOn: $showsGestureTestTools)
+                            .font(.subheadline)
+                            .padding(.horizontal, 8).frame(minHeight: 44)
+                            .accessibilityIdentifier("showGestureTestTools")
+                        Text("Show Circle in the pen toolbar for one-finger or simulator trackpad selection. Two-finger circles remain available with Pen.")
+                            .font(.caption).foregroundStyle(.secondary)
                         Toggle("Detailed preview", isOn: $detailedPreview)
                             .font(.subheadline)
                             .padding(.horizontal, 8).frame(minHeight: 44)

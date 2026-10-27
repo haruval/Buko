@@ -35,6 +35,7 @@ import Darwin
         precondition(LectureComposer.sourceAnswerSpan("Parsing checks types. Parsing builds a syntax tree.", in: sourceSpan) == nil)
         precondition(LectureComposer.sourceAnswerSpan("The trial improved recall. Results were limited.",
             in: "The trial did not improve recall. Results were limited.") == nil)
+        try plannerInputChecks()
         try plannerChecks()
         diagnosticChecks()
         guard CommandLine.arguments.contains("--live") else { return }
@@ -153,6 +154,24 @@ import Darwin
     actor TraceRecorder {
         var trace = PipelineTrace()
         func receive(_ event: PipelineEvent) { trace.receive(event) }
+    }
+
+    static func plannerInputChecks() throws {
+        try CirclePlanner.checkInput(selected: "What should I review before the exam?", context: "Exam in 12 days")
+        try CirclePlanner.checkInput(selected: String(repeating: "x", count: IntentPrompts.selectedCharacterLimit),
+                                     context: String(repeating: "x", count: IntentPrompts.contextCharacterLimit))
+        do {
+            try CirclePlanner.checkInput(selected: " \n", context: "Parsing:")
+            preconditionFailure("Nearby context became the selected target")
+        } catch GapPlanError.invalidReferences { }
+        for (selected, context) in [(String(repeating: "x", count: IntentPrompts.selectedCharacterLimit + 1), ""),
+                                    ("Parsing:", String(repeating: "x", count: IntentPrompts.contextCharacterLimit + 1))] {
+            do {
+                try CirclePlanner.checkInput(selected: selected, context: context)
+                preconditionFailure("Oversized input was silently truncated")
+            } catch GapPlanError.contextLimit { }
+        }
+        print("Planner input checks passed: empty selection, exact limits and oversized selected/context rejection")
     }
 
     static func diagnosticChecks() {
