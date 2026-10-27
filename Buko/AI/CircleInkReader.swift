@@ -53,16 +53,18 @@ actor CircleInkReader {
         try Task.checkCancellation()
         if !text.isEmpty {
             var boxes: [CGRect] = []
+            var wordBounds: [String: [CGRect]] = [:]
             for word in Set(text.split(whereSeparator: \.isWhitespace).map(String.init)).sorted().prefix(48) {
-                let matches = await recognizer.search(word)
+                let matches = await recognizer.search(word, fullWordsOnly: true)
                 try Task.checkCancellation()
                 boxes += matches.filter { !$0.strokes.isDisjoint(with: ids) }.map(\.bounds)
+                wordBounds[word] = matches.filter { !$0.strokes.isEmpty && $0.strokes.isSubset(of: ids) }.map(\.bounds)
             }
             // Context stays separate from the selected transcript and its boxes.
             // Never expand the visible jelly or displayed recognized handwriting.
             let context = nearbyIDs.isEmpty ? "" : (await recognizer.recognizedText(strokeIDs: nearbyIDs) ?? "")
             try Task.checkCancellation()
-            return Result(text: text, context: context,
+            return Result(text: Self.restoringLineBreaks(in: text, wordBounds: wordBounds), context: context,
                 boxes: boxes.isEmpty ? selected.map(\.renderBounds) : boxes, method: "PencilKit strokes")
         }
         // Vision is a real OCR fallback for unavailable/empty stroke recognition.
@@ -72,6 +74,32 @@ actor CircleInkReader {
         try Task.checkCancellation()
         let context = (try? rasterRead(PKDrawing(strokes: nearby)).text) ?? ""
         return Result(text: result.text, context: context, boxes: result.boxes, method: "Vision OCR fallback")
+    }
+
+    /// PencilKit can flatten separate rows. Restore only unambiguous geometric
+    /// breaks, preserving every recognized token and its order. No semantic rules.
+    nonisolated static func restoringLineBreaks(in text: String, wordBounds: [String: [CGRect]]) -> String {
+        guard !text.contains(where: \.isNewline) else { return text }
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard (2...48).contains(words.count), Set(words).count == words.count else { return text }
+        var bounds: [CGRect] = []
+        for word in words {
+            guard let matches = wordBounds[word], matches.count == 1, let rect = matches.first,
+                  !rect.isNull, !rect.isInfinite, rect.width > 0, rect.height > 0 else { return text }
+            bounds.append(rect)
+        }
+        let heights = bounds.map(\.height).sorted()
+        let gap = max(4, heights[heights.count / 2] * 0.3)
+        var result = words[0], restored = false
+        for index in 1..<words.count {
+            let previous = bounds[index - 1], current = bounds[index]
+            // Superscripts, uncertain order and overlapping baselines are not rows.
+            if current.maxY < previous.minY - gap { return text }
+            let newRow = current.minY > previous.maxY + gap && current.minX < previous.minX
+            result += (newRow ? "\n" : " ") + words[index]
+            restored = restored || newRow
+        }
+        return restored ? result : text
     }
 
     private func rasterRead(_ drawing: PKDrawing) throws -> (text: String, boxes: [CGRect]) {

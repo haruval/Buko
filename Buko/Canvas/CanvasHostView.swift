@@ -12,10 +12,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private let circleGesture = CircleGestureRecognizer()
     private let circleContainer = CircleOverlayContainer()
     private var circleHosting: UIHostingController<CircleIntentOverlay>?
-    private let bandHighlight = BandHighlightState()
-    private var bandHosting: UIHostingController<BandHighlight>?
-    private var capturedBand: CGRect?
-    var onBandSelection: ((PKDrawing, CGRect) -> Void)?
 
     var onPageChange: ((Int, Int) -> Void)?
     var preparedHandwriting: ((AutofillProposal) -> HandwritingSampler.Result)?
@@ -113,11 +109,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             transitionGradients.append(gradient)
         }
         addSubview(guides)
-        let bandHosting = UIHostingController(rootView: BandHighlight(state: bandHighlight))
-        bandHosting.view.backgroundColor = .clear
-        bandHosting.view.isUserInteractionEnabled = false
-        self.bandHosting = bandHosting
-        addSubview(bandHosting.view)
         let hosting = UIHostingController(rootView: CircleIntentOverlay(state: circleIntent))
         hosting.view.backgroundColor = .clear
         circleHosting = hosting
@@ -134,10 +125,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         circleGesture.delegate = self
         circleGesture.cancelsTouchesInView = true
         circleGesture.preview = { [weak self] in self?.circleIntent.trace($0) }
-        circleGesture.bandPreview = { [weak self] rect in
-            self?.circleIntent.cancelTracing()
-            self?.bandHighlight.rect = rect
-        }
         addGestureRecognizer(circleGesture)
         canvas.panGestureRecognizer.require(toFail: circleGesture)
         canvas.pinchGestureRecognizer?.require(toFail: circleGesture)
@@ -188,8 +175,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         self.tool = tool
         if tool != .cube { cube.despawn() }
         circleGesture.singleFinger = tool == .circle
-        circleGesture.singleFingerBand = tool == .band
-        circleGesture.bandEnabled = tool == .pen || tool == .eraser
         let policy: PKCanvasViewDrawingPolicy = allowsFingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
         if backdrop.showsGrid != showsGrid { invalidateEdgeSnapshot() }
@@ -342,7 +327,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         cubeHosting?.view.frame = bounds
         circleContainer.frame = bounds
         circleHosting?.view.frame = bounds
-        bandHosting?.view.frame = bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
         isLayingOut = true
         if surface.frame != bounds { surface.frame = bounds }
@@ -451,10 +435,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let scale = canvas.zoomScale
         let offset = canvas.contentOffset
         circleIntent.updateProjection(scale: scale, offset: offset)
-        if let capturedBand {
-            bandHighlight.rect = CGRect(x: capturedBand.minX * scale - offset.x, y: capturedBand.minY * scale - offset.y,
-                                        width: capturedBand.width * scale, height: capturedBand.height * scale)
-        }
+
         autofillPreview.project(from: canvas, style: presentationStyle, showsGrid: backdrop.showsGrid, document: documentSize)
         if cube.visible {
             cube.updateNotebook(bounds: boundaryRect, viewportHeight: bounds.height)
@@ -552,7 +533,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         pagePull.scrollProgress = travel > 0 ? min(1, max(0, canvas.contentOffset.y / travel)) : 0
         pagePull.rightOverBlack = !documentFrame.contains(CGPoint(x: bounds.width - 48, y: bounds.midY))
         updateAccessibilityValue()
-        let canDraw = tool != .cube && tool != .circle && tool != .band && !isOverview && !isPinching && !isSnapping && !pageTurnPending
+        let canDraw = tool != .cube && tool != .circle && !isOverview && !isPinching && !isSnapping && !pageTurnPending
         if canvas.drawingGestureRecognizer.isEnabled != canDraw { canvas.drawingGestureRecognizer.isEnabled = canDraw }
     }
 
@@ -811,20 +792,12 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     @objc private func circleChanged(_ recognizer: CircleGestureRecognizer) {
         switch recognizer.state {
         case .ended:
-            if recognizer.isBand {
-                let start = PageGeometry.documentPoint(recognizer.bandRect.origin, scale: canvas.zoomScale, offset: canvas.contentOffset)
-                let rect = CGRect(origin: start, size: CGSize(width: recognizer.bandRect.width / canvas.zoomScale,
-                                                              height: recognizer.bandRect.height / canvas.zoomScale))
-                capturedBand = rect
-                onBandSelection?(canonicalDrawing, rect)
-                return
-            }
             let polygon = recognizer.points.map {
                 PageGeometry.documentPoint($0, scale: canvas.zoomScale, offset: canvas.contentOffset)
             }
             circleIntent.analyze(drawing: canvas.drawing, polygon: polygon, screenPolygon: recognizer.points,
                                  scale: canvas.zoomScale, offset: canvas.contentOffset)
-        case .cancelled, .failed: circleIntent.cancelTracing(); clearBand()
+        case .cancelled, .failed: circleIntent.cancelTracing()
         default: break
         }
     }
@@ -907,16 +880,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             circleGesture.isEnabled = true
         }
         circleIntent.cancelTracing()
-        clearBand()
     }
 
-    func clearBand() { capturedBand = nil; bandHighlight.rect = nil }
-
-    func revealBulletinSource(page index: Int, bounds: CGRect) {
-        circleIntent.cancel()
-        let page = NotebookPaging.rect(for: index)
-        focus(on: CGPoint(x: page.minX + bounds.midX, y: page.minY + bounds.midY))
-    }
 
     func stopAnimations() {
         cancelCircleInteraction()

@@ -91,11 +91,11 @@ struct SettingsPanel: View {
             } else if showsDevelopment {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Toggle("Gesture test tools", isOn: $showsGestureTestTools)
+                        Toggle("Circle test tool", isOn: $showsGestureTestTools)
                             .font(.subheadline)
                             .padding(.horizontal, 8).frame(minHeight: 44)
                             .accessibilityIdentifier("showGestureTestTools")
-                        Text("Show Circle and Band in the pen toolbar for one-finger or simulator trackpad selection. Two-finger gestures remain available with Pen.")
+                        Text("Show Circle in the pen toolbar for one-finger or simulator trackpad selection. Two-finger circles remain available with Pen.")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Detailed preview", isOn: $detailedPreview)
                             .font(.subheadline)

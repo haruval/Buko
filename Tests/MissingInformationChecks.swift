@@ -178,6 +178,28 @@ import Foundation
             informationNeeds: ["concrete instance"], subjectQuotes: ["Semaphore"])
         let anchoredTerms = try resolvedTerms.subjects(in: contextualTranscript)
         precondition(anchoredTerms == contextualRaw.subjects, "Normalize case by copying actual note text, not inventing it")
+        // Semantic references are not lexical search terms. Single-character
+        // identifiers and stopwords stay valid when actually captured in notes.
+        for identifier in ["C", "D", "A", "x", "λ", "字"] {
+            let text = identifier + " = unknown quantity"
+            let transcript = GapTranscript(selected: text, context: "")
+            let raw = MissingInformationPlan(alreadyCovered: [],
+                targets: [.init(blockID: "S1", quote: identifier)], informationNeeds: ["value"], operation: .continueThought,
+                subjects: [.init(blockID: "S1", quote: identifier)], completionGoal: "supply the value of " + identifier)
+            let validated = try ValidatedGapPlan.validate(raw, in: transcript)
+            precondition(validated.retrievalText == identifier && validated.targetText == identifier)
+            var invalid = raw
+            invalid.subjects = [.init(blockID: "S1", quote: "unwritten")]; rejects(invalid, in: transcript)
+            invalid = raw; invalid.subjects = [.init(blockID: "C1", quote: identifier)]; rejects(invalid, in: transcript)
+        }
+        for invalidQuote in ["", " ", "=", "+"] {
+            let transcript = GapTranscript(selected: "x = + 1", context: "")
+            let raw = MissingInformationPlan(alreadyCovered: [], targets: [.init(blockID: "S1", quote: transcript.selected)],
+                informationNeeds: ["value"], operation: .continueThought,
+                subjects: [.init(blockID: "S1", quote: invalidQuote)], completionGoal: "supply the value")
+            rejects(raw, in: transcript)
+        }
+        precondition(LectureRetrieval.tokens("C D A x").isEmpty, "Reference validation must not loosen lexical ranking")
         let parallelTranscript = GapTranscript(selected: "Oak is a hardwood.\nPine is a softwood.", context: "")
         var parallel = MissingInformationPlan(alreadyCovered: [.init(blockID: "S2", quote: "Pine is a softwood.")],
             targets: [.init(blockID: "S2", quote: "Pine")], informationNeeds: ["a use"], operation: .continueThought,
@@ -204,6 +226,66 @@ import Foundation
         let focused = ContextualRoleMap.focus(roles, candidate: parallelCandidate, in: parallelNotes)
         precondition(focused?.subjectQuotes == ["Beta"] && focused?.informationNeeds == ["use"])
         precondition(focused?.targets == [.init(blockID: "S2", quote: "Beta")])
+        precondition(focused?.alreadyCovered.first == .init(blockID: "S2", quote: "Beta is small."),
+                     "The reviewed topic's supplied content must reach evidence and writing")
+        precondition(Set(focused!.alreadyCovered.map(\.quote)) == Set(roles.content.map(\.quote).filter { !$0.isEmpty }))
+        _ = try ValidatedGapPlan.validate(MissingInformationPlan(alreadyCovered: focused!.alreadyCovered,
+            targets: focused!.targets, informationNeeds: focused!.informationNeeds, operation: .continueThought,
+            subjects: try focused!.subjects(in: parallelNotes), completionGoal: "supply use for Beta"), in: parallelNotes)
+        precondition(!ContextualRoleMap.isComplete(roles, candidate: parallelCandidate, in: parallelNotes))
+        let completeNotes = GapTranscript(selected: "Alpha is tall. Alpha shades a patio.\nBeta is small. Beta fits a planter.", context: "Match a use to each meaning.")
+        var completeRoles = roles
+        completeRoles.content[3].quote = "Beta fits a planter."
+        precondition(ContextualRoleMap.isComplete(completeRoles, candidate: parallelCandidate, in: completeNotes))
+        precondition(ContextualRoleMap.focus(completeRoles, candidate: parallelCandidate, in: completeNotes) == nil)
+        completeRoles.content.reverse()
+        precondition(ContextualRoleMap.isComplete(completeRoles, candidate: parallelCandidate, in: completeNotes), "Coverage must not depend on generated row order")
+        precondition(!ContextualRoleMap.isComplete(completeRoles, candidate: parallelCandidate, in: parallelNotes), "An invented completed counterpart cannot establish coverage")
+        completeRoles.content[0].topic = "Alpha"
+        precondition(!ContextualRoleMap.isComplete(completeRoles, candidate: parallelCandidate, in: completeNotes), "Another topic's quote cannot establish completion")
+        let omittedTopic = GapTranscript(selected: completeNotes.selected + "\nGamma has no use recorded.", context: completeNotes.context)
+        var fullRoles = roles; fullRoles.content[3].quote = "Beta fits a planter."
+        precondition(ContextualRoleMap.isComplete(fullRoles, candidate: parallelCandidate, in: completeNotes))
+        precondition(!ContextualRoleMap.isComplete(fullRoles, candidate: parallelCandidate, in: omittedTopic), "An omitted selected block cannot establish a complete pattern")
+        let wrappedNotes = GapTranscript(selected: "Alpha is tall.\nAlpha shades a patio.\nBeta is small.", context: parallelNotes.context)
+        precondition(ContextualRoleMap.focus(roles, candidate: parallelCandidate, in: wrappedNotes)?.targets == [.init(blockID: "S3", quote: "Beta")], "Wrapping cannot change the missing counterpart")
+        let wrappedFocus = ContextualRoleMap.focus(roles, candidate: parallelCandidate, in: wrappedNotes)!
+        precondition(wrappedFocus.alreadyCovered.first == .init(blockID: "S3", quote: "Beta is small."))
+        _ = try ValidatedGapPlan.validate(MissingInformationPlan(alreadyCovered: wrappedFocus.alreadyCovered,
+            targets: wrappedFocus.targets, informationNeeds: wrappedFocus.informationNeeds, operation: .continueThought,
+            subjects: try wrappedFocus.subjects(in: wrappedNotes), completionGoal: "supply use for Beta"), in: wrappedNotes)
+        let boundedNotes = GapTranscript(selected: "Alpha is tall. Alpha shades a patio. Alpha needs water.\nBeta is small. Beta fits a planter.", context: "")
+        let boundedRoles = ContextualRoleMap(content: [
+            .init(topic: "Alpha", role: "meaning", quote: "Alpha is tall."),
+            .init(topic: "Alpha", role: "use", quote: "Alpha shades a patio."),
+            .init(topic: "Alpha", role: "care", quote: "Alpha needs water."),
+            .init(topic: "Beta", role: "meaning", quote: "Beta is small."),
+            .init(topic: "Beta", role: "use", quote: "Beta fits a planter.")], requiredRoles: ["meaning", "use", "care"])
+        let boundedFocus = ContextualRoleMap.focus(boundedRoles, candidate: parallelCandidate, in: boundedNotes)!
+        precondition(boundedFocus.alreadyCovered.count == 4 && boundedFocus.informationNeeds == ["care"])
+        precondition(boundedFocus.alreadyCovered.prefix(2).map(\.quote) == ["Beta is small.", "Beta fits a planter."],
+                     "Focused supplied roles take priority within the unchanged span budget")
+        let wrappedComplete = GapTranscript(selected: "Alpha is tall.\nAlpha shades a patio.\nBeta is small.\nBeta fits a planter.", context: completeNotes.context)
+        precondition(ContextualRoleMap.isComplete(fullRoles, candidate: parallelCandidate, in: wrappedComplete), "Two topics can cover four physical lines")
+        var continuationRoles = roles
+        continuationRoles.content[1].quote = "It shades a patio."
+        let continuation = GapTranscript(selected: "Alpha is tall.\nIt shades a patio.\nBeta is small.", context: "")
+        precondition(ContextualRoleMap.focus(continuationRoles, candidate: parallelCandidate, in: continuation)?.subjectQuotes == ["Beta"], "Model-associated continuation quotes need not repeat the topic name")
+        for selected in [completeNotes.selected + " Gamma has no use recorded.",
+                         completeNotes.selected + "\nGamma has no use recorded.",
+                         completeNotes.selected + " An additional unrepresented fact."] {
+            precondition(!ContextualRoleMap.isComplete(fullRoles, candidate: parallelCandidate,
+                in: GapTranscript(selected: selected, context: "")), "Partial line coverage cannot hide omitted content or topics")
+        }
+        var partialRoles = fullRoles; partialRoles.content.remove(at: 1)
+        precondition(ContextualRoleMap.focus(partialRoles, candidate: parallelCandidate, in: completeNotes) == nil,
+                     "Omitting an existing example cannot manufacture a missing counterpart")
+        let contextOnlyRole = GapTranscript(selected: "Alpha is tall.\nBeta is small.", context: "Alpha shades a patio.")
+        precondition(ContextualRoleMap.focus(roles, candidate: parallelCandidate, in: contextOnlyRole) == nil,
+                     "Nearby content cannot impersonate selected pattern coverage")
+        let repeatedRole = GapTranscript(selected: wrappedNotes.selected + "\nAlpha shades a patio.", context: "")
+        precondition(ContextualRoleMap.focus(roles, candidate: parallelCandidate, in: repeatedRole) == nil,
+                     "Repeated role quotes need unique locations")
         var reordered = roles; reordered.content.reverse()
         precondition(ContextualRoleMap.focus(reordered, candidate: parallelCandidate, in: parallelNotes)?.subjectQuotes == ["Beta"])
         var wrongRoles = roles; wrongRoles.content[2].quote = "An invented definition."
@@ -222,6 +304,23 @@ import Foundation
         precondition(!CollectiveReference(selectedCue: "both").isGrounded(in: "What would that look like?"))
         precondition(!CollectiveReference(selectedCue: "each").isGrounded(in: "peaches"))
         precondition(!CollectiveReference(selectedCue: "").isGrounded(in: "Both routes"))
+        let repairNotes = GapTranscript(selected: "What would that look like?", context: "Alpha stores values.\nBeta controls access.")
+        let repair = GroundedReferenceRepair(targetQuotes: ["what would that look like?"], subjectQuotes: ["Beta"],
+            informationNeed: "concrete example", coveredQuotes: ["Beta controls access."])
+        let repaired = try repair.anchored(in: repairNotes)
+        precondition(repaired.targets == [.init(blockID: "S1", quote: "What would that look like?")])
+        precondition(repaired.alreadyCovered == [.init(blockID: "C2", quote: "Beta controls access.")])
+        let repairedSubjects = try repaired.subjects(in: repairNotes)
+        precondition(repairedSubjects == [.init(blockID: "C2", quote: "Beta")])
+        for quote in ["Beta", "unwritten text", "", String(repeating: "x", count: 241)] {
+            var invalid = repair; invalid.targetQuotes = [quote]
+            do { _ = try invalid.anchored(in: repairNotes); preconditionFailure("Repair must not promote context or unanchored text to selected targets") }
+            catch is GapPlanError { }
+        }
+        for selected in ["What would that look like? What would that look like?", "What would that look like?\nWhat would that look like?"] {
+            do { _ = try repair.anchored(in: GapTranscript(selected: selected, context: repairNotes.context)); preconditionFailure("Repeated target quotes must not select an arbitrary occurrence") }
+            catch is GapPlanError { }
+        }
         let definitions = [passage("process", "A process is an executing program with its own address space."),
                            passage("thread", "A thread is an execution path within a process, with its own stack.")]
         let conjunctive = LectureRetrieval.search(passages: definitions, selected: compare.targetText, intent: compare.intent, queryVector: nil)

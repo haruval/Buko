@@ -14,9 +14,6 @@ struct ContentView: View {
     private var trashedNotes: [Note]
     @Query(sort: \TrashedPage.deletedAt, order: .reverse) private var trashedPages: [TrashedPage]
     @Query(sort: \NoteFolder.createdAt, order: .reverse) private var folders: [NoteFolder]
-    @State private var showsBulletinBoard = false
-    @State private var bulletinCapture: BulletinCapture?
-    @State private var sourceNavigationTask: Task<Void, Never>?
     @AppStorage("canvasGridEnabled") private var showsGrid = false
     @AppStorage("pplTestNoteID") private var pplTestNoteID = ""
     @AppStorage("testPPLLectureTitleMigrated") private var testPPLLectureTitleMigrated = false
@@ -130,17 +127,9 @@ struct ContentView: View {
         .sheet(isPresented: $showsHandwritingPreview) {
             HandwritingPreviewView(preparation: handwriting, noteID: selectedNote?.id)
         }
-        .sheet(isPresented: $showsBulletinBoard) {
-            BulletinBoardView(openSource: openBulletinSource)
-                .presentationSizing(.page)
-        }
-        .sheet(item: $bulletinCapture, onDismiss: { session.host?.clearBand() }) { capture in
-            BulletinExtractionView(capture: capture) { drafts in try saveBulletin(drafts, capture: capture) }
-        }
-        .onChange(of: bulletinCapture?.id) { _, _ in refreshHandwriting() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
-                session.host?.circleIntent.cancel(); bulletinCapture?.cancel(); bulletinCapture = nil; saveNow()
+                session.host?.circleIntent.cancel(); saveNow()
             }
             refreshHandwriting()
         }
@@ -223,8 +212,6 @@ struct ContentView: View {
             scheduleSave()
         }, preparedHandwriting: { proposal in
             handwriting.prepared(for: proposal)
-        }, onBandSelection: { drawing, bounds in
-            captureBulletin(drawing: drawing, bounds: bounds, note: note, revision: revision)
         }, onAutofillCommit: { before, after in
             guard revision == canvasRevision, selectedNote?.id == note.id,
                   note.deletedAt == nil, !session.isDrawing,
@@ -298,7 +285,7 @@ struct ContentView: View {
                             newTitle = note.title
                             renamingNote = note
                             renamePresented = true
-                        }, trash: moveToTrash, board: openBulletinBoard,
+                        }, trash: moveToTrash,
                         group: { source, target in
                             guard source.id != target.id else { return false }
                             return organize { try LibraryOrganization.group(source, with: target, in: modelContext) }
@@ -452,8 +439,6 @@ struct ContentView: View {
     }
 
     private func resetCanvas() {
-        bulletinCapture?.cancel(); bulletinCapture = nil
-        sourceNavigationTask?.cancel()
         canvasRevision = UUID() // Invalidate writers before stopping UIKit animations.
         session.host?.stopAnimations()
         session = CanvasSession()
@@ -550,97 +535,10 @@ struct ContentView: View {
         catch { persistenceError = error.localizedDescription; return false }
     }
 
-    private func openBulletinBoard() {
-        guard flushDrawing() else { return }
-        session.host?.circleIntent.cancel()
-        showsBulletinBoard = true
-    }
-
-    private func captureBulletin(drawing: PKDrawing, bounds: CGRect, note: Note, revision: UUID) {
-        guard revision == canvasRevision, selectedNote?.id == note.id, !session.isDrawing else { return }
-        do {
-            let index = max(0, Int(bounds.midY / NotebookPaging.pageStride))
-            let page = NotebookPaging.rect(for: index)
-            let pages = try note.pages().filter { !$0.isTrashed }
-            guard pages.indices.contains(index), page.contains(bounds), bounds.height > 0 else { throw BulletinError.tooLarge }
-            guard flushDrawing() else { session.host?.clearBand(); return }
-            var ids: [String] = []
-            if #available(iOS 27, *) {
-                ids = drawing.strokes.filter { $0.renderBounds.intersects(bounds) }.map { $0.id.description }
-            }
-            let source = BulletinSource(noteID: note.id, noteTitle: note.title, pageID: pages[index].id, pageIndex: index,
-                bounds: bounds.offsetBy(dx: -page.minX, dy: -page.minY), strokeIDs: ids,
-                capturedAt: .now, timeZoneID: TimeZone.current.identifier)
-            let polygon = [bounds.origin, CGPoint(x: bounds.maxX, y: bounds.minY),
-                           CGPoint(x: bounds.maxX, y: bounds.maxY), CGPoint(x: bounds.minX, y: bounds.maxY)]
-            let context = CircleInkReader.contextBounds(around: bounds)
-            let cropped = PKDrawing(strokes: drawing.strokes.filter { $0.renderBounds.intersects(context) })
-            bulletinCapture = BulletinCapture(source: source, document: AutofillDocument(note), drawing: cropped, polygon: polygon)
-        } catch {
-            session.host?.clearBand()
-            persistenceError = error.localizedDescription
-        }
-    }
-
-    private func saveBulletin(_ drafts: [BulletinDraft], capture: BulletinCapture) throws {
-        guard !drafts.isEmpty, let note = selectedNote, note.id == capture.source.noteID,
-              note.deletedAt == nil, capture.document.matches(AutofillDocument(note)), !session.isDrawing else {
-            throw BulletinError.stale
-        }
-        guard drafts.allSatisfy({ !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.title.count <= 240 }),
-              saveNow() else { throw AutofillEditError.unavailable }
-        let captureID = capture.id
-        let existing = try modelContext.fetch(FetchDescriptor<BulletinItem>(predicate: #Predicate { $0.captureID == captureID }))
-        guard existing.isEmpty else { return }
-        try NotebookEdits.commit(in: modelContext) {
-            for draft in drafts { modelContext.insert(BulletinItem(draft: draft, source: capture.source)) }
-        }
-    }
-
-    private func openBulletinSource(_ item: BulletinItem) -> String? {
-        guard let note = notes.first(where: { $0.id == item.noteID }) else { return "This source note is in Trash or has been deleted." }
-        guard let pages = try? note.pages().filter({ !$0.isTrashed }) else { return "The source pages couldn’t be opened." }
-        var index = pages.firstIndex { $0.id == item.pageID }
-        var region = CGRect(x: item.sourceX, y: item.sourceY, width: item.sourceWidth, height: item.sourceHeight)
-        // Stroke identity follows reflow. Page identity is the fallback if the original ink was erased.
-        if #available(iOS 27, *), let drawing = try? PKDrawing(data: note.drawingData),
-           let ids = try? JSONDecoder().decode([String].self, from: item.sourceStrokeIDs) {
-            let wanted = Set(ids)
-            let matches = drawing.strokes.filter { wanted.contains($0.id.description) }
-            if let first = matches.min(by: { $0.renderBounds.minY < $1.renderBounds.minY }) {
-                let current = max(0, Int(first.renderBounds.midY / NotebookPaging.pageStride))
-                if pages.indices.contains(current) {
-                    index = current
-                    let page = NotebookPaging.rect(for: current)
-                    let bounds = matches.filter { $0.renderBounds.intersects(page) }
-                        .reduce(first.renderBounds) { $0.union($1.renderBounds) }.intersection(page)
-                    region = bounds.offsetBy(dx: -page.minX, dy: -page.minY)
-                }
-            }
-        }
-        guard let index else { return "This source page is in Trash or has been deleted." }
-        guard flushDrawing() else { return persistenceError ?? "The current note couldn’t be saved." }
-        select(note)
-        guard selectedNote?.id == note.id else { return persistenceError ?? "The source note couldn’t be opened." }
-        sidebarVisible = false
-        sourceNavigationTask?.cancel()
-        sourceNavigationTask = Task { @MainActor in
-            for _ in 0..<20 {
-                do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
-                guard selectedNote?.id == note.id else { return }
-                if let host = session.host, host.circleIntent.noteID == note.id, host.bounds.width > 0 {
-                    host.revealBulletinSource(page: index, bounds: region)
-                    return
-                }
-            }
-        }
-        return nil
-    }
-
     private func refreshHandwriting() {
         var available = notes
         if let selectedNote, !available.contains(where: { $0.id == selectedNote.id }) { available.insert(selectedNote, at: 0) }
-        handwriting.setPaused(scenePhase != .active || session.isDrawing || bulletinCapture != nil || (session.host?.circleIntent.phase ?? .idle) != .idle)
+        handwriting.setPaused(scenePhase != .active || session.isDrawing || (session.host?.circleIntent.phase ?? .idle) != .idle)
         handwriting.update(notes: available, preferredID: selectedNote?.id)
     }
 

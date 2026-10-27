@@ -22,7 +22,6 @@ struct NotesSidebar: View {
     let hide: () -> Void
     let rename: (Note) -> Void
     let trash: (Note) -> Void
-    let board: () -> Void
     let group: (Note, Note) -> Bool
     let move: (Note, NoteFolder?) -> Bool
     let renameFolder: (NoteFolder, String) -> Void
@@ -49,48 +48,10 @@ struct NotesSidebar: View {
                 Text("buko")
                     .font(.system(size: 30, weight: .semibold, design: .rounded)).tracking(-1.5)
                 Spacer(minLength: 0)
-                ShelfButton(title: "Bulletin board", symbol: "rectangle.grid.1x2", action: board)
-                    .accessibilityIdentifier("openBulletinBoard")
                 ShelfButton(title: "Hide notes", symbol: "sidebar.left", action: hide)
                     .accessibilityIdentifier("hideNotes")
             }
-            if let folder = openFolder {
-                VStack(alignment: .leading, spacing: 8) {
-                    Button { closeFolder() } label: { Label("Notes", systemImage: "chevron.left") }
-                        .font(.subheadline.weight(.medium)).buttonStyle(.plain)
-                        .frame(minHeight: 44)
-                        .accessibilityIdentifier("folderBack")
-                        .modifier(NoteDropTarget { refs in receive(refs) { move($0, nil) } })
-                    TextField("Folder name", text: $folderTitle)
-                        .font(.title2.weight(.semibold)).textFieldStyle(.plain)
-                        .focused($editingTitle)
-                        .submitLabel(.done)
-                        .onSubmit { renameFolder(folder, folderTitle); editingTitle = false }
-                        .accessibilityIdentifier("folderTitle")
-                }
-            } else {
-                Text("Notes").font(.title2.weight(.semibold)).padding(.horizontal, 4)
-            }
-            ScrollView {
-                GlassEffectContainer(spacing: 8) {
-                    HStack(alignment: .top, spacing: 12) {
-                        column(parity: 0)
-                        column(parity: 1).padding(.top, entries.count > 1 ? 34 : 0)
-                    }
-                    .padding(.horizontal, 2).padding(.vertical, 6)
-                }
-                if entries.isEmpty {
-                    Text("New notes will appear here.")
-                        .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 28)
-                }
-            }
-            .scrollIndicators(.hidden)
-            Button { create(openFolder?.id) } label: {
-                Label("New note", systemImage: "plus")
-                    .font(.subheadline.weight(.medium)).frame(maxWidth: .infinity, minHeight: 46)
-            }
-            .buttonStyle(.plain).bukoGlass(interactive: true)
-            .accessibilityIdentifier("newNote")
+            libraryContents
         }
         .padding(16)
         .onChange(of: editingTitle) { _, focused in
@@ -99,6 +60,46 @@ struct NotesSidebar: View {
         .onChange(of: folders.map(\.id)) { _, ids in
             if let openFolderID, !ids.contains(openFolderID) { self.openFolderID = nil }
         }
+    }
+
+    @ViewBuilder private var libraryContents: some View {
+        if let folder = openFolder {
+            VStack(alignment: .leading, spacing: 8) {
+                Button { closeFolder() } label: { Label("Notes", systemImage: "chevron.left") }
+                    .font(.subheadline.weight(.medium)).buttonStyle(.plain)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("folderBack")
+                    .modifier(NoteDropTarget { refs in receive(refs) { move($0, nil) } })
+                TextField("Folder name", text: $folderTitle)
+                    .font(.title2.weight(.semibold)).textFieldStyle(.plain)
+                    .focused($editingTitle)
+                    .submitLabel(.done)
+                    .onSubmit { renameFolder(folder, folderTitle); editingTitle = false }
+                    .accessibilityIdentifier("folderTitle")
+            }
+        } else {
+            Text("Notes").font(.title2.weight(.semibold)).padding(.horizontal, 4)
+        }
+        ScrollView {
+            GlassEffectContainer(spacing: 8) {
+                HStack(alignment: .top, spacing: 12) {
+                    column(parity: 0)
+                    column(parity: 1).padding(.top, entries.count > 1 ? 34 : 0)
+                }
+                .padding(.horizontal, 2).padding(.vertical, 6)
+            }
+            if entries.isEmpty {
+                Text("New notes will appear here.")
+                    .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 28)
+            }
+        }
+        .scrollIndicators(.hidden)
+        Button { create(openFolder?.id) } label: {
+            Label("New note", systemImage: "plus")
+                .font(.subheadline.weight(.medium)).frame(maxWidth: .infinity, minHeight: 46)
+        }
+        .buttonStyle(.plain).bukoGlass(interactive: true)
+        .accessibilityIdentifier("newNote")
     }
 
     private func column(parity: Int) -> some View {
