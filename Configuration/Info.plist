@@ -2,14 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>UTExportedTypeDeclarations</key>
-	<array>
-		<dict>
-			<key>UTTypeIdentifier</key><string>dev.buko.note-reference</string>
-			<key>UTTypeDescription</key><string>Buko note reference</string>
-			<key>UTTypeConformsTo</key><array><string>public.data</string></array>
-		</dict>
-	</array>
+	<key>BukoIsolatedExperiment</key>
+	<true/>
+	<key>BukoLayoutAutofillEnabled</key>
+	<true/>
+	<key>CFBundleDisplayName</key>
+	<string>Buko Experiment</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Buko uses microphone volume to animate the Cube tool while it is selected. Audio is not saved or sent anywhere.</string>
 	<key>UIApplicationSceneManifest</key>
@@ -17,5 +15,18 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Buko note reference</string>
+			<key>UTTypeIdentifier</key>
+			<string>dev.buko.note-reference</string>
+		</dict>
+	</array>
 </dict>
 </plist>

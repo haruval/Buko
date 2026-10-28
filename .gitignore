@@ -8,3 +8,6 @@ build/
 *.xcuserstate
 xcuserdata/
 .xcodebuildmcp/
+
+# Generated isolated iPad validation app (recreate with prepare_device.py).
+/DeviceApp/

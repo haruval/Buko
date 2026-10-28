@@ -192,6 +192,7 @@ final class CircleIntentState {
         task?.cancel(); timeout?.cancel()
         let id = UUID(); requestID = id
         let observer: PipelineObserver = { [weak self] event in await self?.record(event, request: id) }
+        let planningMode = AppBuildConfiguration.capturePlanningMode()
         let capturedNoteID = noteID
         let capturedAt = Date()
         phase = .recognizing; issue = nil; intent = ""; evidence = ""; clarification = ""
@@ -201,8 +202,11 @@ final class CircleIntentState {
         task = Task { [weak self] in
             guard let self else { return }
             let reading: CircleInkReader.Result
+            let spatialLines: [SpatialLine]?
             do {
-                reading = try await CircleInkReader().read(drawing: drawing, polygon: polygon)
+                let capture = try await SpatialCircleBridge.read(drawing: drawing, polygon: polygon, mode: planningMode)
+                reading = capture.original
+                spatialLines = capture.lines
             } catch {
                 guard requestID == id, !Task.isCancelled else { return }
                 finishIssue(error.localizedDescription, id: id); return
@@ -249,7 +253,13 @@ final class CircleIntentState {
             modelStartedAt = modelStarted
             var proposalStarted: Double?
             do {
-                let plan = try await CirclePlanner.infer(selected: recognizedText, context: context, model: model, observer: observer)
+                let plan: CirclePlan
+                if let spatialLines {
+                    plan = try await SpatialPlanner.infer(selected: recognizedText, context: context,
+                        lines: spatialLines, model: model, observer: observer)
+                } else {
+                    plan = try await CirclePlanner.infer(selected: recognizedText, context: context, model: model, observer: observer)
+                }
                 guard requestID == id, !Task.isCancelled else { return }
                 intent = plan.intent
                 action = plan.action

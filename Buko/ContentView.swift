@@ -105,12 +105,12 @@ struct ContentView: View {
         .task {
             normalizeDuplicateTitles()
             migrateTestLectureTitle()
-            if pplTestNoteID.isEmpty { recreateTestNote(.programmingLanguages) }
+            if !AppBuildConfiguration.isIsolatedExperiment && pplTestNoteID.isEmpty { recreateTestNote(.programmingLanguages) }
             if selection == nil {
                 if notes.isEmpty && trashedNotes.isEmpty { createNote() }
                 else if let note = notes.first { select(note) }
             }
-            for lecture in [SampleLecture.operatingSystems, .linearAlgebra, .biology101] {
+            for lecture in [SampleLecture.operatingSystems, .linearAlgebra, .biology101] where !AppBuildConfiguration.isIsolatedExperiment {
                 if UserDefaults.standard.string(forKey: lecture.storageKey) == nil {
                     recreateTestNote(lecture, selectCreated: false)
                 }

@@ -1,0 +1,62 @@
+    private func setupSpatialFixture() {
+        guard flushDrawing() else { return }
+        Task { @MainActor in
+            do {
+                let note: Note
+                if ProcessInfo.processInfo.arguments.contains("--spatial-resume") {
+                    let original = try SpatialAppFixture.loadOriginal()
+                    guard let saved = notes.first(where: { $0.id == original.noteID }) else { throw AutofillEditError.unavailable }
+                    note = saved; spatialOriginal = original
+                } else {
+                    note = Note(title: "Spatial validation - " + SpatialAppFixture.name)
+                    note.pageLayoutVersion = 2
+                    note.drawingData = SpatialAppFixture.drawing().dataRepresentation()
+                    guard performEdit({ try note.setPages([NotebookPage()]); modelContext.insert(note) }) else { return }
+                    if SpatialAppFixture.name != "no-source" {
+                        guard let url = Bundle.main.url(forResource:SpatialAppFixture.pdfName,withExtension:"pdf",subdirectory:"Lectures")
+                            ?? Bundle.main.url(forResource:SpatialAppFixture.pdfName,withExtension:"pdf") else { throw LectureLibrary.LibraryError.missingDocument }
+                        try await LectureLibrary.shared.importPDF(from:url,noteID:note.id)
+                    }
+                }
+                resetCanvas(); selection = note; sidebarVisible = false
+                for _ in 0..<60 {
+                    try await Task.sleep(for:.milliseconds(100))
+                    if let host = session.host, host.circleIntent.noteID == note.id, host.bounds.width > 0 {
+                        if spatialOriginal == nil {
+                            _ = flushDrawing(); spatialOriginal = AutofillDocument(note)
+                            try SpatialAppFixture.saveOriginal(spatialOriginal!)
+                        }
+                        spatialReady = true; spatialCheckpoint("setup"); return
+                    }
+                }
+                spatialStatus = "ERROR: canvas did not load"
+            } catch { spatialStatus = "ERROR: \(error)" }
+        }
+    }
+
+    private func captureSpatialFixture() {
+        guard spatialReady, let host = session.host else { return }
+        let r = SpatialAppFixture.rectangle
+        // A sampled closed selection goes through the real loop qualification
+        // and trace feedback. Delivery is synthetic; it does not test finger input.
+        let corners = [CGPoint(x:r.minX,y:r.minY),CGPoint(x:r.maxX,y:r.minY),CGPoint(x:r.maxX,y:r.maxY),CGPoint(x:r.minX,y:r.maxY)]
+        let traced = (0..<4).flatMap { edge in (0..<24).map { step in
+            let a=corners[edge], b=corners[(edge+1)%4], t=CGFloat(step)/24
+            return CGPoint(x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t)
+        } } + [corners[0]]
+        let screen = traced.map { CGPoint(x:$0.x*host.canvas.zoomScale-host.canvas.contentOffset.x,
+                                           y:$0.y*host.canvas.zoomScale-host.canvas.contentOffset.y) }
+        guard let completed = CircleGeometry.completedLoop(screen) else {
+            spatialStatus = "ERROR: circle did not qualify"; return
+        }
+        host.circleIntent.trace(screen)
+        let polygon = completed.map { PageGeometry.documentPoint($0,scale:host.canvas.zoomScale,offset:host.canvas.contentOffset) }
+        host.circleIntent.analyze(drawing:host.canonicalDrawing,polygon:polygon,screenPolygon:completed,
+                                  scale:host.canvas.zoomScale,offset:host.canvas.contentOffset)
+    }
+
+    private func spatialCheckpoint(_ tag: String) {
+        guard let note = selectedNote, let original = spatialOriginal, let host = session.host else { return }
+        do { spatialStatus = try SpatialAppFixture.checkpoint(note:note,host:host,original:original,tag:tag) }
+        catch { spatialStatus = "ERROR: \(error)" }
+    }
