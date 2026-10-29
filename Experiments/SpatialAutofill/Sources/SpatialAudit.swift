@@ -32,10 +32,9 @@ enum SpatialAudit {
         if args.contains("--cancel-spatial") { try await cancellationChecks(output:output); return }
         if args.contains("--self-check") {
             try selfChecks(); try WrapAudit.run(); try await explicitBindingChecks(); planningModeChecks()
-            try save(["passed": 61], to: output); return
+            try save(["passed": 56], to: output); return
         }
         if args.contains("--ink") { try await InkAudit.run(args: args, output: output); return }
-        if args.contains("--writing") { try await WritingAudit.run(args: args, output: output); return }
         guard let path = option("--fixtures") else { throw GapPlanError.invalidReferences("missingFixtures") }
         struct Corpus: Decodable { let cases: [SpatialFixture] }
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
@@ -236,11 +235,6 @@ enum SpatialAudit {
             .init(topic:"Alpha",supplied:[.init(role:"meaning",quote:transcript.blocks[0].text)]),
             .init(topic:"Beta",supplied:[.init(role:"meaning",quote:transcript.blocks[1].text),.init(role:"limit",quote:transcript.blocks[2].text)])], requiredRoles:["meaning","limit"])
         precondition(!groups.allows(bad,transcript:transcript))
-        precondition(GroundedNoteWriter.continuation(from: "Dynamic scoping: resolves names through callers.", prefix: "Dynamic scoping:") == "resolves names through callers.")
-        precondition(GroundedNoteWriter.continuation(from: "It persists because its environment is retained.", prefix: "It persists because") == "its environment is retained.")
-        precondition(GroundedNoteWriter.continuation(from: "Dynamic scope resolves names.", prefix: "Dynamic scoping:") == nil)
-        precondition(GroundedNoteWriter.continuation(from: "Heading:", prefix: "Heading:") == nil)
-        precondition(GroundedNoteWriter.continuation(from: "Heading: Heading: repeated", prefix: "Heading:") == nil)
         let repeated = GapTranscript(selected: "Alpha stores items.\nBeta stores items.\nAlpha holds six items.", context: "")
         let repeatedLines = zip(input,repeated.blocks.filter(\.selected)).map { line,block in SpatialLine(blockID:line.blockID,text:block.text,page:line.page,rect:line.rect) }
         let repeatedLayout = try SpatialGroups.validated(repeatedLines,transcript:repeated)
@@ -274,6 +268,6 @@ enum SpatialAudit {
         precondition(SpatialPlanner.uniqueTarget(.init(blockID:"S1",quote:"M1"),in:identifiers)?.quote == "Device M1")
         let ordinary = GapTextReference(blockID:"S1",quote:"magnet")
         precondition(SpatialPlanner.uniqueTarget(ordinary,in:GapTranscript(selected:"A magnet attracts iron.",context:"")) == ordinary)
-        print("SELF-CHECK 39 structural checks; four explicit-binding checks follow")
+        print("SELF-CHECK 34 structural checks; four explicit-binding checks follow")
     }
 }

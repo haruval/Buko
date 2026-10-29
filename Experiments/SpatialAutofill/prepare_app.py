@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Copy the integrated app and add synthetic UI fixtures only in the disposable copy."""
 import argparse, hashlib, json, pathlib, shutil
+import xml.etree.ElementTree as ET
 p=argparse.ArgumentParser(); p.add_argument('destination',type=pathlib.Path); a=p.parse_args()
 repo=pathlib.Path(__file__).resolve().parents[2]; experiment=pathlib.Path(__file__).resolve().parent
 root=a.destination.resolve()
@@ -11,7 +12,22 @@ for name in ['Buko','Buko.xcodeproj','Configuration']: shutil.copytree(repo/name
 shutil.copyfile(experiment/'Integration/SpatialAppTests.swift',root/'Tests/UI/SpatialAppTests.swift')
 p=root/'Buko.xcodeproj/project.pbxproj'
 s=p.read_text().replace('dev.buko.LayoutExperiment.M4.UITests','dev.buko.SpatialIntegrationUITests').replace('dev.buko.LayoutExperiment.M4','dev.buko.SpatialIntegrationValidation')
+# Every configuration in this disposable copy must remain isolated.
+for original,replacement in [
+    ('PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)";', 'PRODUCT_BUNDLE_IDENTIFIER = dev.buko.SpatialIntegrationValidation;'),
+    ('PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests;', 'PRODUCT_BUNDLE_IDENTIFIER = dev.buko.SpatialIntegrationUITests;'),
+    ('REGISTER_APP_GROUPS = YES;', 'REGISTER_APP_GROUPS = NO;'),
+    ('INFOPLIST_FILE = Configuration/Info.plist;', 'INFOPLIST_FILE = Configuration/ExperimentInfo.plist;')]:
+    assert s.count(original)==2
+    s=s.replace(original,replacement)
 p.write_text(s)
+# The fixture scheme must select the isolated configuration even from Xcode.
+scheme=root/'Buko.xcodeproj/xcshareddata/xcschemes/BukoValidation.xcscheme'
+tree=ET.parse(scheme)
+for action in tree.getroot():
+    if action.get('buildConfiguration') in ('Debug','Release'):
+        action.set('buildConfiguration','Experiment '+action.get('buildConfiguration'))
+ET.indent(tree); tree.write(scheme,encoding='UTF-8',xml_declaration=True)
 shutil.copyfile(experiment/'Integration/SpatialAppFixture.swift',root/'Buko/Development/SpatialAppFixture.swift')
 # All live orchestration and spatial implementation come verbatim from the app.
 # Raw capture persistence is a fixture-only observation hook.

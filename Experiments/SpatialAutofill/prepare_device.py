@@ -14,6 +14,16 @@ if root.exists() or root.is_relative_to(repo):
 root.mkdir(parents=True)
 for name in ['Buko', 'Buko.xcodeproj', 'Configuration']:
     shutil.copytree(repo/name, root/name, ignore=shutil.ignore_patterns('xcuserdata'))
+# All configurations in a capture copy keep the experiment identity/store.
+p=root/'Buko.xcodeproj/project.pbxproj'; s=p.read_text()
+for original,replacement in [
+    ('PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)";', 'PRODUCT_BUNDLE_IDENTIFIER = dev.buko.LayoutExperiment.M4;'),
+    ('PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests;', 'PRODUCT_BUNDLE_IDENTIFIER = dev.buko.LayoutExperiment.M4.UITests;'),
+    ('REGISTER_APP_GROUPS = YES;', 'REGISTER_APP_GROUPS = NO;'),
+    ('INFOPLIST_FILE = Configuration/Info.plist;', 'INFOPLIST_FILE = Configuration/ExperimentInfo.plist;')]:
+    assert s.count(original)==2
+    s=s.replace(original,replacement)
+p.write_text(s)
 (root/'Tests/UI').mkdir(parents=True)
 shutil.copyfile(repo/'Tests/UI/SpatialDeviceSmokeTests.swift', root/'Tests/UI/SpatialDeviceSmokeTests.swift')
 shutil.copyfile(experiment/'Integration/SpatialDeviceCapture.swift', root/'Buko/Development/SpatialDeviceCapture.swift')

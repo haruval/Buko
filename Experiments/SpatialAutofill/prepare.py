@@ -36,7 +36,7 @@ def prepare(destination, instrument_reader=False):
         if name.endswith('ContextualIntentChecks.swift'):
             boundary = '        if args.contains("--cancel-repair") {'
             assert copied.count(boundary) == 1
-            copied = copied.replace(boundary, '''        if args.contains("--capture-checks") || args.contains("--ink-guards") || args.contains("--cancel-spatial") || args.contains("--ink") || args.contains("--spatial") || args.contains("--writing") || args.contains("--self-check") {
+            copied = copied.replace(boundary, '''        if args.contains("--capture-checks") || args.contains("--ink-guards") || args.contains("--cancel-spatial") || args.contains("--ink") || args.contains("--spatial") || args.contains("--self-check") {
             try await SpatialAudit.run(args: args, output: output)
             return
         }
