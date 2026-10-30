@@ -112,12 +112,8 @@ private struct InsertionHarnessView: UIViewRepresentable {
 
     @available(iOS 27, *)
     func checkOtherNotesAndGeneratedExclusion() async throws {
-        let proposal = AutofillProposal(requestID: UUID(), noteID: note.id, capturedAt: .now,
-            selectionPolygon: polygon, selectedText: "Parsing:", sourceRevision: "fixture",
-            content: AutofillContent(lines: [.init(text: "tokens into", citationIndices: [])], origin: .lectureDraft), citations: [])
         let ink = try AutofillDocument.drawing(original.ink)
-        let record = AutofillRecord(proposal: proposal, documentRevision: original.revision,
-            drawing: ink, bounds: ink.bounds, rendering: "fixture-generated")
+        let record = AutofillRecord(strokeIDs: ink.strokes.map(\.id))
         let generated = AutofillDocument(noteID: original.noteID, ink: original.ink, pages: original.pages,
             pageCount: 1, layoutVersion: original.layoutVersion, history: try JSONEncoder().encode([record]))
         let excluded = try await HandwritingSampler().prepare(document: generated)

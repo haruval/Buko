@@ -184,6 +184,29 @@ enum NotebookEdits {
         for archive in pages { context.delete(archive) }
     }
 
+    /// Stage every decode before saving: malformed records or failed saves leave
+    /// all prior values intact. Includes notes in Trash; no ink/schema changes.
+    static func minimizeAutofillHistory(in context: ModelContext) throws {
+        let notes = try context.fetch(FetchDescriptor<Note>())
+        let changes = try notes.compactMap { note -> (Note, Data)? in
+            guard let data = note.autofillHistory else { return nil }
+            let minimized = try AutofillRecord.minimized(data)
+            return minimized == data ? nil : (note, minimized)
+        }
+        guard !changes.isEmpty else { return }
+        try commit(in: context, notes: changes.map { $0.0 }) {
+            for (note, data) in changes { note.autofillHistory = data }
+        }
+    }
+
+    /// Both active and trashed owners protect their files. Also preserve any
+    /// surviving page archive whose owner needs recovery.
+    static func retainedNoteIDs(in context: ModelContext) throws -> Set<UUID> {
+        guard !context.hasChanges else { throw EditError.unsavedWork }
+        return Set(try context.fetch(FetchDescriptor<Note>()).map(\.id))
+            .union(try context.fetch(FetchDescriptor<TrashedPage>()).map(\.noteID))
+    }
+
     private struct NoteSnapshot {
         let note: Note
         let title: String

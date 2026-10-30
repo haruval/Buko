@@ -85,7 +85,10 @@ import SwiftData
         try NotebookEdits.commit(in: context, notes: [note]) { after.apply(to: note) }
         precondition(after.matches(AutofillDocument(note)) && !before.matches(AutofillDocument(note)))
         let records = try JSONDecoder().decode([AutofillRecord].self, from: note.autofillHistory!)
-        precondition(records.count == 1 && records[0].text == proposal.text && records[0].documentRevision == before.revision)
+        precondition(records.count == 1)
+        let storedRecords = try JSONSerialization.jsonObject(with: note.autofillHistory!) as! [[String: Any]]
+        precondition(storedRecords.allSatisfy { Set($0.keys) == ["strokeIDs"] },
+                     "Accepted fills must not persist selected text, answers or source excerpts")
         precondition(records[0].strokeIDs.count == staged.inserted.strokes.count)
         try NotebookEdits.commit(in: context, notes: [note]) { before.apply(to: note) }
         precondition(before.matches(AutofillDocument(note)), "Undo restores original pages, ink and provenance")

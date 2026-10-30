@@ -37,6 +37,7 @@ struct ContentView: View {
     @State private var renamingNote: Note?
     @State private var renamePresented = false
     @State private var newTitle = ""
+    @State private var cleanupError: String?
     @State private var persistenceError: String?
     @State private var saveTask: Task<Void, Never>?
     @FocusState private var titleFocused: Bool
@@ -71,12 +72,22 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) { }
             Button("Delete permanently", role: .destructive) {
                 let owners = Set(trashedPages.filter { emptyPageIDs.contains($0.id) }.map(\.noteID))
-                performEdit(notes: (notes + trashedNotes).filter { owners.contains($0.id) }) {
+                if performEdit(notes: (notes + trashedNotes).filter { owners.contains($0.id) }, {
                     try NotebookEdits.emptyTrash(noteIDs: emptyNoteIDs, pageIDs: emptyPageIDs, context: modelContext)
+                }) {
+                    Task { await cleanRetainedData() }
                 }
             }
         } message: {
             Text("Permanently delete \(emptyNoteIDs.count) notes and \(emptyPageIDs.count) pages from Trash? This cannot be undone.")
+        }
+        .alert("Data cleanup couldn’t finish", isPresented: Binding(
+            get: { cleanupError != nil }, set: { if !$0 { cleanupError = nil } }
+        )) {
+            Button("Retry") { Task { await cleanRetainedData() } }
+            Button("Dismiss", role: .cancel) { }
+        } message: {
+            Text("Some old autofill metadata or deleted-note files may remain in this app. Cleanup will retry on the next launch.\n\n" + (cleanupError ?? ""))
         }
         .alert("Notes couldn’t be saved", isPresented: Binding(
             get: { persistenceError != nil },
@@ -103,6 +114,7 @@ struct ContentView: View {
         .ignoresSafeArea(.keyboard)
         .tint(.accentColor)
         .task {
+            await cleanRetainedData()
             normalizeDuplicateTitles()
             migrateTestLectureTitle()
             if !AppBuildConfiguration.isIsolatedExperiment && pplTestNoteID.isEmpty { recreateTestNote(.programmingLanguages) }
@@ -540,6 +552,23 @@ struct ContentView: View {
         if let selectedNote, !available.contains(where: { $0.id == selectedNote.id }) { available.insert(selectedNote, at: 0) }
         handwriting.setPaused(scenePhase != .active || session.isDrawing || (session.host?.circleIntent.phase ?? .idle) != .idle)
         handwriting.update(notes: available, preferredID: selectedNote?.id)
+    }
+
+    private func cleanRetainedData() async {
+        do {
+            guard saveNow() else { throw NotebookEdits.EditError.unsavedWork }
+            try NotebookEdits.minimizeAutofillHistory(in: modelContext)
+            // Enumerate first, then read current owners. A note created while
+            // enumeration awaits cannot be mistaken for an old orphan.
+            let pdfIDs = try await LectureLibrary.shared.storedNoteIDs()
+            let sampleIDs = try await handwriting.storedNoteIDs()
+            let retained = try NotebookEdits.retainedNoteIDs(in: modelContext)
+            let orphaned = pdfIDs.union(sampleIDs).subtracting(retained)
+            try await LectureLibrary.shared.removeNotes(orphaned)
+            try await handwriting.removeCaches(for: orphaned)
+            cleanupError = nil
+            refreshHandwriting()
+        } catch { cleanupError = error.localizedDescription }
     }
 
     private func scheduleSave() {

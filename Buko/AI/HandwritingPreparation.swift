@@ -79,6 +79,23 @@ actor HandwritingCache {
         }
     }
 
+    func storedNoteIDs() throws -> Set<UUID> {
+        guard let directory, FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        return Set(try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).compactMap { url in
+            guard url.pathExtension == "json", let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent),
+                  url.lastPathComponent == id.uuidString + ".json" else { return nil }
+            return id
+        })
+    }
+
+    func removeNotes(_ ids: Set<UUID>) throws {
+        guard let directory else { return }
+        for id in ids {
+            let url = directory.appendingPathComponent(id.uuidString + ".json")
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        }
+    }
+
     private static func valid(_ profile: PreparedHandwriting) -> Bool {
         guard profile.samples.count <= 224, profile.headings.count <= 128,
               profile.samples.values.reduce(0, { $0 + $1.drawingData.count }) <= byteLimit else { return false }
@@ -155,6 +172,14 @@ nonisolated struct HandwritingInspectionSample: Sendable {
         // Called synchronously on edits, before SwiftUI delivers query changes.
         task?.cancel(); generation = UUID()
         stamps = []
+    }
+
+    func storedNoteIDs() async throws -> Set<UUID> { try await cache.storedNoteIDs() }
+
+    func removeCaches(for ids: Set<UUID>) async throws {
+        guard !ids.isEmpty else { return }
+        for id in ids { invalidate(noteID: id) }
+        try await cache.removeNotes(ids)
     }
 
     func rebuild() {

@@ -191,6 +191,33 @@ actor LectureLibrary {
         documents.removeAll { $0.id == documentID }; cache[noteID] = documents
     }
 
+    /// Discover existing app-owned directories before asking the store which
+    /// owners still exist. Never enumerate or delete picker-provided originals.
+    func storedNoteIDs() throws -> Set<UUID> {
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        return Set(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]).compactMap { url in
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values.isDirectory == true, values.isSymbolicLink != true,
+                  let id = UUID(uuidString: url.lastPathComponent), id.uuidString == url.lastPathComponent else { return nil }
+            return id
+        })
+    }
+
+    /// Call only for IDs confirmed absent from the saved note/page store.
+    /// Idempotent and independent of index decoding, so corrupt orphan indexes
+    /// can be removed too. A failed delete leaves the directory for a later retry.
+    func removeNotes(_ ids: Set<UUID>) throws {
+        for id in ids {
+            let url = directory(id)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                guard values.isDirectory == true, values.isSymbolicLink != true else { throw LibraryError.invalidIndex }
+                try FileManager.default.removeItem(at: url)
+            }
+            cache[id] = nil
+        }
+    }
+
     enum LibraryError: LocalizedError {
         case fileSize, tooManyDocuments, unreadablePDF, pageLimit, noText, pageTextLimit, invalidIndex, missingDocument
         var errorDescription: String? {

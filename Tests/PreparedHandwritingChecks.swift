@@ -94,6 +94,17 @@ import PencilKit
         let repairedCount = await builds.count
         precondition(repairedCount == 5, "A corrupt derivative should rebuild without affecting the source")
         precondition(document.ink == sample.drawingData)
+        let storedIDs = try await cache.storedNoteIDs()
+        precondition(storedIDs == [document.noteID])
+        let unrelated = directory.appendingPathComponent("leave-me.txt")
+        try Data("unrelated".utf8).write(to: unrelated)
+        try await cache.removeNotes([UUID()])
+        precondition(FileManager.default.fileExists(atPath: file.path))
+        try await cache.removeNotes([document.noteID])
+        try await cache.removeNotes([document.noteID])
+        precondition(!FileManager.default.fileExists(atPath: file.path))
+        let unrelatedBytes = try Data(contentsOf: unrelated)
+        precondition(unrelatedBytes == Data("unrelated".utf8))
         print("Prepared handwriting checks passed: persisted reuse, revision/provenance invalidation, idle pause/resume, immediate lookups, deletion, cancellation, corrupt-cache repair and unchanged source ink")
     }
 }
