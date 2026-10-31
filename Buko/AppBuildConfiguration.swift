@@ -1,7 +1,8 @@
 import Foundation
 
-/// Build defaults are explicit; a normal build without these keys stays on the
-/// original reader/planner. The isolated app enables layout through its plist.
+/// Normal and isolated builds explicitly enable layout through their plists.
+/// Missing configuration stays on the original reader/planner; the baseline
+/// launch argument selects that path without changing the app identity.
 nonisolated enum AppBuildConfiguration {
     static var isIsolatedExperiment: Bool {
         Bundle.main.object(forInfoDictionaryKey: "BukoIsolatedExperiment") as? Bool ?? false

@@ -56,6 +56,17 @@ nonisolated struct GeneratedContextualAutofillDraft {
     var lines: [ContextualAutofillLine]
 }
 
+// Scope explanation wording without changing the ordinary draft contract.
+@Generable
+nonisolated struct GeneratedExplanationAutofillDraft {
+    @Guide(description: "Briefly identify the approved evidence that fills the requested need. For a why question, identify the source-supported explanatory relationship, not merely a restatement that the property holds. Preserve every requested part. A definition cannot substitute for a concrete example. Do not answer from the student's notes.")
+    var assessment: String
+    @Guide(description: "ready only when the approved evidence supplies the missing contribution; otherwise insufficientEvidence with no lines.")
+    var status: AutofillDraftStatus
+    @Guide(description: "Answer every requested part, with supporting source IDs. For why, write the explanatory relationship identified in the assessment rather than merely repeating the question's premise. Include both results when two are requested. No repetition of the selected question or unfinished clause. Use only the lines necessary for a complete answer and its qualifications.", .maximumCount(6))
+    var lines: [ContextualAutofillLine]
+}
+
 nonisolated struct AutofillDraftResult: Sendable {
     let content: AutofillContent?
     let explanation: String
@@ -191,9 +202,11 @@ enum AutofillWriter {
                                      action: action, gap: gap, evidence: evidence, search: search)
             let taskForm = instructions != Self.instructions
             let contextual = gap?.completionGoal != nil
+            let explanatory = contextual && GapHeadingRequest.isExplanationQuestion(selected)
             let outputBudget = taskForm ? 750 : 650
             let instructionsCount = try await model.tokenCount(for: Instructions(instructions))
-            let schemaCount = try await model.tokenCount(for: contextual ? GeneratedContextualAutofillDraft.generationSchema
+            let schemaCount = try await model.tokenCount(for: explanatory ? GeneratedExplanationAutofillDraft.generationSchema
+                : contextual ? GeneratedContextualAutofillDraft.generationSchema
                 : taskForm ? GeneratedTaskAutofillDraft.generationSchema : GeneratedAutofillDraft.generationSchema)
             let inputCount = try await model.tokenCount(for: Prompt(request))
             try Task.checkCancellation()
@@ -206,7 +219,13 @@ enum AutofillWriter {
             try Task.checkCancellation()
             let generated: GeneratedAutofillDraft
             let assessment: String
-            if contextual {
+            if explanatory {
+                let response = try await session.respond(to: request, generating: GeneratedExplanationAutofillDraft.self,
+                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
+                assessment = response.content.assessment
+                generated = GeneratedAutofillDraft(status: response.content.status,
+                    lines: response.content.lines.map { AutofillDraftLine(text: $0.text, sourceIDs: $0.sourceIDs) })
+            } else if contextual {
                 let response = try await session.respond(to: request, generating: GeneratedContextualAutofillDraft.self,
                     options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
                 assessment = response.content.assessment

@@ -35,12 +35,59 @@ import Darwin
         precondition(LectureComposer.sourceAnswerSpan("Parsing checks types. Parsing builds a syntax tree.", in: sourceSpan) == nil)
         precondition(LectureComposer.sourceAnswerSpan("The trial improved recall. Results were limited.",
             in: "The trial did not improve recall. Results were limited.") == nil)
+        let wrappedRule = "If A is m by n\nand B is n by p, AB is m by p."
+        precondition(LectureComposer.sourceAnswerSpan("If A is m by n and B is n by p, AB is m by p.", in: wrappedRule) == wrappedRule)
+        for changed in ["If A is m by n and B is n by p, AB is n by p.",
+                        "If A is m by n and B is n by p, AB is not m by p.",
+                        "AB is m by p. If A is m by n and B is n by p,"] {
+            precondition(LectureComposer.sourceAnswerSpan(changed, in: wrappedRule) == nil)
+        }
+        let chunks = [(id: "P1", text: "Opening. The rule continues"),
+                      (id: "P2", text: "The rule continues here. Closing.")]
+        let rematched = LectureComposer.matchAnswerExcerpt("The rule continues here.", proposedID: "P1", passages: chunks)
+        precondition(rematched?.id == "P2" && rematched?.text == "The rule continues here.")
+        precondition(LectureComposer.matchAnswerExcerpt("The rule continues here.", proposedID: "P2", passages: chunks)?.id == "P2")
+        precondition(LectureComposer.matchAnswerExcerpt("The rule continues here.", proposedID: "P9", passages: chunks) == nil)
+        precondition(LectureComposer.matchAnswerExcerpt("The rule continues here.", proposedID: "P1", passages: [chunks[0]]) == nil)
+        precondition(LectureComposer.matchAnswerExcerpt("The rule continues here.", proposedID: "P1", passages: chunks + [(id: "P3", text: chunks[1].text)]) == nil)
+        precondition(LectureComposer.matchAnswerExcerpt("The rule does not continue here.", proposedID: "P1", passages: chunks) == nil)
+        precondition(LectureComposer.matchAnswerExcerpt("Parsing checks grammar. Parsing builds a syntax tree.",
+            proposedID: "P1", passages: [chunks[0], (id: "P2", text: sourceSpan)]) == nil,
+            "Rebinding requires one contiguous quote, without omitted qualifications")
+        let question = GapTranscript(selected: "Why is matrix multiplication not commutative?", context: "")
+        let unanswered = ContextualGapReferences(alreadyCovered: [], targets: [], informationNeeds: ["reason"], subjectQuotes: ["matrix multiplication"])
+        func repairAllowed(_ reason: String, _ transcript: GapTranscript = question, calls: Int = 0) -> Bool {
+            CirclePlanner.canRepairQuestionReferences(reason: reason, candidate: unanswered, transcript: transcript, scopeCalls: calls)
+        }
+        precondition(repairAllowed("fieldCount") && repairAllowed("invalidSpan:C1"))
+        precondition(!repairAllowed("overlap") && !repairAllowed("informationNeeds"))
+        precondition(!repairAllowed("fieldCount", calls: 1), "Do not spend beyond the existing repair budget")
+        precondition(!repairAllowed("fieldCount", GapTranscript(selected: "A completed definition.", context: "")))
+        precondition(!repairAllowed("fieldCount", GapTranscript(selected: "Why does this happen? What changes?", context: "")))
+        precondition(!repairAllowed("fieldCount", GapTranscript(selected: "Why does this\nhappen?", context: "")))
+        precondition(!repairAllowed("fieldCount", GapTranscript(selected: String(repeating: "x", count: 120) + "?", context: "")))
+        for separator in [" ", "\n"] {
+            let captured = "a is 2 by 3 and B is 3 by 2." + separator + "dimensions of ab and ba:"
+            let transcript = GapTranscript(selected: captured, context: "Why is matrix multiplication not commutative?")
+            let plan = try CirclePlanner.explicitPlan(in: transcript, mode: .structuredGap)
+            precondition(plan?.planningPasses == 0 && plan?.gap?.targetText == "dimensions of ab and ba:")
+            precondition(plan?.gap?.value.informationNeeds == ["dimensions"])
+            precondition(plan?.gap?.value.alreadyCovered.map(\.quote) == ["a is 2 by 3 and B is 3 by 2."])
+        }
+        guard case .unconstrained = GapSyntaxBinding.inspect(GapTranscript(
+            selected: "Explain the known rules. Dimensions of AB and BA:", context: "")) else {
+            preconditionFailure("A preceding command is not a completed fact")
+        }
         try plannerInputChecks()
         try plannerChecks()
         diagnosticChecks()
         guard CommandLine.arguments.contains("--live") else { return }
         guard #available(macOS 27, *), case .available = SystemLanguageModel.default.availability else {
             print("SKIPPED: local model unavailable"); exit(77)
+        }
+        if CommandLine.arguments.contains("--question-evidence-only") {
+            try await questionEvidenceChecks()
+            return
         }
         if CommandLine.arguments.contains("--corrections-only") {
             try await correctedEvidencePipelineChecks()
@@ -436,6 +483,35 @@ import Darwin
         print("LIVE MISLEADING HINT CONTROL: \(text)")
         precondition(text.localizedCaseInsensitiveContains("makeAdder"))
         print("Answer-form pipeline checks passed: actual lecture example, wrapped notes, freeform question, definition-only refusal and misleading hints. Development cases only.")
+    }
+
+    /// Exercise explanation guidance alongside the fact and example contracts.
+    /// Plans are fixed so an earlier planner clarification cannot hide an
+    /// unsupported completion at the evidence-to-writer boundary.
+    @available(macOS 27, *)
+    static func questionEvidenceChecks() async throws {
+        let cases = [
+            ("Why did the study method improve scores?", "study method",
+             "Students who chose the study method had higher scores. This nonrandom observational comparison does not establish that the method caused the difference; the cause is unknown."),
+            ("How many parts are in a Luma unit?", "Luma",
+             "A Luma unit has a blue shell. The number of internal parts was not recorded."),
+            ("What would a closure look like in a small program?", "closure",
+             "A closure pairs a function with its captured lexical environment.")
+        ]
+        for (question, subject, passage) in cases {
+            let transcript = GapTranscript(selected: question, context: "")
+            let gap = try ValidatedGapPlan.validate(MissingInformationPlan(alreadyCovered: [],
+                targets: [.init(blockID: "S1", quote: question)], informationNeeds: [question],
+                operation: .explain, subjects: [.init(blockID: "S1", quote: subject)],
+                completionGoal: "answer " + question), in: transcript)
+            var search = makeSearch([passage]); search.gapPlan = gap
+            let evidence = try await LectureComposer.complete(selected: question, context: "",
+                intent: gap.intent, action: gap.action, search: search)
+            let draft = try await AutofillWriter.draft(selected: question, context: "", intent: gap.intent,
+                action: gap.action, gap: gap.value, evidence: evidence, search: search)
+            precondition(draft.content == nil, "Unsupported question completion: \(question)")
+            print("PASS unsupported question completion withheld: \(question)")
+        }
     }
 
     static func makeSearch(_ texts: [String]) -> LectureSearch {

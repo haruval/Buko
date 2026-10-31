@@ -1,7 +1,6 @@
 import Foundation
 import FoundationModels
 import Darwin
-import CryptoKit
 
 /// Development transcript replays using the actual local model. These are not
 /// handwriting-recognition tests, held-out accuracy, or iPad latency measures.
@@ -97,10 +96,6 @@ import CryptoKit
             try await library.importPDF(from: URL(fileURLWithPath: "Buko/Resources/Lectures/programmingLanguages.pdf"), noteID: noteID)
         }
         var records: [[String: Any]] = []
-        // Explicit offline export only: app diagnostics remain transient. Capture
-        // the real gap-call boundary, including the frozen preliminary hypothesis,
-        // so another local model can replay exactly the same stage inputs.
-        var gapReplays: [[String: Any]] = []
         for item in selectedFixtures {
             var record: [String: Any] = ["id": item.id, "selected": item.selected, "context": item.context]
             let recorder = Recorder()
@@ -183,31 +178,6 @@ import CryptoKit
             precondition(Set(stageIDs).count == stageIDs.count, "Every review must remain visible in request-local diagnostics")
             precondition(stageIDs.filter { $0 == "referenceRepair" }.count <= 1, "Reference repair must remain bounded to one attempt")
             record["trace"] = await recorder.trace.steps.map { ["id": $0.id, "input": $0.input, "summary": $0.summary] }
-            if let exportPath = option("--export-gap-replay") {
-                if let step = await recorder.trace.steps.first(where: { $0.id == "gap" }),
-                   let instructions = step.instructions {
-                    gapReplays.append(["id": item.id, "instructions": instructions, "input": step.input,
-                        "maximumResponseTokens": MissingInformationPrompts.responseTokens,
-                        "recordedOutput": step.summary,
-                        "expectations": ["subjects": item.subjects, "excludedSubjects": item.excludedSubjects,
-                            "needs": item.needs, "excludedNeeds": item.excludedNeeds,
-                            "targets": item.expectedTargets, "abstain": item.clarify] as [String: Any]])
-                }
-                let paths = ["Buko/AI/CirclePlanner.swift", "Buko/AI/MissingInformationPlan.swift",
-                    "Buko/AI/IntentPrompts.swift", "Tests/ContextualIntentChecks.swift"]
-                var sourceHashes: [String: String] = [:]
-                for path in paths {
-                    sourceHashes[path] = SHA256.hash(data: try Data(contentsOf: URL(fileURLWithPath: path)))
-                        .map { String(format: "%02x", $0) }.joined()
-                }
-                let corpus: [String: Any] = ["formatVersion": 1, "kind": "buko.contextual-gap-stage",
-                    "partition": "development", "gapContractVersion": MissingInformationPrompts.version,
-                    "sourceHashes": sourceHashes,
-                    "schema": try JSONSerialization.jsonObject(with: JSONEncoder().encode(ContextualGapReferences.generationSchema)),
-                    "requestedCaseIDs": selectedFixtures.map(\.id), "cases": gapReplays]
-                try JSONSerialization.data(withJSONObject: corpus, options: [.sortedKeys, .prettyPrinted])
-                    .write(to: URL(fileURLWithPath: exportPath), options: .atomic)
-            }
             records.append(record)
             try JSONSerialization.data(withJSONObject: records, options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)
             print("\(record["passed"] as? Bool == true ? "PASS" : "FAIL") \(item.id): \(record["intent"] ?? record["error"] ?? "") · query=\(record["query"] ?? "") · clarification=\(record["clarification"] ?? "")")
@@ -219,9 +189,12 @@ import CryptoKit
 
     @available(macOS 27, *)
     static func cancellationChecks(output: URL) async throws {
-        let fixture = fixtures.first { $0.id == "disambiguated-reference" }!
+        let reference = fixtures.first { $0.id == "disambiguated-reference" }!
+        let question = Fixture(id: "question-reference-repair", selected: "Why is matrix multiplication not commutative?",
+            context: "", needs: ["why"], subjects: ["matrix multiplication"])
         var reports: [[String: Any]] = []
-        for stage in ["referenceRepair", "referenceRepair.scopeBinding"] {
+        for (fixture, stage) in [(reference, "referenceRepair"), (reference, "referenceRepair.scopeBinding"),
+                                 (question, "referenceRepair")] {
             let recorder = Recorder()
             let task = Task {
                 let observer: PipelineObserver = { event in
@@ -237,7 +210,7 @@ import CryptoKit
             let steps = await recorder.trace.steps
             precondition(steps.last?.id == stage && steps.last?.status == .completed,
                          "Cancellation must occur at the real review boundary and prevent later stages")
-            reports.append(["cancelledAfter": stage, "stages": steps.map(\.id), "passed": true])
+            reports.append(["case": fixture.id, "cancelledAfter": stage, "stages": steps.map(\.id), "passed": true])
             print("PASS cancellation after \(stage): no subsequent stage or plan")
         }
         try JSONSerialization.data(withJSONObject: reports, options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)

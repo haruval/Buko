@@ -31,7 +31,12 @@ struct CircleIntentOverlay: View {
                         .allowsHitTesting(false)
                     if state.phase == .finished || state.processing {
                         AutofillPreviewCard(state: state, detailed: detailedPreview, maximumHeight: maximumHeight) { size in
+                            guard state.phase != .idle, measuredHeight != size.height else { return }
                             measuredHeight = size.height
+                            // Place from the measured destination immediately. A content
+                            // measurement can arrive after the stage's layout change.
+                            repositionPopup(CGSize(width: popupSize.width, height: min(size.height, maximumHeight)),
+                                            viewport: geometry.size, animated: true)
                         }
                             .frame(width: popupSize.width, alignment: .topLeading)
                             .transaction { $0.animation = nil }
@@ -43,7 +48,7 @@ struct CircleIntentOverlay: View {
                                 // Camera/viewport changes remain direct; only pipeline changes spring.
                                 let animate = previous.viewport == current.viewport && previous.detailed == current.detailed
                                     && (previous.size != current.size || previous.stage != current.stage || previous.insertedBounds != current.insertedBounds)
-                                repositionPopup(popupSize, viewport: geometry.size, animated: animate)
+                                repositionPopup(current.size, viewport: current.viewport, animated: animate)
                             }
                             .transition(reduceMotion ? .identity : .scale(scale: 0.75).combined(with: .opacity))
                     }

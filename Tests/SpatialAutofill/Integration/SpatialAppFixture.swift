@@ -9,9 +9,11 @@ import PencilKit
         return args[i+1]
     }
     static var baseline: Bool { ProcessInfo.processInfo.arguments.contains("--spatial-baseline") }
-    static var pdfName: String { name == "threads" ? "operatingSystems" : "programmingLanguages" }
+    static var pdfName: String { name.hasPrefix("question-") ? "linearAlgebra" : (name == "threads" ? "operatingSystems" : "programmingLanguages") }
     static var root: URL { URL.documentsDirectory.appendingPathComponent("SpatialEvidence", isDirectory: true) }
     static var rectangle: CGRect {
+        if name == "question-why" { return CGRect(x: 1045, y: 1045, width: 900, height: 50) }
+        if name.hasPrefix("question-") { return CGRect(x: 1045, y: 855, width: 900, height: 95) }
         if name == "single" { return CGRect(x: 1050, y: 210, width: 850, height: 95) }
         return CGRect(x: 1045, y: 210, width: 900, height: name == "wrapped" ? 115 : 75)
     }
@@ -23,6 +25,14 @@ import PencilKit
         return drawing
     }
     static func drawing() -> PKDrawing {
+        if name.hasPrefix("question-") {
+            var page = SampleLecture.linearAlgebraPages[0]
+            if name == "question-new-dimensions" {
+                page[15] = "A is 4 by 6 and B is 6 by 4."
+            }
+            if name == "question-missing-input" { page[15] = "A is 2 by 3. B has an unknown size." }
+            return LectureHandwriting.drawing(pages: [page])
+        }
         var rows: [(String, CGFloat, CGFloat, CGFloat)] = [
             ("PROGRAMMING LANGUAGES - scope rules",60,70,850),
             ("Record each scope's purpose and lookup rule.",60,160,870),

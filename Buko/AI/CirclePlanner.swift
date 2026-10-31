@@ -121,18 +121,32 @@ nonisolated enum CirclePlanner {
             var calls = 2 + checked.calls
             var tokens = IntentPrompts.intentTokenLimit + MissingInformationPrompts.responseTokens + checked.responseTokens
             if checked.canRepair {
-                let instructions = GroundedReferenceRepair.instructions
+                let instructions = checked.questionReferenceRepair
+                    ? QuestionReferenceRepair.instructions : GroundedReferenceRepair.instructions
+                let repairTokens = checked.questionReferenceRepair
+                    ? QuestionReferenceRepair.responseTokens : GroundedReferenceRepair.responseTokens
                 let request = String(decoding: try encoder.encode(transcript.blocks), as: UTF8.self)
+                let repairSchema = checked.questionReferenceRepair
+                    ? QuestionReferenceRepair.generationSchema : GroundedReferenceRepair.generationSchema
                 let repairCount = try await model.tokenCount(for: Instructions(instructions))
-                    + model.tokenCount(for: GroundedReferenceRepair.generationSchema) + model.tokenCount(for: Prompt(request))
-                guard repairCount + GroundedReferenceRepair.responseTokens + 128 <= model.contextSize else { throw GapPlanError.contextLimit }
+                    + model.tokenCount(for: repairSchema) + model.tokenCount(for: Prompt(request))
+                guard repairCount + repairTokens + 128 <= model.contextSize else { throw GapPlanError.contextLimit }
                 await observer?(.began(id: "referenceRepair", title: "Re-anchor the inferred references", instructions: instructions, input: request))
                 try Task.checkCancellation()
-                let repair = try await LanguageModelSession(model: model, instructions: instructions).respond(to: request,
-                    generating: GroundedReferenceRepair.self,
-                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: GroundedReferenceRepair.responseTokens)).content
+                let repair: GroundedReferenceRepair
+                if checked.questionReferenceRepair, let question = transcript.blocks.first(where: \.selected) {
+                    let response = try await LanguageModelSession(model: model, instructions: instructions).respond(to: request,
+                        generating: QuestionReferenceRepair.self,
+                        options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: repairTokens)).content
+                    repair = GroundedReferenceRepair(targetQuotes: [question.text], subjectQuotes: response.subjectQuotes,
+                        informationNeed: question.text, coveredQuotes: [])
+                } else {
+                    repair = try await LanguageModelSession(model: model, instructions: instructions).respond(to: request,
+                        generating: GroundedReferenceRepair.self,
+                        options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: repairTokens)).content
+                }
                 try Task.checkCancellation()
-                calls += 1; tokens += GroundedReferenceRepair.responseTokens
+                calls += 1; tokens += repairTokens
                 await observer?(.completed(id: "referenceRepair", summary: String(decoding: try encoder.encode(repair), as: UTF8.self)))
                 try Task.checkCancellation()
                 if let anchored = try? repair.anchored(in: transcript) {
@@ -166,6 +180,7 @@ nonisolated enum CirclePlanner {
         var gap: ValidatedGapPlan? = nil
         var question = "What would you like to add to the selected notes?"
         var canRepair = false
+        var questionReferenceRepair = false
         var calls = 0
         var responseTokens = 0
     }
@@ -193,10 +208,24 @@ nonisolated enum CirclePlanner {
             await observer?(.began(id: "planValidation", title: "Check the inferred references", instructions: nil,
                 input: String(decoding: try encoder.encode(proposed), as: UTF8.self)))
             await observer?(.completed(id: "planValidation", summary: "No validated addition: " + reason))
-            // Overlap, missing targets and other final validation failures are
-            // not permission to invent an addition to already complete notes.
+            // A selected question can be unanswered even when it is a complete
+            // sentence. Reuse the one existing original-notes repair only when
+            // no scope calls have been spent, preserving the six-call ceiling.
+            result.canRepair = canRepairQuestionReferences(reason: reason, candidate: candidate,
+                transcript: transcript, scopeCalls: result.calls)
+            result.questionReferenceRepair = result.canRepair
         }
         return result
+    }
+
+    static func canRepairQuestionReferences(reason: String, candidate: ContextualGapReferences,
+                                            transcript: GapTranscript, scopeCalls: Int) -> Bool {
+        let selected = transcript.blocks.filter(\.selected)
+        guard scopeCalls == 0, selected.count == 1, selected[0].text.count <= 120,
+              transcript.selected.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?"),
+              transcript.selected.filter({ $0 == "?" }).count == 1,
+              !candidate.informationNeeds.isEmpty else { return false }
+        return (reason == "fieldCount" && candidate.targets.isEmpty) || reason.hasPrefix("invalidSpan:")
     }
 
     private struct ScopeResolution {
@@ -256,7 +285,10 @@ nonisolated enum CirclePlanner {
         }
         guard subjects.count > 1 else { return result }
         let choices = ContextualScopeChoice.choices(subjects: subjects.map(\.quote))
-        let need = "the requested content"
+        let namesRequestedTogether = candidate.targets.contains { target in
+            subjects.allSatisfy { target.quote.localizedCaseInsensitiveContains($0.quote) }
+        }
+        let need = namesRequestedTogether ? candidate.informationNeeds.joined(separator: ", ") : "the requested content"
         let choiceText = choices.map { choice in
             let omitted = subjects.map(\.quote).filter { !choice.subjects.contains($0) }
             return "\(choice.id): Add \(need) for \(choice.subjects.joined(separator: " and "))"

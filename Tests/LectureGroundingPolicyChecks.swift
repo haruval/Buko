@@ -3,6 +3,7 @@ import Foundation
 /// Deterministic contract tests; no model responses or normal notebook stores are used.
 @main struct LectureGroundingPolicyChecks {
     static func main() {
+        dimensionChecks()
         let fact = "For this fictional laboratory exercise, the Luma sample has exactly seven chambers."
         let qualified = "In a small observational pilot, test scores rose by 3 points. The change was not statistically significant, does not establish causation, and no long-term benefit was measured."
         let source = hit("luma", fact), qualification = hit("pilot", qualified, page: 2)
@@ -117,5 +118,30 @@ import Foundation
 
     static func assertAbstention(_ result: LectureCompletion) {
         precondition(result.lines.isEmpty && result.citations.isEmpty && !result.extractive && !result.explanation.isEmpty)
+    }
+    static func dimensionChecks() {
+        let cases: [(String, [String])] = [
+            ("a is 2 by 3 and B is 3 by 2. dimensions of ab and ba:", ["AB is 2 by 2.","BA is 3 by 3."]),
+            ("A is 2 by 3 and B is 3 by 2.\nDimensions of AB and BA:", ["AB is 2 by 2.","BA is 3 by 3."]),
+            ("A is 4 by 6 and B is 6 by 4. What are the dimensions of AB and BA?", ["AB is 4 by 4.","BA is 6 by 6."]),
+            ("A is 2 by 3 and B is 3 by 4. What are the dimensions of AB and BA?", ["AB is 2 by 4.","BA is undefined: the inner dimensions 4 and 2 do not match."]),
+            ("m = 7x2, n = 2×5. Sizes of mn:", ["MN is 7 by 5."]),
+            ("C is 3 by 3. Dimensions of CC:", ["CC is 3 by 3."])
+        ]
+        for (request, expected) in cases {
+            for sources in [false,true] {
+                guard case .arithmetic(let result) = CircleCompletionRoute.select(for: request, hasLectureEvidence: sources) else { fatalError(request) }
+                precondition(result.lines == expected && result.clarification.isEmpty, "\(request): \(result.lines)")
+            }
+        }
+        for givens in ["A is 2 by 3. B has an unknown size.","A is 2 by 3. A is 4 by 3. B is 3 by 2.","A is 2.5 by 3. B is 3 by 2.","A is 2 by 3.5. B is 3 by 2.","A is -2 by 3. B is 3 by 2.","A is 0 by 3. B is 3 by 2.","A is 999999999999999999999999 by 3. B is 3 by 2."] {
+            guard case .arithmetic(let result) = CircleCompletionRoute.select(for: givens + " Dimensions of AB and BA:", hasLectureEvidence:true) else { fatalError(givens) }
+            precondition(result.lines.isEmpty && !result.clarification.isEmpty, givens)
+        }
+        for request in ["Why is matrix multiplication not commutative?","Why do the dimensions of AB and BA differ?","Dimensions of an organism:","A is 2 by 3. B is 3 by 2. Dimensions of AB: 2 by 2."] {
+            precondition(MatrixProductCheck.evaluate(request) == nil, request)
+        }
+        precondition(MatrixProductCheck.evaluate("C = [2 1; 0 3], D = [1 4; 2 0]. CD =")?.lines.last == "CD = [4 8; 6 0].")
+        print("24 dimension/routing controls passed, including existing numeric multiplication")
     }
 }

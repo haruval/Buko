@@ -12,6 +12,7 @@ nonisolated enum MatrixProductCheck {
 
     static func evaluate(_ selected: String) -> Result? {
         let text = selected.replacingOccurrences(of: "−", with: "-")
+        if let dimensions = dimensions(text) { return dimensions }
         guard let target = matches(unfinishedProduct, in: text).last else { return nil }
         var matrices: [String: [[Double]]] = [:]
         for assignment in matches(#"\b([A-Za-z])\s*=\s*\[([^\[\]]+)\]"#, in: text) {
@@ -51,6 +52,36 @@ nonisolated enum MatrixProductCheck {
         }
         let name = target[1] + target[2]
         lines.append(name + " = [" + result.map { $0.map(number).joined(separator: " ") }.joined(separator: "; ") + "].")
+        return Result(lines: lines, clarification: "")
+    }
+
+    /// Explicit numeric sizes and a final shape request. Explanatory questions
+    /// still use the lecture path. Unknown or duplicate sizes never borrow PDF inputs.
+    private static func dimensions(_ text: String) -> Result? {
+        let pattern = #"(?i)(?:^|\n|[.!?]\s+)(?:what\s+(?:are|is)\s+(?:the\s+)?)?(?:dimensions?|sizes?)\s+of\s+([A-Za-z]{2}(?:\s*(?:,|and)\s*[A-Za-z]{2})*)\s*[:?]?\s*\z"#
+        guard let request = matches(pattern, in: text).last else { return nil }
+        let refusal = Result(lines: [], clarification: "Please give one positive, whole-number row and column count for each matrix in the requested products.")
+        var sizes: [String: (rows: Int, columns: Int)] = [:]
+        let assignment = #"(?i)\b([A-Za-z])\s*(?:is|=|:)\s*(\d+)\s*(?:by|x|×)\s*(\d+)\b(?!\.[0-9])"#
+        for match in matches(assignment, in: text) {
+            let name = match[1].lowercased()
+            guard sizes[name] == nil, let rows = Int(match[2]), let columns = Int(match[3]),
+                  rows > 0, columns > 0 else { return refusal }
+            sizes[name] = (rows, columns)
+        }
+        let products = matches(#"([A-Za-z])([A-Za-z])"#, in: request[1].replacingOccurrences(of: "and", with: ",", options: .caseInsensitive))
+        guard (1...3).contains(products.count) else { return refusal }
+        var seen = Set<String>(), lines: [String] = []
+        for product in products {
+            let name = (product[1] + product[2]).uppercased()
+            guard seen.insert(name).inserted,
+                  let left = sizes[product[1].lowercased()], let right = sizes[product[2].lowercased()] else { return refusal }
+            if left.columns == right.rows {
+                lines.append("\(name) is \(left.rows) by \(right.columns).")
+            } else {
+                lines.append("\(name) is undefined: the inner dimensions \(left.columns) and \(right.rows) do not match.")
+            }
+        }
         return Result(lines: lines, clarification: "")
     }
 

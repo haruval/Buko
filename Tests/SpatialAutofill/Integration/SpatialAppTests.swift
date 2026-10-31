@@ -22,7 +22,7 @@ final class SpatialAppTests: XCTestCase {
         if let expected { XCTAssertEqual(app.staticTexts["spatialResult"].label,expected) }
         if expected == "proposal" {
             let name=app.launchArguments[1]
-            let target=["static":"static scope","dynamic":"dynamic scope","wrapped":"static scope","single":"parsing","threads":"thread"][name]!
+            let target=["static":"static scope","dynamic":"dynamic scope","wrapped":"static scope","single":"parsing","threads":"thread","question-dimensions":"ab","question-new-dimensions":"ab","question-why":"matrix multiplication"][name]!
             XCTAssertTrue(app.staticTexts["spatialTarget"].label.lowercased().contains(target),app.staticTexts["spatialTarget"].label)
             let requestAndDraft = (app.staticTexts["spatialTarget"].value as? String ?? "").lowercased()
             let parts = requestAndDraft.components(separatedBy:" | ")
@@ -33,7 +33,10 @@ final class SpatialAppTests: XCTestCase {
                 "wrapped":[["nested","enclosing","lexical"]],
                 "dynamic":[["call"],["search"]],
                 "single":[["grammar"],["syntax tree"]],
-                "threads":[["share","sharing"],["address space"],["own"],["stack"]]
+                "threads":[["share","sharing"],["address space"],["own"],["stack"]],
+                "question-dimensions":[["ab"],["ba"],["2 by 2","2×2","2 × 2","2x2","2 x 2"],["3 by 3","3×3","3 × 3","3x3","3 x 3"]],
+                "question-new-dimensions":[["ab"],["ba"],["4 by 4","4×4","4 × 4","4x4","4 x 4"],["6 by 6","6×6","6 × 6","6x6","6 x 6"]],
+                "question-why":[["order","compos"],["different","differ","chang"]]
             ]
             for alternatives in criteria[name]! {
                 XCTAssertTrue(alternatives.contains { parts[1].contains($0) },requestAndDraft)
@@ -54,10 +57,48 @@ final class SpatialAppTests: XCTestCase {
         XCTAssertTrue(accept.waitForExistence(timeout:10))
         expectation(for:NSPredicate(format:"enabled == true"),evaluatedWith:accept)
         waitForExpectations(timeout:15)
+        let visible = app.windows.firstMatch.frame.insetBy(dx: -1, dy: -1)
+        for button in [accept, app.buttons["declineAutofill"]] {
+            XCTAssertTrue(visible.contains(button.frame), "Preview control outside viewport: \(button.frame)")
+            XCTAssertTrue(button.isHittable)
+        }
     }
     @MainActor private func gone(_ app: XCUIApplication) {
         expectation(for:NSPredicate(format:"exists == false"),evaluatedWith:app.buttons["acceptAutofill"])
         waitForExpectations(timeout:8)
+    }
+    @MainActor func testQQuestionDimensionsAcceptUndo() {
+        let app=launch("question-dimensions"); capture(app,expected:"proposal"); ready(app)
+        checkpoint(app,original:true,records:0)
+        XCTAssertEqual(app.staticTexts["autofillPreviewTitle"].label, "Calculated from your notes")
+        XCTAssertFalse(app.buttons["autofillSourceLink"].exists)
+        app.buttons["acceptAutofill"].tap(); gone(app)
+        checkpoint(app,original:false,records:1)
+        app.buttons["Undo"].tap(); checkpoint(app,original:true,records:0)
+    }
+    @MainActor func testRQuestionWhyDecline() {
+        let app=launch("question-why"); capture(app,expected:"proposal"); ready(app)
+        checkpoint(app,original:true,records:0)
+        XCTAssertTrue(app.buttons["autofillSourceLink"].firstMatch.exists)
+        app.buttons["autofillSourceLink"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["closeLecturePDF"].waitForExistence(timeout:8))
+        screenshot(app,"Explanation cited lecture")
+        app.buttons["closeLecturePDF"].tap()
+        app.buttons["declineAutofill"].tap(); gone(app)
+        checkpoint(app,original:true,records:0)
+    }
+    @MainActor func testSQuestionNewDimensionsAcceptUndo() {
+        let app=launch("question-new-dimensions"); capture(app,expected:"proposal"); ready(app)
+        XCTAssertEqual(app.staticTexts["autofillPreviewTitle"].label, "Calculated from your notes")
+        checkpoint(app,original:true,records:0)
+        app.buttons["acceptAutofill"].tap(); gone(app)
+        checkpoint(app,original:false,records:1)
+        app.buttons["Undo"].tap(); checkpoint(app,original:true,records:0)
+    }
+    @MainActor func testTQuestionMissingInputWithheld() {
+        let app=launch("question-missing-input"); capture(app,expected:"no-proposal")
+        XCTAssertFalse(app.buttons["acceptAutofill"].exists)
+        checkpoint(app,original:true,records:0)
     }
     @MainActor func testAStaticAcceptUndoRedoAndPersistence() {
         let app=launch("static"); capture(app,expected:"proposal"); ready(app)

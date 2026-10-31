@@ -9,5 +9,5 @@ build/
 xcuserdata/
 .xcodebuildmcp/
 
-# Generated isolated iPad validation app (recreate with prepare_device.py).
+# Legacy generated validation copies are private, never shipping source.
 /DeviceApp/

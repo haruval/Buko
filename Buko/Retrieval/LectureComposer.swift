@@ -96,6 +96,32 @@ struct GroundedContextualSelection {
     }
 }
 
+/// Why questions inspect an explanatory excerpt before judging answerability.
+/// Other forms retain their original, stricter form-specific evidence contract.
+@Generable
+struct GroundedExplanationSelection {
+    @Guide(description: "The contribution actually requested by the selected notes. Preserve every requested part; do not add requirements from a planning hint.")
+    var requestedForm: String
+    @Guide(description: "Inspect all passages, then copy a complete supporting sentence or contiguous excerpt containing the candidate answer or explanation. Keep the source capitalization, including the first word. An explanation can use a stated relationship or order effect. Copy source words exactly from ONE passage, at most 600 characters. Do not generate an answer here. Empty if no candidate evidence exists.")
+    var answerExcerpt: String
+    @Guide(description: "Original P ID of the passage containing the whole quoted excerpt. Overlapping passages can start similarly: use the one containing all quoted words, not the first topic match. Empty if no candidate evidence exists.")
+    var answerSourceID: String
+    @Guide(description: "In at most 70 words, connect the quoted evidence to the requested answer. An explanation can use a stated relationship, structural property or order effect; it need not be a numerical demonstration. Check every requested part, subject and input. Another exercise's result cannot answer different inputs. Identify missing support, applicable corrections or conflicting claims. A definition alone cannot supply an example, nor correlation a causal effect.")
+    var assessment: String
+    @Guide(description: "True only if the evidence supplies the requested content for the exact subject and inputs. A topic mention, another exercise's result, an unsupplied example or an unknown empirical fact is insufficient.")
+    var hasRequestedContent: Bool
+    @Guide(description: "directAnswer for supported requested content; missingInformation for missing required support; unresolvedConflict for incompatible applicable claims. negativeAnswer and correctedAnswer require explicit source support.")
+    var status: GroundedLectureStatus
+    @Guide(description: "Original P IDs supplying the requested content and necessary qualifications. Empty for missingInformation or unresolvedConflict.", .maximumCount(4))
+    var sourceIDs: [String]
+
+    var selection: GroundedTaskSelection {
+        GroundedTaskSelection(requestedForm: requestedForm, assessment: assessment,
+            hasRequestedContent: hasRequestedContent, answerSourceID: answerSourceID,
+            answerExcerpt: answerExcerpt, status: status, sourceIDs: sourceIDs)
+    }
+}
+
 /// Evidence selection only. An exact citation never licenses unverified generated prose.
 /// No canvas, persistence, tools, or general-knowledge fallback are available here.
 enum LectureComposer {
@@ -185,7 +211,7 @@ enum LectureComposer {
     private static func reviewInstructions(_ base: String, selected: String, gap: ValidatedGapPlan?) -> String {
         guard requiresTaskForm(selected: selected, gap: gap) else { return base }
         guard gap?.value.completionGoal != nil else { return answerFormRules }
-        return answerFormRules.replacingOccurrences(of:
+        let contextual = answerFormRules.replacingOccurrences(of:
             "An explicit selected task takes priority over a conflicting model hint.", with: """
             An explicit selected task takes priority over a conflicting model hint.
             The inferred need is a hypothesis, not extra independent requirements. Check
@@ -193,6 +219,8 @@ enum LectureComposer {
             properties or an implementation because a planning hint used a broad word
             such as "function". Judge whether the sources fill the actual selected gap.
             """)
+        guard GapHeadingRequest.isExplanationQuestion(selected) else { return contextual }
+        return contextual + "\nA why question can be answered by a source-stated explanatory relationship or order effect. Do not demand an unrequested comparison, physical cause or numerical demonstration. A definition alone cannot supply an example; association does not establish empirical causation."
     }
 
     private static let answerFormRules = """
@@ -243,6 +271,22 @@ enum LectureComposer {
         return String(excerpt[marker.upperBound...])
     }
 
+    /// Overlapping chunks can make the model name a neighboring passage.
+    /// Rebind only an exact, uniquely located quote among scope-approved sources;
+    /// unknown IDs, ambiguous matches and changed wording still refuse.
+    static func matchAnswerExcerpt(_ quote: String, proposedID: String,
+                                   passages: [(id: String, text: String)]) -> (id: String, text: String)? {
+        guard !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, quote.count <= 600,
+              let proposed = passages.first(where: { $0.id == proposedID }) else { return nil }
+        if let text = sourceAnswerSpan(quote, in: proposed.text) { return (proposedID, text) }
+        let matches = passages.compactMap { passage -> (id: String, text: String)? in
+            guard let text = sourceAnswerSpan(quote, in: passage.text),
+                  text.split(whereSeparator: \.isWhitespace) == quote.split(whereSeparator: \.isWhitespace) else { return nil }
+            return (passage.id, text)
+        }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
     /// Recover a source span when the model copied several exact sentences but
     /// omitted intervening sentences. Reinsert that material, including any
     /// qualifications. Never match paraphrases, reordered sentences or changed
@@ -251,6 +295,15 @@ enum LectureComposer {
         let quote = excerpt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !quote.isEmpty, quote.count <= 600 else { return nil }
         if source.contains(quote) { return quote }
+        // PDF line wrapping is presentation, not a changed quotation. Match
+        // exactly the same tokens and punctuation, then restore the source's
+        // original whitespace. Never accept paraphrases or changed numbers.
+        let whitespacePattern = quote.split(whereSeparator: \.isWhitespace)
+            .map { NSRegularExpression.escapedPattern(for: String($0)) }.joined(separator: "\\s+")
+        if let range = source.range(of: whitespacePattern, options: .regularExpression) {
+            let span = String(source[range])
+            if span.count <= 600 { return span }
+        }
         var sentences: [String] = []
         quote.enumerateSubstrings(in: quote.startIndex..., options: .bySentences) { sentence, _, _, _ in
             if let sentence { sentences.append(sentence.trimmingCharacters(in: .whitespacesAndNewlines)) }
@@ -314,11 +367,13 @@ enum LectureComposer {
             let proposalInstructions = reviewInstructions(Self.proposalInstructions, selected: selected, gap: search.gapPlan)
             let taskForm = requiresTaskForm(selected: selected, gap: search.gapPlan)
             let contextual = search.gapPlan?.value.completionGoal != nil
+            let explanatoryQuestion = contextual && GapHeadingRequest.isExplanationQuestion(selected)
             let outputBudget = taskForm ? 700 : 400
             let indexedHits = search.hits.enumerated().map { (id: "P\($0.offset + 1)", hit: $0.element) }
             let request = try prompt(selected: selected, context: context, intent: intent, action: action, gap: search.gapPlan, hits: indexedHits, expanded: true)
             let instructionTokens = try await model.tokenCount(for: Instructions(instructions))
-            let schemaTokens = try await model.tokenCount(for: contextual ? GroundedContextualSelection.generationSchema
+            let schemaTokens = try await model.tokenCount(for: explanatoryQuestion ? GroundedExplanationSelection.generationSchema
+                : contextual ? GroundedContextualSelection.generationSchema
                 : taskForm ? GroundedTaskSelection.generationSchema : GroundedLectureSelection.generationSchema)
             let inputTokens = try await model.tokenCount(for: Prompt(request))
             try Task.checkCancellation()
@@ -398,8 +453,12 @@ enum LectureComposer {
             let selection: GroundedLectureSelection
             var requestedContent: LectureCompletion.RequestedContent?
             if taskForm {
-                let task: GroundedTaskSelection
-                if contextual {
+                var task: GroundedTaskSelection
+                if explanatoryQuestion {
+                    let result = try await session.respond(to: scopedRequest, generating: GroundedExplanationSelection.self,
+                        options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
+                    task = result.content.selection
+                } else if contextual {
                     let result = try await session.respond(to: scopedRequest, generating: GroundedContextualSelection.self,
                         options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
                     task = result.content.selection
@@ -417,6 +476,19 @@ enum LectureComposer {
                     // Whole-passage scope can keep a definition of X beside an
                     // example of Y. Recheck only the exact proposed answer span
                     // so that neighboring topic mentions cannot lend it scope.
+                    if contextual, Set(task.sourceIDs).count == task.sourceIDs.count,
+                       task.sourceIDs.contains(task.answerSourceID),
+                       let matched = matchAnswerExcerpt(task.answerExcerpt, proposedID: task.answerSourceID,
+                            passages: applicable.map { (id: $0.id, text: $0.hit.passage.text) }),
+                       matched.id != task.answerSourceID {
+                        let oldID = task.answerSourceID
+                        task.answerSourceID = matched.id
+                        task.answerExcerpt = matched.text
+                        task.sourceIDs = task.sourceIDs.reduce(into: []) { ids, id in
+                            let corrected = id == oldID ? matched.id : id
+                            if !ids.contains(corrected) { ids.append(corrected) }
+                        }
+                    }
                     guard task.sourceIDs.contains(task.answerSourceID),
                           let original = applicable.first(where: { $0.id == task.answerSourceID }),
                           !task.answerExcerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

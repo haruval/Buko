@@ -1,4 +1,4 @@
-"""Build an isolated Apple-model experiment from hash-recorded production copies."""
+"""Build spatial regression checks from hash-recorded app sources."""
 import argparse
 import hashlib
 import json
@@ -53,13 +53,13 @@ def prepare(destination, instrument_reader=False):
         (dest / 'Sources' / Path(name).name).write_text(copied)
         manifest['sources'][name] = {'originalSHA256': hashlib.sha256(original.encode()).hexdigest(),
                                     'generatedSHA256': hashlib.sha256(copied.encode()).hexdigest()}
-    for source in (ROOT / 'Experiments/SpatialAutofill/Sources').glob('*.swift'):
+    for source in (ROOT / 'Tests/SpatialAutofill/Sources').glob('*.swift'):
         shutil.copy2(source, dest / 'Sources' / source.name)
         manifest['sources'][str(source.relative_to(ROOT))] = {'originalSHA256': hashlib.sha256(source.read_bytes()).hexdigest()}
     (dest / 'source-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     (dest / 'Package.swift').write_text('''// swift-tools-version: 6.2
 import PackageDescription
-let package = Package(name: "BukoSpatialExperiment", platforms: [.macOS("27.0")],
+let package = Package(name: "BukoSpatialChecks", platforms: [.macOS("27.0")],
     targets: [.executableTarget(name: "buko-spatial", path: "Sources")], swiftLanguageModes: [.v5])
 ''')
     print(dest)
