@@ -26,6 +26,30 @@ import SwiftData
         do { _ = try HandwritingSample(drawing: PKDrawing()); preconditionFailure("Empty samples must fail") }
         catch HandwritingSample.SampleError.invalidInk { }
 
+        // Reproduce the physical report: tiny cached connected words beside
+        // ordinary fallback ink. Size/baseline must be independent of source scale.
+        for word in ["can", "but", "edit", "gy", "Maya"] {
+            var strokes: [PKStroke] = []
+            var x: CGFloat = 0
+            for character in word {
+                let glyph = try PKDrawing(data: HandwrittenFont.sample(String(character))!.drawingData)
+                strokes += glyph.transformed(using: CGAffineTransform(translationX: x, y: 0)).strokes
+                x += glyph.bounds.width + 8
+            }
+            let reference = PKDrawing(strokes: strokes)
+            for factor: CGFloat in [0.08, 0.3, 2] {
+                let source = reference.transformed(using: CGAffineTransform(scaleX: factor, y: factor)
+                    .concatenating(CGAffineTransform(translationX: 800, y: 450)))
+                let normalized = try HandwritingSample.normalized(drawing: source, text: word)
+                let actual = try PKDrawing(data: normalized.drawingData)
+                precondition(abs(actual.bounds.height - reference.bounds.height) < 2, "Sample height must match the shared lettering metrics")
+                precondition(abs(actual.bounds.maxY - reference.bounds.maxY) < 2, "Samples must share a baseline and preserve descenders")
+                let again = try PKDrawing(data: HandwritingSample.normalized(drawing: actual, text: word).drawingData)
+                precondition(abs(again.bounds.height - actual.bounds.height) < 0.5, "Normalization must not compound on cache reuse")
+            }
+        }
+        print("Physical handwriting regression: tiny words, cap/x-height, baseline, descenders and repeated normalization passed")
+
         let original = PKDrawing(strokes: [stroke(1100, 110), stroke(1100, 160), stroke(1100, 235)])
         let originalData = original.dataRepresentation()
         let staged = try AutofillLayout.stage(text: "abba abba\nba", drawing: original,

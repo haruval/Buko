@@ -31,6 +31,17 @@ import Darwin
         let sourceSpan = "Parsing checks grammar. This applies to the token sequence. Parsing builds a syntax tree."
         precondition(LectureComposer.sourceAnswerSpan("Parsing checks grammar. Parsing builds a syntax tree.", in: sourceSpan) == sourceSpan)
         precondition(LectureComposer.sourceAnswerSpan("Parsing checks grammar.", in: sourceSpan) == "Parsing checks grammar.")
+        let numberedSource = "First claim. A qualification applies. Final claim."
+        precondition(LectureComposer.sentenceSpan(in: numberedSource, first: 1, last: 3) == numberedSource)
+        precondition(LectureComposer.sentenceSpan(in: numberedSource, first: 2, last: 2) == "A qualification applies.")
+        for (first, last) in [(0, 1), (2, 1), (1, 4), (-1, 2)] {
+            precondition(LectureComposer.sentenceSpan(in: numberedSource, first: first, last: last) == nil)
+        }
+        precondition(LectureComposer.sentenceSpan(in: String(repeating: "long ", count: 125) + ".", first: 1, last: 1) == nil)
+        let invalidPassage = GroundedExplanationSelection(requestedForm: "explanation", answerSourceID: "P9",
+            firstSentence: 1, lastSentence: 2, assessment: "", hasRequestedContent: true,
+            status: .directAnswer, sourceIDs: ["P9"])
+        precondition(invalidPassage.selection(passages: [(id: "P1", text: numberedSource)]).answerExcerpt.isEmpty)
         precondition(LectureComposer.sourceAnswerSpan("Parsing builds a syntax tree. Parsing checks grammar.", in: sourceSpan) == nil)
         precondition(LectureComposer.sourceAnswerSpan("Parsing checks types. Parsing builds a syntax tree.", in: sourceSpan) == nil)
         precondition(LectureComposer.sourceAnswerSpan("The trial improved recall. Results were limited.",
@@ -66,6 +77,15 @@ import Darwin
         precondition(!repairAllowed("fieldCount", GapTranscript(selected: "Why does this happen? What changes?", context: "")))
         precondition(!repairAllowed("fieldCount", GapTranscript(selected: "Why does this\nhappen?", context: "")))
         precondition(!repairAllowed("fieldCount", GapTranscript(selected: String(repeating: "x", count: 120) + "?", context: "")))
+        let wrappedQuestion = GapTranscript(selected: "Why do different salts help when two\nstudents choose the same password,\nand what attack is still possible?", context: "Stored password verifier = hash + salt")
+        precondition(wrappedQuestion.question?.targets.count == 3)
+        precondition(wrappedQuestion.question?.text == "Why do different salts help when two students choose the same password, and what attack is still possible?")
+        precondition(CollectiveReference(selectedCue: "two students").isGrounded(in: wrappedQuestion.selected))
+        precondition(!CollectiveReference(selectedCue: "two teachers").isGrounded(in: wrappedQuestion.selected))
+        let withPremise = GapTranscript(selected: "A: password + PIN\nB: password + security key\nWhy is only B multi-factor?", context: "")
+        precondition(withPremise.question?.targets == [.init(blockID: "S3", quote: "Why is only B multi-factor?")])
+        precondition(GapTranscript(selected: "Why this? Why that?", context: "").question == nil)
+        precondition(GapTranscript(selected: "Closures:\nDynamic scope:", context: "").question == nil)
         for separator in [" ", "\n"] {
             let captured = "a is 2 by 3 and B is 3 by 2." + separator + "dimensions of ab and ba:"
             let transcript = GapTranscript(selected: captured, context: "Why is matrix multiplication not commutative?")
@@ -509,6 +529,7 @@ import Darwin
                 intent: gap.intent, action: gap.action, search: search)
             let draft = try await AutofillWriter.draft(selected: question, context: "", intent: gap.intent,
                 action: gap.action, gap: gap.value, evidence: evidence, search: search)
+            print("Question control draft: \(draft.content?.text ?? "<withheld>")")
             precondition(draft.content == nil, "Unsupported question completion: \(question)")
             print("PASS unsupported question completion withheld: \(question)")
         }

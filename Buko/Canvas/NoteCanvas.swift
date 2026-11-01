@@ -43,6 +43,7 @@ struct NoteCanvas: UIViewRepresentable {
             host.preparedHandwriting = preparedHandwriting
             host.persistAutofill = onAutofillCommit
             host.onUndoStateChange = { [weak session] in session?.refreshUndoState() }
+            host.onPencilToolToggle = { [weak session] in session?.togglePencilEraser() }
         }
         host.configure(tool: session.tool, allowsFingerDrawing: session.allowsFingerDrawing, showsGrid: showsGrid,
                        colorScheme: colorScheme)

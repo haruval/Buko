@@ -54,6 +54,7 @@ final class CanvasRefinementTests: XCTestCase {
         expect("Page 3 of 3", on: canvas)
         app.buttons["Hide notes"].tap()
         XCTAssertEqual(title.value as? String, newTitle)
+        Thread.sleep(forTimeInterval: 0.8) // Pinch must begin after the sidebar leaves its touch area.
         app.descendants(matching: .any)["Canvas zoom test area"].pinch(withScale: 0.5, velocity: -0.5)
         expectation(for: NSPredicate(format: "value CONTAINS 'overview'"), evaluatedWith: canvas)
         waitForExpectations(timeout: 5)

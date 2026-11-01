@@ -9,6 +9,9 @@ struct SettingsPanel: View {
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
     @AppStorage("showsGestureTestTools") private var showsGestureTestTools = true
     let previewHandwriting: () -> Void
+    let writeAlphabet: () -> Void
+    let scanHandwriting: () -> Void
+    let handwritingStatus: HandwritingPreparationStatus
     let recreateTestNote: (SampleLecture) -> Void
     let restore: (Note) -> Void
     let restorePage: (TrashedPage) -> Void
@@ -109,6 +112,16 @@ struct SettingsPanel: View {
                                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                                 .padding(.horizontal, 8)
                         }.buttonStyle(.glass).accessibilityIdentifier("previewHandwriting")
+                        Button(action: writeAlphabet) {
+                            Label("Write your alphabet", systemImage: "pencil.line")
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }.buttonStyle(.glass).accessibilityIdentifier("writeAlphabet")
+                        Button(action: scanHandwriting) {
+                            Label(handwritingStatus.isRebuilding ? "Scanning notes…" : "Scan notes now", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }.buttonStyle(.glass).disabled(handwritingStatus.isRebuilding)
+                            .accessibilityIdentifier("scanHandwritingNow")
+                        Text(handwritingStatus.message).font(.caption).foregroundStyle(.secondary)
                         Divider()
                         ForEach(SampleLecture.allCases) { lecture in
                             Button { recreateTestNote(lecture) } label: {

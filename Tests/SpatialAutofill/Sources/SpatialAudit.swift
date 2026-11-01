@@ -220,6 +220,20 @@ enum SpatialAudit {
         let input = [line(0,[60,100,370,25]),line(1,[560,100,370,25]),line(2,[80,140,350,25])]
         let groups = try SpatialGroups.validated(input, transcript: transcript)
         precondition(groups.groups.contains(["S1","S3"]) && groups.groups.contains(["S2"]))
+        let labeledTranscript = GapTranscript(selected: "Alpha\nMeaning: holds requests\nExample: a print job\nBeta\nMeaning: holds results", context: "")
+        let labeledLines = labeledTranscript.blocks.enumerated().map { index, block in
+            SpatialLine(blockID: block.id, text: block.text, page: "p1", rect: [60, [100.0, 140, 180, 350, 390][index], 320, 20])
+        }
+        let labeledGroups = try SpatialGroups.validated(labeledLines, transcript: labeledTranscript)
+        let inventory = SpatialInventory(regions: [
+            .init(regionID: "G1", topic: "Alpha", supplied: [.init(role: "meaning", quote: "holds requests"), .init(role: "example", quote: "a print job")]),
+            .init(regionID: "G2", topic: "Beta", supplied: [.init(role: "meaning", quote: "holds results")])
+        ], requiredRoles: ["meaning", "example"], basis: "Comparable labeled notes", kind: .ordinaryRequest)
+        let labeledInventory = SpatialPlanner.anchoredInventory(inventory, layout: labeledGroups, transcript: labeledTranscript)
+        precondition(labeledInventory.topics[0].supplied[0].quote == "Meaning: holds requests")
+        let anchoredCandidate = ContextualGapReferences(alreadyCovered: [], targets: [], informationNeeds: [], subjectQuotes: ["Alpha", "Beta"])
+        let missing = ContextualRoleMap.focus(labeledInventory.map, candidate: anchoredCandidate, in: labeledTranscript)
+        precondition(missing?.informationNeeds == ["example"] && missing?.subjectQuotes == ["Beta"])
         func rejects(_ values: [SpatialLine]) {
             do { _ = try SpatialGroups.validated(values, transcript: transcript); preconditionFailure("Invalid geometry accepted") } catch {}
         }

@@ -115,7 +115,13 @@ nonisolated enum CirclePlanner {
                 generating: ContextualGapReferences.self,
                 options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: MissingInformationPrompts.responseTokens))
             try Task.checkCancellation()
-            let candidate = response.content
+            var candidate = response.content
+            if let question = transcript.question, !candidate.subjectQuotes.isEmpty {
+                candidate.targets = question.targets
+                candidate.informationNeeds = [question.text]
+                let questionIDs = Set(question.targets.map(\.blockID))
+                candidate.alreadyCovered.removeAll { questionIDs.contains($0.blockID) }
+            }
             await observer?(.completed(id: "gap", summary: String(decoding: try encoder.encode(candidate), as: UTF8.self)))
             var checked = try await checkCandidate(candidate, transcript: transcript, model: model, observer: observer)
             var calls = 2 + checked.calls
@@ -198,8 +204,9 @@ nonisolated enum CirclePlanner {
         let bound = resolution.plan
         let subjects = try bound.subjects(in: transcript)
         let explicitOperation = bound.targets.count == 1 ? GapHeadingRequest.inspect(bound.targets[0].quote)?.operation : nil
+        let questionOperation: GapOperation? = transcript.question.map { GapHeadingRequest.isExplanationQuestion($0.text) ? .explain : .continueThought }
         let proposed = MissingInformationPlan(alreadyCovered: bound.alreadyCovered, targets: bound.targets,
-            informationNeeds: bound.informationNeeds, operation: explicitOperation ?? .continueThought, subjects: subjects,
+            informationNeeds: bound.informationNeeds, operation: explicitOperation ?? questionOperation ?? .continueThought, subjects: subjects,
             completionGoal: "supply \(bound.informationNeeds.joined(separator: ", ")) for \(subjects.map(\.quote).joined(separator: " and "))")
         do { result.gap = try ValidatedGapPlan.validate(proposed, in: transcript) }
         catch let error as GapPlanError {
@@ -256,7 +263,7 @@ nonisolated enum CirclePlanner {
         // A counterpart may be inferred only from text-grounded content-role pairs,
         // with one incomplete selected topic and a shared established pattern.
         let selectedBlocks = transcript.blocks.filter(\.selected)
-        if (2...4).contains(selectedBlocks.count) && subjects.contains(where: { $0.blockID.hasPrefix("S") }) {
+        if transcript.question == nil && (2...4).contains(selectedBlocks.count) && subjects.contains(where: { $0.blockID.hasPrefix("S") }) {
             let request = String(decoding: try encoder.encode(transcript.blocks), as: UTF8.self)
             let instructions = ContextualScopePrompts.roles
             let count = try await model.tokenCount(for: Instructions(instructions))
@@ -342,12 +349,15 @@ nonisolated enum CirclePlanner {
             }
         }
         result.plan.subjectQuotes = choice.subjects
-        if choice.subjects.count == 1, let subject = subjects.first(where: { $0.quote == choice.subjects[0] }), subject.blockID.hasPrefix("S") {
+        if transcript.question == nil, choice.subjects.count == 1, let subject = subjects.first(where: { $0.quote == choice.subjects[0] }), subject.blockID.hasPrefix("S") {
             result.plan.targets = [subject]
         }
         // Preserve the user's actual relation instead of broadening an inferred
         // label into an additional technical requirement.
-        if choice.subjects.count > 1 {
+        if let question = transcript.question {
+            result.plan.targets = question.targets
+            result.plan.informationNeeds = [question.text]
+        } else if choice.subjects.count > 1 {
             let selectedRequest = candidate.targets.map(\.quote).joined(separator: " ")
             if candidate.targets.count == 1, !selectedRequest.isEmpty, selectedRequest.count <= 120,
                !subjects.contains(where: { $0.quote == selectedRequest }) {

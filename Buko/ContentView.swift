@@ -19,6 +19,7 @@ struct ContentView: View {
     @AppStorage("testPPLLectureTitleMigrated") private var testPPLLectureTitleMigrated = false
     @State private var showsDevelopment = false
     @State private var showsHandwritingPreview = false
+    @State private var showsPersonalAlphabet = false
     @State private var lectureSourceNote: Note?
     @State private var canvasRevision = UUID()
     @State private var pagesVisible = false
@@ -138,6 +139,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showsHandwritingPreview) {
             HandwritingPreviewView(preparation: handwriting, noteID: selectedNote?.id)
+        }
+        .fullScreenCover(isPresented: $showsPersonalAlphabet) {
+            PersonalAlphabetView(preparation: handwriting)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
@@ -338,7 +342,15 @@ struct ContentView: View {
                         previewHandwriting: {
                             session.host?.circleIntent.cancel()
                             showsHandwritingPreview = true
-                        }, recreateTestNote: { lecture in
+                        }, writeAlphabet: {
+                            session.host?.circleIntent.cancel()
+                            showsPersonalAlphabet = true
+                        }, scanHandwriting: {
+                            session.host?.circleIntent.cancel()
+                            saveNow()
+                            refreshHandwriting()
+                            handwriting.rebuild()
+                        }, handwritingStatus: handwriting.status, recreateTestNote: { lecture in
                             recreateTestNote(lecture)
                             if settingsVisible { toggleSettings() }
                         }, restore: restore, restorePage: restorePage,

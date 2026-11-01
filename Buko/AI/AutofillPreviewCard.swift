@@ -14,6 +14,7 @@ struct AutofillPreviewCard: View {
     let state: CircleIntentState
     let detailed: Bool
     let maximumHeight: CGFloat
+    var dragTitle: ((CGSize?) -> Void)? = nil
     let sizeChanged: (CGSize) -> Void
     @State private var headerHeight: CGFloat = 44
     @State private var contentHeight: CGFloat = 0
@@ -96,6 +97,12 @@ struct AutofillPreviewCard: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(.rect)
+            .gesture(DragGesture(minimumDistance: 5, coordinateSpace: .named("autofillOverlay"))
+                .onChanged { dragTitle?($0.translation) }
+                .onEnded { _ in dragTitle?(nil) })
+            .accessibilityHint("Drag to move the preview")
             Spacer(minLength: 0)
             Button(action: state.decline) {
                 Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(.rect)

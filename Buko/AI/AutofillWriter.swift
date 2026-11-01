@@ -58,13 +58,21 @@ nonisolated struct GeneratedContextualAutofillDraft {
 
 // Scope explanation wording without changing the ordinary draft contract.
 @Generable
+nonisolated struct ExplanationAutofillLine {
+    @Guide(description: "Choose the approved P IDs supplying this sentence BEFORE writing it. Use only approved_lecture_passages. Other retrieved passages are visible only to check for conflicts; their IDs cannot be cited.", .maximumCount(4))
+    var sourceIDs: [String]
+    @Guide(description: "One concise answer sentence supported entirely by those approved sources. Address the requested explanatory relationship or a remaining requested part. Preserve qualifications. No heading, Markdown, source IDs or restatement of the question. Always under 400 characters.")
+    var text: String
+}
+
+@Generable
 nonisolated struct GeneratedExplanationAutofillDraft {
     @Guide(description: "Briefly identify the approved evidence that fills the requested need. For a why question, identify the source-supported explanatory relationship, not merely a restatement that the property holds. Preserve every requested part. A definition cannot substitute for a concrete example. Do not answer from the student's notes.")
     var assessment: String
     @Guide(description: "ready only when the approved evidence supplies the missing contribution; otherwise insufficientEvidence with no lines.")
     var status: AutofillDraftStatus
     @Guide(description: "Answer every requested part, with supporting source IDs. For why, write the explanatory relationship identified in the assessment rather than merely repeating the question's premise. Include both results when two are requested. No repetition of the selected question or unfinished clause. Use only the lines necessary for a complete answer and its qualifications.", .maximumCount(6))
-    var lines: [ContextualAutofillLine]
+    var lines: [ExplanationAutofillLine]
 }
 
 nonisolated struct AutofillDraftResult: Sendable {
@@ -396,6 +404,12 @@ enum AutofillWriter {
         if let goal = gap?.completionGoal {
             fields["completion_goal"] = goal
             fields["requested_subject"] = gap?.subjects?.map(\.quote).joined(separator: " ")
+        }
+        if gap?.completionGoal != nil, GapHeadingRequest.isExplanationQuestion(selected),
+           let passages = fields.removeValue(forKey: "lecture_passages") as? [[String: Any]],
+           let approved = fields["approved_source_ids"] as? [String] {
+            fields["approved_lecture_passages"] = passages.filter { approved.contains($0["id"] as? String ?? "") }
+            fields["other_retrieved_passages_for_conflict_review"] = passages.filter { !approved.contains($0["id"] as? String ?? "") }
         }
         if let answer = evidence.requestedContent,
            let index = search.hits.firstIndex(where: { $0.id == answer.passageID }) {

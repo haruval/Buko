@@ -65,12 +65,10 @@ actor HandwritingSampler {
                 try Task.checkCancellation()
                 let strokes = complete.filter { match.strokes.contains($0.id) }
                 guard Self.isIsolated(strokes: strokes, bounds: match.bounds, all: complete),
-                      let row = rows.first(where: { $0.bounds.contains(CGPoint(x: match.bounds.midX, y: match.bounds.midY)) }) else { continue }
+                      rows.contains(where: { $0.bounds.contains(CGPoint(x: match.bounds.midX, y: match.bounds.midY)) }) else { continue }
                 let isolated = await recognizer.recognizedText(strokeIDs: match.strokes) ?? ""
                 guard isolated.trimmingCharacters(in: .whitespacesAndNewlines) == query else { continue }
-                let style = AutofillTypography.style(row, neighbors: rows)
-                guard let sample = try? HandwritingSample(drawing: PKDrawing(strokes: strokes),
-                    referenceTop: style.top, referenceHeight: style.height) else { continue }
+                guard let sample = try? HandwritingSample.normalized(drawing: PKDrawing(strokes: strokes), text: query) else { continue }
                 result.samples[query] = sample
                 break
             }

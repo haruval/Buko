@@ -13,6 +13,7 @@ struct CircleIntentOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
     @State private var measuredHeight: CGFloat = 76
+    @State private var dragOrigin: CGPoint?
 
     var body: some View {
         GeometryReader { geometry in
@@ -30,7 +31,16 @@ struct CircleIntentOverlay: View {
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: state.insertion.layout != nil)
                         .allowsHitTesting(false)
                     if state.phase == .finished || state.processing {
-                        AutofillPreviewCard(state: state, detailed: detailedPreview, maximumHeight: maximumHeight) { size in
+                        AutofillPreviewCard(state: state, detailed: detailedPreview, maximumHeight: maximumHeight, dragTitle: { translation in
+                            if let translation {
+                                if dragOrigin == nil { dragOrigin = state.popupHitBounds?.origin ?? state.popupBounds.origin }
+                                guard let origin = dragOrigin else { return }
+                                var transaction = Transaction(); transaction.disablesAnimations = true
+                                withTransaction(transaction) {
+                                    state.movePopup(to: CGPoint(x: origin.x + translation.width, y: origin.y + translation.height), viewport: geometry.size)
+                                }
+                            } else { dragOrigin = nil }
+                        }) { size in
                             guard state.phase != .idle, measuredHeight != size.height else { return }
                             measuredHeight = size.height
                             // Place from the measured destination immediately. A content
@@ -55,10 +65,11 @@ struct CircleIntentOverlay: View {
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            .coordinateSpace(name: "autofillOverlay")
         }
         .ignoresSafeArea()
         .onChange(of: state.phase) { _, phase in
-            if phase == .idle { measuredHeight = 76 }
+            if phase == .idle { measuredHeight = 76; dragOrigin = nil }
         }
     }
 
@@ -135,8 +146,8 @@ private struct PopupPresentation: ViewModifier, Animatable {
         // the interpolated value keeps moving controls from leaking taps to ink.
         state.popupHitBounds = bounds
         return content.frame(width: bounds.width, height: bounds.height, alignment: .topLeading)
-            .clipShape(.rect(cornerRadius: 26))
-            .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.18)), in: .rect(cornerRadius: 26))
+            .clipShape(.rect(cornerRadius: CirclePopupPlacement.cornerRadius))
+            .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.18)), in: .rect(cornerRadius: CirclePopupPlacement.cornerRadius))
             .offset(x: bounds.minX, y: bounds.minY)
     }
 }
@@ -162,6 +173,12 @@ private struct GestureJellyShape: Shape {
     private func materialPath() -> Path {
         if let boundary, let closeAge {
             if let rectangle, let morphAge {
+                if reduceMotion || morphAge >= CircleJellyGeometry.morphDuration {
+                    let width = rectangle.radii[0] * 2
+                    let height = rectangle.radii[CircleJellyGeometry.sampleCount / 4] * 2
+                    let rect = CGRect(x: rectangle.center.x - width / 2, y: rectangle.center.y - height / 2, width: width, height: height)
+                    return Path(roundedRect: rect, cornerRadius: CirclePopupPlacement.cornerRadius / max(0.01, projection.a))
+                }
                 return Path(CircleJellyGeometry.smoothPath(CircleJellyGeometry.moldedContour(
                     from: boundary, to: rectangle, age: morphAge, reduceMotion: reduceMotion)))
             }

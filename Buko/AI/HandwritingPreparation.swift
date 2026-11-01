@@ -52,7 +52,7 @@ actor HandwritingCache {
         let url = directory?.appendingPathComponent(document.noteID.uuidString + ".json")
         if !ignoringCache, let url, let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= Self.byteLimit,
            let data = try? Data(contentsOf: url), let saved = try? JSONDecoder().decode(Envelope.self, from: data),
-           saved.version == 1, saved.revision == revision, Self.valid(saved.handwriting) {
+           saved.version == 2, saved.revision == revision, Self.valid(saved.handwriting) {
             try Task.checkCancellation()
             return saved.handwriting
         }
@@ -63,7 +63,7 @@ actor HandwritingCache {
             // Failure to save derived data never prevents writing or previewing.
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let data = try JSONEncoder().encode(Envelope(version: 1, revision: revision, handwriting: handwriting))
+                let data = try JSONEncoder().encode(Envelope(version: 2, revision: revision, handwriting: handwriting))
                 if data.count <= Self.byteLimit { try data.write(to: url, options: .atomic) }
             } catch { }
         }
@@ -137,6 +137,7 @@ nonisolated struct HandwritingInspectionSample: Sendable {
     private var resetRequested = false
     private let cache: HandwritingCache
     private let idleDelay: Duration
+    let alphabet: PersonalAlphabetStore
     private var notes: [Note] = []
     private var stamps: [Stamp] = []
     private var entries: [UUID: Entry] = [:]
@@ -144,14 +145,14 @@ nonisolated struct HandwritingInspectionSample: Sendable {
     private var generation = UUID()
     private var paused = false
 
-    init(cache: HandwritingCache = HandwritingCache(), idleDelay: Duration = .seconds(2)) {
-        self.cache = cache; self.idleDelay = idleDelay
+    init(cache: HandwritingCache = HandwritingCache(), idleDelay: Duration = .seconds(2), alphabet: PersonalAlphabetStore? = nil) {
+        self.cache = cache; self.idleDelay = idleDelay; self.alphabet = alphabet ?? PersonalAlphabetStore()
     }
 
     func update(notes all: [Note], preferredID: UUID?) {
         let active = all.filter { $0.deletedAt == nil }
         let preferred = active.first { $0.id == preferredID }
-        let next = (preferred.map { [$0] } ?? []) + active.filter { $0.id != preferredID }.prefix(preferred == nil ? 4 : 3)
+        let next = (preferred.map { [$0] } ?? []) + active.filter { $0.id != preferredID }
         let nextStamps = next.map(Stamp.init)
         guard stamps != nextStamps else { return }
         notes = next; stamps = nextStamps
@@ -190,6 +191,11 @@ nonisolated struct HandwritingInspectionSample: Sendable {
         restart()
     }
 
+    func saveAlphabet(_ drawing: PKDrawing, letter: String) throws {
+        try alphabet.save(drawing, for: letter)
+        status.revision += 1
+    }
+
     func inspection(preferredID: UUID?) -> [String: HandwritingInspectionSample] {
         var result: [String: HandwritingInspectionSample] = [:]
         let ids = preferredID.map { [$0] } ?? []
@@ -199,6 +205,9 @@ nonisolated struct HandwritingInspectionSample: Sendable {
             for (key, sample) in entry.handwriting.samples where result[key] == nil {
                 result[key] = HandwritingInspectionSample(sample: sample, source: note.title)
             }
+        }
+        for (key, sample) in alphabet.samples where result[key] == nil {
+            result[key] = HandwritingInspectionSample(sample: sample, source: "Your alphabet")
         }
         return result
     }
@@ -215,18 +224,28 @@ nonisolated struct HandwritingInspectionSample: Sendable {
             self.resetRequested = false
             guard !self.paused else { return }
             do {
-                try await Task.sleep(for: delay)
-                for (index, note) in self.notes.enumerated() {
+                if !self.status.isRebuilding { try await Task.sleep(for: delay) }
+                let pending = self.status.isRebuilding ? self.notes : Array(self.notes.prefix(4))
+                for (index, note) in pending.enumerated() {
                     try Task.checkCancellation()
                     guard token == self.generation, note.deletedAt == nil else { return }
                     let stamp = Stamp(note)
                     if self.entries[note.id]?.stamp == stamp { continue }
-                    self.status.message = "Preparing \(index + 1) of \(self.notes.count) · \(note.title)"
+                    self.status.message = "Preparing \(index + 1) of \(pending.count) · \(note.title)"
                     let document = AutofillDocument(note)
                     let handwriting = try await cache.prepared(for: document, ignoringCache: self.status.isRebuilding)
                     try Task.checkCancellation()
                     guard token == self.generation, note.deletedAt == nil, Stamp(note) == stamp else { return }
                     self.entries[note.id] = Entry(stamp: stamp, handwriting: handwriting)
+                    // Scanning every note persists each derivative, but keeps
+                    // only a bounded set of recent profiles resident on iPad.
+                    var residentBytes = 0
+                    for stamp in self.stamps {
+                        guard let entry = self.entries[stamp.id] else { continue }
+                        let bytes = entry.handwriting.samples.values.reduce(0) { $0 + $1.drawingData.count }
+                        if residentBytes + bytes > 24_000_000 { self.entries[stamp.id] = nil }
+                        else { residentBytes += bytes }
+                    }
                     self.status.revision += 1
                 }
                 self.status.message = self.notes.isEmpty ? "No active notes to sample" : "Ready · \(self.entries.count) notes prepared"
@@ -251,6 +270,7 @@ nonisolated struct HandwritingInspectionSample: Sendable {
                 result.targetBounds = entry.handwriting.targetBounds(proposal.insertionTarget, selection: proposal.selectionPolygon)
             }
         }
+        for key in keys where result.samples[key] == nil { result.samples[key] = alphabet.samples[key] }
         return result
     }
 }

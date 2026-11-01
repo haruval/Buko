@@ -3,6 +3,12 @@ import CoreGraphics
 
 /// Choose placement once, then project the page anchor with the source jelly.
 nonisolated enum CirclePopupPlacement {
+    static let cornerRadius: CGFloat = 26
+
+    static func clampedOrigin(_ origin: CGPoint, size: CGSize, viewport: CGSize) -> CGPoint {
+        CGPoint(x: min(max(8, viewport.width - size.width - 8), max(8, origin.x)),
+                y: min(max(60, viewport.height - size.height - 24), max(60, origin.y)))
+    }
     /// Keep the card readable at a fixed size while its origin follows the page.
     /// Never clamp during scrolling: the popup must leave the viewport with its source.
     static func projected(anchor: CGPoint, size: CGSize, projection: CGAffineTransform) -> CGRect {

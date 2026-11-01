@@ -102,10 +102,12 @@ struct GroundedContextualSelection {
 struct GroundedExplanationSelection {
     @Guide(description: "The contribution actually requested by the selected notes. Preserve every requested part; do not add requirements from a planning hint.")
     var requestedForm: String
-    @Guide(description: "Inspect all passages, then copy a complete supporting sentence or contiguous excerpt containing the candidate answer or explanation. Keep the source capitalization, including the first word. An explanation can use a stated relationship or order effect. Copy source words exactly from ONE passage, at most 600 characters. Do not generate an answer here. Empty if no candidate evidence exists.")
-    var answerExcerpt: String
-    @Guide(description: "Original P ID of the passage containing the whole quoted excerpt. Overlapping passages can start similarly: use the one containing all quoted words, not the first topic match. Empty if no candidate evidence exists.")
+    @Guide(description: "Inspect all passages and choose the original P ID containing a complete explanation of every requested part. A later concrete comparison may cover more of the question than an earlier general description. Choose ONE passage before copying it. Empty if no candidate evidence exists.")
     var answerSourceID: String
+    @Guide(description: "The numbered first sentence of the explanatory span in answerSourceID. Choose a contiguous span supporting ALL requested parts, including necessary qualifications. The app copies the original source text. Zero if no candidate exists.")
+    var firstSentence: Int
+    @Guide(description: "The numbered last sentence of that SAME passage's explanatory span, inclusive. May equal firstSentence. Never combine sentence numbers from different passages. Keep the complete span within 600 characters. Zero if no candidate exists.")
+    var lastSentence: Int
     @Guide(description: "In at most 70 words, connect the quoted evidence to the requested answer. An explanation can use a stated relationship, structural property or order effect; it need not be a numerical demonstration. Check every requested part, subject and input. Another exercise's result cannot answer different inputs. Identify missing support, applicable corrections or conflicting claims. A definition alone cannot supply an example, nor correlation a causal effect.")
     var assessment: String
     @Guide(description: "True only if the evidence supplies the requested content for the exact subject and inputs. A topic mention, another exercise's result, an unsupplied example or an unknown empirical fact is insufficient.")
@@ -115,16 +117,35 @@ struct GroundedExplanationSelection {
     @Guide(description: "Original P IDs supplying the requested content and necessary qualifications. Empty for missingInformation or unresolvedConflict.", .maximumCount(4))
     var sourceIDs: [String]
 
-    var selection: GroundedTaskSelection {
+    func selection(passages: [(id: String, text: String)]) -> GroundedTaskSelection {
         GroundedTaskSelection(requestedForm: requestedForm, assessment: assessment,
             hasRequestedContent: hasRequestedContent, answerSourceID: answerSourceID,
-            answerExcerpt: answerExcerpt, status: status, sourceIDs: sourceIDs)
+            answerExcerpt: passages.first(where: { $0.id == answerSourceID }).flatMap {
+                LectureComposer.sentenceSpan(in: $0.text, first: firstSentence, last: lastSentence)
+            } ?? "", status: status, sourceIDs: sourceIDs)
     }
 }
 
 /// Evidence selection only. An exact citation never licenses unverified generated prose.
 /// No canvas, persistence, tools, or general-knowledge fallback are available here.
 enum LectureComposer {
+    /// Sentence IDs refer to exact ranges in one original passage. Invalid,
+    /// reversed or oversized spans fail closed; generated prose is never repaired.
+    static func sentenceRanges(in text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: .bySentences) { _, range, _, _ in
+            ranges.append(range)
+        }
+        return ranges
+    }
+
+    static func sentenceSpan(in text: String, first: Int, last: Int) -> String? {
+        let ranges = sentenceRanges(in: text)
+        guard first > 0, last >= first, last <= ranges.count else { return nil }
+        let span = String(text[ranges[first - 1].lowerBound..<ranges[last - 1].upperBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return !span.isEmpty && span.count <= 600 ? span : nil
+    }
     static let scopeInstructions = """
     Decide whether this ONE lecture passage concerns any part of the exact target
     in selected_handwriting. The target may be an unfinished heading; completed
@@ -441,7 +462,7 @@ enum LectureComposer {
             }
 
             let scopedRequest = try prompt(selected: selected, context: context, intent: intent, action: action, gap: search.gapPlan,
-                                           hits: applicable, expanded: hasWithdrawal)
+                                           hits: applicable, expanded: hasWithdrawal, numberedSentences: explanatoryQuestion)
             let scopedInputTokens = try await model.tokenCount(for: Prompt(scopedRequest))
             try Task.checkCancellation()
             guard instructionTokens + schemaTokens + scopedInputTokens + outputBudget + 128 <= model.contextSize else {
@@ -457,7 +478,7 @@ enum LectureComposer {
                 if explanatoryQuestion {
                     let result = try await session.respond(to: scopedRequest, generating: GroundedExplanationSelection.self,
                         options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
-                    task = result.content.selection
+                    task = result.content.selection(passages: applicable.map { (id: $0.id, text: $0.hit.passage.text) })
                 } else if contextual {
                     let result = try await session.respond(to: scopedRequest, generating: GroundedContextualSelection.self,
                         options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
@@ -561,7 +582,8 @@ enum LectureComposer {
     }
 
     private static func prompt(selected: String, context: String, intent: String, action: String, gap: ValidatedGapPlan?,
-                               hits: [(id: String, hit: LectureHit)], expanded: Bool = false) throws -> String {
+                               hits: [(id: String, hit: LectureHit)], expanded: Bool = false,
+                               numberedSentences: Bool = false) throws -> String {
         var target: [String: Any] = [
             "selected_handwriting": selected, "nearby_handwriting_already_written": context,
             "intent": intent, "action": action
@@ -579,10 +601,16 @@ enum LectureComposer {
             target["requested_subject"] = gap.retrievalText
             target["requested_answer_form"] = gap.value.informationNeeds.joined(separator: ", ")
         }
-        let passages = hits.map { [
-            "id": $0.id, "title": $0.hit.passage.title,
-            "physical_page": $0.hit.passage.page, "text": $0.hit.passage.text
-        ] as [String: Any] }
+        let passages: [[String: Any]] = hits.map { item in
+            var passage: [String: Any] = ["id": item.id, "title": item.hit.passage.title,
+                "physical_page": item.hit.passage.page]
+            if numberedSentences {
+                passage["sentences"] = sentenceRanges(in: item.hit.passage.text).enumerated().map {
+                    ["number": $0.offset + 1, "text": String(item.hit.passage.text[$0.element])] as [String: Any]
+                }
+            } else { passage["text"] = item.hit.passage.text }
+            return passage
+        }
         // Answerability uses compact JSON. Scope and evidence reviews present the
         // target before the passages so their source relationships stay explicit.
         if !expanded {

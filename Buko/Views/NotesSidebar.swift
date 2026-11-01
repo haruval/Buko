@@ -115,7 +115,7 @@ struct NotesSidebar: View {
     }
 
     private func noteCard(_ note: Note) -> some View {
-        LibraryCard(selected: note.id == selectedID, action: { select(note) }) {
+        LibraryCard(action: { select(note) }) {
             Text(note.title).font(.subheadline.weight(.semibold)).lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
             LibraryThumbnail(note: note)
@@ -139,7 +139,7 @@ struct NotesSidebar: View {
 
     private func folderCard(_ folder: NoteFolder) -> some View {
         let children = notes.filter { $0.folderID == folder.id }
-        return LibraryCard(selected: false, action: {
+        return LibraryCard(action: {
             withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)) {
                 folderTitle = folder.title; openFolderID = folder.id
             }
@@ -182,7 +182,6 @@ private enum LibraryEntry: Identifiable {
 }
 
 private struct LibraryCard<Content: View>: View {
-    let selected: Bool
     let action: () -> Void
     @ViewBuilder let content: () -> Content
     var body: some View {
@@ -191,9 +190,19 @@ private struct LibraryCard<Content: View>: View {
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(.rect(cornerRadius: 28))
         }
-        .buttonStyle(.plain)
-        .bukoGlass(cornerRadius: 28, interactive: true)
-        .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2) }
+        .buttonStyle(LibraryPressStyle())
+        .contentShape(.contextMenuPreview, .rect(cornerRadius: 28))
+        .contentShape(.dragPreview, .rect(cornerRadius: 28))
+    }
+}
+
+private struct LibraryPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .bukoGlass(cornerRadius: 28)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 1.035 : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
     }
 }
 

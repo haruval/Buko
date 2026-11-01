@@ -20,6 +20,8 @@ final class CanvasSession {
 
     func navigate(to index: Int) { host?.navigate(to: index) }
 
+    func togglePencilEraser() { tool = tool == .eraser ? .pen : .eraser }
+
     func undo() {
         canvas?.undoManager?.undo()
         refreshUndoState()

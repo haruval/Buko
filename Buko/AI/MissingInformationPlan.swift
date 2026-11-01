@@ -18,6 +18,25 @@ nonisolated struct GapTranscript: Codable, Sendable {
     let context: String
     let blocks: [Block]
 
+    /// A short explicit question may wrap across physical OCR rows. Preserve
+    /// its complete wording while keeping each target bound to an original row.
+    var question: (text: String, targets: [GapTextReference])? {
+        let selectedBlocks = blocks.filter(\.selected)
+        guard selected.filter({ $0 == "?" }).count == 1,
+              selected.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?") else { return nil }
+        for index in selectedBlocks.indices {
+            let suffix = selectedBlocks[index...]
+            guard suffix.count <= 3,
+                  suffix.allSatisfy({ $0.text.count <= 120 }),
+                  selectedBlocks[index].text.range(of: #"^\s*(?:why|how|what|when|where|which|who|can|does|do|is|are)\b"#,
+                    options: [.regularExpression, .caseInsensitive]) != nil else { continue }
+            let text = suffix.map(\.text).joined(separator: " ").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            guard text.count <= 120 else { return nil }
+            return (text, suffix.map { .init(blockID: $0.id, quote: $0.text) })
+        }
+        return nil
+    }
+
     init(selected: String, context: String) {
         self.selected = String(selected.prefix(IntentPrompts.selectedCharacterLimit))
         self.context = String(context.prefix(IntentPrompts.contextCharacterLimit))
@@ -81,7 +100,8 @@ nonisolated struct GapHeadingRequest {
 
     /// Prompt/schema scoping only, never a verdict that sources contain an answer.
     static func isExplanationQuestion(_ selected: String) -> Bool {
-        selected.range(of: #"^\s*why\b[^?]*\?\s*$"#,
+        let request = GapTranscript(selected: selected, context: "").question?.text ?? selected
+        return request.range(of: #"^\s*why\b[^?]*\?\s*$"#,
             options: [.regularExpression, .caseInsensitive]) != nil
     }
 
@@ -365,7 +385,7 @@ nonisolated struct RejectedGapPlan: LocalizedError {
 }
 
 nonisolated enum MissingInformationPrompts {
-    static let version = 13
+    static let version = 14
     static let responseTokens = 650
     static let instructions = """
     Identify the missing information in these circled notes. Return a retrieval
@@ -755,7 +775,9 @@ nonisolated struct CollectiveReference {
     func isGrounded(in selected: String) -> Bool {
         let cue = selectedCue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cue.isEmpty, cue.count <= 60, (1...4).contains(cue.split(whereSeparator: \.isWhitespace).count),
-              let range = selected.range(of: cue, options: .caseInsensitive) else { return false }
+              let range = selected.range(of: cue.split(whereSeparator: \.isWhitespace)
+                .map { NSRegularExpression.escapedPattern(for: String($0)) }.joined(separator: #"\s+"#),
+                options: [.regularExpression, .caseInsensitive]) else { return false }
         func word(_ character: Character) -> Bool { character.isLetter || character.isNumber }
         if range.lowerBound > selected.startIndex, let first = cue.first, word(first),
            word(selected[selected.index(before: range.lowerBound)]) { return false }

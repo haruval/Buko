@@ -55,6 +55,7 @@ final class CircleIntentState {
     var elapsed: Double = 0
     var recognitionMethod = ""
     private var popupAnchor: CGPoint?
+    private var popupWasMoved = false
     var popupBounds = CGRect.zero
     @ObservationIgnored var popupHitBounds: CGRect?
     private var requestID = UUID()
@@ -109,6 +110,10 @@ final class CircleIntentState {
     }
 
     func positionPopup(size: CGSize, viewport: CGSize) {
+        if popupWasMoved {
+            let origin = CirclePopupPlacement.clampedOrigin(popupBounds.origin, size: size, viewport: viewport)
+            popupAnchor = origin.applying(projection.inverted())
+        }
         if popupAnchor == nil {
             var occupied = selectionBounds
             if let preview = insertion.layout {
@@ -123,7 +128,15 @@ final class CircleIntentState {
         }
     }
 
-    func resetPopupAnchor() { popupAnchor = nil }
+    func resetPopupAnchor() { if !popupWasMoved { popupAnchor = nil } }
+
+    func movePopup(to origin: CGPoint, viewport: CGSize) {
+        let clamped = CirclePopupPlacement.clampedOrigin(origin, size: popupBounds.size, viewport: viewport)
+        popupWasMoved = true
+        popupAnchor = clamped.applying(projection.inverted())
+        popupBounds.origin = clamped
+        popupHitBounds = popupBounds
+    }
 
     func cancel() {
         cancel(animatedReturn: false)
@@ -148,6 +161,7 @@ final class CircleIntentState {
         action = ""; proposal = nil; draftDetail = ""; draftingSeconds = 0
         intentSeconds = 0; proposalSeconds = 0; recognitionSeconds = 0; elapsed = 0
         phase = .idle; textBounds = []; popupBounds = .zero; popupHitBounds = nil; popupAnchor = nil
+        popupWasMoved = false
         droplet = nil; tailAnchor = nil; paintedPath = CGMutablePath(); closedBoundary = nil; fittedRectangle = nil
         release = nil; tracedPoints = []; projection = .identity
         closedAt = nil; morphBegan = nil; motionActive = false

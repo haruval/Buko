@@ -16,10 +16,10 @@ struct HandwritingPreviewView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(preparation.status.message).font(.subheadline)
                             .accessibilityIdentifier("handwritingPreparationStatus")
-                        Text("Samples from this note and recent notes. Missing letters use Buko’s handwriting font.")
+                        Text("Notes take priority, then your saved alphabet. Remaining letters use Buko’s handwriting font. Scan notes now refreshes samples from every active note.")
                             .font(.caption).foregroundStyle(.secondary)
                         Button(action: preparation.rebuild) {
-                            Label(preparation.status.isRebuilding ? "Rebuilding cache…" : "Rebuild cache", systemImage: "arrow.clockwise")
+                            Label(preparation.status.isRebuilding ? "Scanning notes…" : "Scan notes now", systemImage: "arrow.clockwise")
                                 .frame(minHeight: 36)
                         }.buttonStyle(.glass).disabled(preparation.status.isRebuilding)
                             .accessibilityIdentifier("rebuildHandwritingCache")

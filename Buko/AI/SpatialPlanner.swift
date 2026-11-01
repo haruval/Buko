@@ -220,6 +220,16 @@ nonisolated enum SpatialPlanner {
             guard layout.groups.indices.contains(index) else { return .init(topic:region.topic,supplied:region.supplied) }
             let blocks = layout.groups[index].compactMap { id in transcript.blocks.first { $0.id == id } }
             let supplied = region.supplied.flatMap { role -> [SuppliedPatternRole] in
+                // Restore an omitted literal role label only when it exactly
+                // names this role and the quoted value is the entire suffix.
+                // The final coverage/ownership checks still see original text.
+                let labeled = blocks.filter { block in
+                    guard let colon = block.text.firstIndex(of: ":") else { return false }
+                    let label = block.text[..<colon].trimmingCharacters(in: .whitespaces)
+                    let value = block.text[block.text.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                    return label.localizedCaseInsensitiveCompare(role.role) == .orderedSame && value == role.quote
+                }
+                if labeled.count == 1 { return [.init(role: role.role, quote: labeled[0].text)] }
                 if blocks.contains(where: { $0.text.contains(role.quote) }) { return [role] }
                 // A model may quote an exactly wrapped sentence as one string.
                 // Expand only one exact, consecutive same-region line sequence;
@@ -277,7 +287,7 @@ nonisolated enum SpatialPlanner {
         try Task.checkCancellation()
         try CirclePlanner.checkInput(selected: selected, context: context)
         let transcript = GapTranscript(selected: selected, context: context)
-        if try CirclePlanner.explicitPlan(in: transcript, mode: .structuredGap) != nil {
+        if try CirclePlanner.explicitPlan(in: transcript, mode: .structuredGap) != nil || transcript.question != nil {
             // Preserve zero-call binding diagnostics and cancellation boundaries.
             return try await CirclePlanner.infer(selected: selected, context: context, model: model, observer: observer)
         }
@@ -317,6 +327,18 @@ nonisolated enum SpatialPlanner {
         }
         var value = try await generate(request, id: "spatialInventory")
         var passes = 1
+        // A fully anchored role inventory is stronger than a contradictory
+        // route label. It still must cover every selected character and belong
+        // to the measured regions before it can establish a missing counterpart.
+        if value.kind == .ordinaryRequest {
+            let anchored = anchoredInventory(value, layout: layout, transcript: transcript)
+            let candidate = ContextualGapReferences(alreadyCovered: [], targets: [], informationNeeds: [], subjectQuotes: value.regions.map(\.topic))
+            if value.regions.map(\.regionID) == layout.groups.indices.map({ "G\($0 + 1)" }),
+               layout.allows(anchored, transcript: transcript),
+               ContextualRoleMap.focus(anchored.map, candidate: candidate, in: transcript) != nil {
+                value.kind = .parallelPattern
+            }
+        }
         // Choose the ordinary route once. A failed spatial inventory cannot
         // switch planners during repair and bypass its ownership checks.
         if value.kind == .ordinaryRequest {
@@ -458,6 +480,10 @@ nonisolated enum SpatialPlanner {
             await observer?(.completed(id:"spatialRequest",summary:String(decoding:try encoder.encode(semanticRequest),as:UTF8.self)))
             try Task.checkCancellation()
             cue = anchoredCue(.init(blockID:semanticRequest.blockID,quote:semanticRequest.phrase),in:transcript)
+            if let recovered = cue, !recovered.quote.isEmpty,
+               focus.alreadyCovered.contains(where: { $0.blockID == recovered.blockID && $0.quote.localizedCaseInsensitiveContains(recovered.quote) }) {
+                cue = nil
+            }
             if cue == nil {
                 // This is an optional specificity improvement over an already
                 // validated inventory. Never let an invented/misanchored cue

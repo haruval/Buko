@@ -18,7 +18,7 @@ nonisolated enum AutofillLayout {
         let letterHeight: CGFloat
         let sampledGlyphCount: Int
         let fallbackGlyphCount: Int
-        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v1" : "note-samples-with-fallback-v1" }
+        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v2" : "note-samples-with-fallback-v2" }
         var drawing: PKDrawing { PKDrawing(strokes: existing.strokes + inserted.strokes) }
         var bounds: CGRect { lines.reduce(.null) { $0.union($1.frame) } }
     }
@@ -80,7 +80,12 @@ nonisolated enum AutofillLayout {
             ?? min(selectedBounds.minX, PageGeometry.pageOriginX + PageGeometry.pageWidth * 0.35))
         let right = PageGeometry.pageOriginX + PageGeometry.pageWidth - margin
         var decoded: [String: PKDrawing] = [:]
-        for (key, value) in samples { decoded[key] = try PKDrawing(data: value.drawingData) }
+        for (key, value) in samples {
+            let source = try PKDrawing(data: value.drawingData)
+            if let normalized = try? HandwritingSample.normalized(drawing: source, text: key) {
+                decoded[key] = try PKDrawing(data: normalized.drawingData)
+            }
+        }
         let personal = Set(decoded.keys)
         var missing: [String] = []
         for key in Set(text.filter { !$0.isWhitespace }.map(String.init)).sorted() where decoded[key] == nil {

@@ -1,15 +1,14 @@
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
 
-/// A short arbitration window distinguishes a curving two-finger translation
-/// from a straight pan or changing finger separation (pinch). Pencil never enters.
+/// Two fingers translate to select; one finger scrolls. Only the initial motion
+/// arbitrates with pinch. A loop is validated on release, not while starting it.
 final class CircleGestureRecognizer: UIGestureRecognizer {
     var singleFinger = false
     var preview: (([CGPoint]) -> Void)?
     private(set) var points: [CGPoint] = []
     private var fingers: [UITouch] = []
     private var initialSeparation: CGFloat = 0
-    private var travel: CGFloat = 0
     private var lifting = false
     private var releasedFingers: Set<UITouch> = []
 
@@ -34,26 +33,19 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
             if let start = points.first, CircleGeometry.distance(start, center) < 8 { return }
             state = .failed; return
         }
-        if !singleFinger, abs(separation / max(1, initialSeparation) - 1) > 0.16 {
-            state = state == .possible ? .failed : .cancelled; return
-        }
         let point = center
+        if !singleFinger, state == .possible, let start = points.first {
+            let translation = CircleGeometry.distance(start, point)
+            let spread = abs(separation - initialSeparation)
+            if Self.isPinch(translation: translation, spread: spread, separation: initialSeparation) {
+                state = .failed; return
+            }
+            if translation >= 12 && translation > spread * 1.25 { state = .began }
+        }
         guard let previous = points.last, CircleGeometry.distance(previous, point) >= 2 else { return }
-        travel += CircleGeometry.distance(previous, point)
         points.append(point)
         if points.count > 700 { state = .cancelled; return }
-        if state == .possible {
-            // Detect curvature without requiring a completed circle. Until this
-            // decision UIScrollView retains the touches through failure dependencies.
-            if travel >= 26, points.count >= 5 {
-                let a = points[0], b = points[points.count / 2], c = point
-                let u = CGPoint(x: b.x - a.x, y: b.y - a.y)
-                let v = CGPoint(x: c.x - b.x, y: c.y - b.y)
-                let turn = abs(atan2(u.x * v.y - u.y * v.x, u.x * v.x + u.y * v.y))
-                if turn > 0.20 { state = .began }
-                else if travel > 140 { state = .failed; return }
-            }
-        } else { state = .changed }
+        if state == .began || state == .changed { state = .changed }
         if state == .began || state == .changed {
             preview?(points)
         }
@@ -80,9 +72,13 @@ final class CircleGestureRecognizer: UIGestureRecognizer {
 
     private func reject() { state = state == .possible ? .failed : .cancelled }
 
+    static func isPinch(translation: CGFloat, spread: CGFloat, separation: CGFloat) -> Bool {
+        spread >= max(8, separation * 0.06) && spread > translation * 0.8
+    }
+
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .cancelled }
     override func reset() {
-        fingers = []; points = []; travel = 0; initialSeparation = 0; lifting = false; releasedFingers = []
+        fingers = []; points = []; initialSeparation = 0; lifting = false; releasedFingers = []
     }
     private var center: CGPoint {
         let positions = fingers.map { $0.location(in: view) }

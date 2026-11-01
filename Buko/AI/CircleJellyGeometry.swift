@@ -175,7 +175,7 @@ nonisolated enum CircleJellyGeometry {
 
     static func roundedRectangle(_ rect: CGRect) -> Boundary {
         let half = CGSize(width: rect.width / 2, height: rect.height / 2)
-        let corner = min(14, min(half.width, half.height))
+        let corner = min(26, min(half.width, half.height))
         let radii = (0..<sampleCount).map { i -> CGFloat in
             let theta = angle(at: i)
             var low: CGFloat = 0, high = hypot(half.width, half.height)
