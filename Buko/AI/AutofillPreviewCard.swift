@@ -50,6 +50,7 @@ struct AutofillPreviewCard: View {
                             Text(issue).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillInsertionIssue")
                         }
                         if state.proposal != nil { acceptance }
+                        if state.canClarify { clarificationInput }
                     }
                     .fixedSize(horizontal: false, vertical: true)
                     .onGeometryChange(for: CGFloat.self) { ceil($0.size.height) } action: { footerHeight = $0 }
@@ -76,7 +77,7 @@ struct AutofillPreviewCard: View {
         if let proposal = state.proposal { return !proposal.usedCitations.isEmpty || proposal.content.origin == .localArithmetic }
         return !state.processing
     }
-    private var hasFooter: Bool { state.proposal != nil || sourceError != nil || state.insertion.issue != nil }
+    private var hasFooter: Bool { state.proposal != nil || state.canClarify || sourceError != nil || state.insertion.issue != nil }
     private var fixedHeight: CGFloat {
         32 + headerHeight + (hasContent ? 12 : 0) + (hasFooter ? footerHeight + 12 : 0)
     }
@@ -123,7 +124,6 @@ struct AutofillPreviewCard: View {
         if detailed {
             VStack(alignment: .leading, spacing: 18) {
                 DetailedAutofillPreview(state: state)
-                if state.canClarify { clarificationInput }
                 if !state.citations.isEmpty { sources(state.citations, title: "Approved lecture evidence") }
                 if !state.retrievedHits.isEmpty {
                     DisclosureGroup("Retrieved lecture passages (\(state.retrievedHits.count))") {
@@ -144,23 +144,31 @@ struct AutofillPreviewCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(finishedMessage).font(.subheadline).textSelection(.enabled)
                     .accessibilityIdentifier("autofillUnavailable")
-                if state.canClarify { clarificationInput }
             }
         }
     }
 
     private var clarificationInput: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Type the topic or what you’d like to add", text: $clarificationReply, axis: .vertical)
-                .lineLimit(1...4).textFieldStyle(.roundedBorder)
-                .focused($clarificationFocused).submitLabel(.go)
-                .accessibilityIdentifier("autofillClarificationInput")
-                .onSubmit(submitClarification)
-            if let issue = state.clarificationIssue { Text(issue).font(.caption).foregroundStyle(.red) }
-            Button("Try autofill", systemImage: "arrow.up") { submitClarification() }
-                .buttonStyle(.glassProminent)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("A little more detail…", text: $clarificationReply, axis: .vertical)
+                    .lineLimit(1...4).textFieldStyle(.plain)
+                    .padding(.leading, 16).padding(.vertical, 12)
+                    .focused($clarificationFocused).submitLabel(.send)
+                    .accessibilityIdentifier("autofillClarificationInput")
+                    .onSubmit(submitClarification)
+                Button(action: submitClarification) {
+                    Image(systemName: "arrow.up").font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.glassProminent).buttonBorderShape(.circle).tint(.blue)
+                .accessibilityLabel("Send clarification")
                 .disabled(clarificationReply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || clarificationReply.count > 500)
                 .accessibilityIdentifier("submitAutofillClarification")
+                .padding(4)
+            }
+            .glassEffect(.clear.interactive(), in: .capsule)
+            if let issue = state.clarificationIssue { Text(issue).font(.caption).foregroundStyle(.red) }
             if clarificationReply.count > 500 { Text("Use 500 characters or fewer.").font(.caption).foregroundStyle(.secondary) }
         }
     }
@@ -264,7 +272,7 @@ struct AutofillPreviewCard: View {
                 }
             } label: {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("\(prefix)\(passage.title) · p. \(passage.page)", systemImage: "doc.text")
+                    Label("\(prefix)\(passage.title) – p. \(passage.page)", systemImage: "doc.text")
                         .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     if let noteID = state.noteID {

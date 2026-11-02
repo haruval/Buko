@@ -17,6 +17,7 @@ struct NotesSidebar: View {
     let notes: [Note]
     let folders: [NoteFolder]
     let selectedID: UUID?
+    var canCollapse = true
     let select: (Note) -> Void
     let create: (UUID?) -> Void
     let hide: () -> Void
@@ -25,6 +26,7 @@ struct NotesSidebar: View {
     let group: (Note, Note) -> Bool
     let move: (Note, NoteFolder?) -> Bool
     let renameFolder: (NoteFolder, String) -> Void
+    var openBeside: ((Note) -> Void)? = nil
     let ungroup: (NoteFolder) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var openFolderID: UUID?
@@ -48,8 +50,10 @@ struct NotesSidebar: View {
                 Text("buko")
                     .font(.system(size: 30, weight: .semibold, design: .rounded)).tracking(-1.5)
                 Spacer(minLength: 0)
-                ShelfButton(title: "Hide notes", symbol: "sidebar.left", action: hide)
-                    .accessibilityIdentifier("hideNotes")
+                if canCollapse {
+                    ShelfButton(title: "Hide notes", symbol: "sidebar.left", action: hide)
+                        .accessibilityIdentifier("hideNotes")
+                }
             }
             libraryContents
         }
@@ -126,6 +130,7 @@ struct NotesSidebar: View {
         .draggable(NoteDragReference(id: note.id))
         .modifier(NoteDropTarget { refs in receive(refs) { group($0, note) } })
         .contextMenu {
+            if let openBeside { Button("Open beside current note", systemImage: "rectangle.split.2x1") { openBeside(note) } }
             Button("Rename", systemImage: "pencil") { rename(note) }
             Menu("Move to", systemImage: "folder") {
                 if note.folderID != nil { Button("Notes") { _ = move(note, nil) } }

@@ -4,56 +4,61 @@ import PDFKit
 struct LecturePDFView: View {
     let destination: LecturePDFDestination
     @Environment(\.dismiss) private var dismiss
-    @State private var currentPage = 1
-    @State private var pageCount = 0
-    @State private var loadError = false
-
     var body: some View {
-        GeometryReader { geometry in
-            card
-                .background(.background)
-                .clipShape(.rect(cornerRadius: 28))
-                .padding(.horizontal, min(24, geometry.size.width * 0.025))
-                .padding(.vertical, 12)
-        }
-        .presentationBackground(.black.opacity(0.32))
-        .accessibilityIdentifier("lecturePDFPreview")
-    }
-
-    private var card: some View {
         NavigationStack {
-            PDFPageView(destination: destination, currentPage: $currentPage, pageCount: $pageCount, loadError: $loadError)
-                .accessibilityIdentifier("lecturePDFContent")
-                .overlay {
-                    if loadError { ContentUnavailableView("Couldn’t open this PDF", systemImage: "doc.questionmark", description: Text("Close this preview and try attaching the source again.")) }
-                }
+            LecturePDFCard(destination: destination)
+                .padding(16)
+                .background(Color("CanvasBackground"))
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(.visible, for: .navigationBar)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .cancellationAction) {
                         Button("Close PDF preview", systemImage: "xmark") { dismiss() }
-                            .labelStyle(.iconOnly).buttonBorderShape(.circle)
-                            .accessibilityLabel("Close PDF preview").accessibilityIdentifier("closeLecturePDF")
-                    }
-                    ToolbarItem(placement: .principal) {
-                        VStack(spacing: 3) {
-                            Text(destination.title.isEmpty ? "Lecture PDF" : destination.title).font(.headline).lineLimit(1)
-                            if pageCount > 0 { Text("Page \(currentPage) of \(pageCount)").font(.caption).foregroundStyle(.secondary) }
-                        }.accessibilityIdentifier("lecturePDFTitle")
+                            .accessibilityIdentifier("closeLecturePDF")
                     }
                 }
         }
     }
 }
 
+struct LecturePDFCard: View {
+    let destination: LecturePDFDestination
+    var isVisible = true
+    @State private var currentPage = 1
+    @State private var pageCount = 0
+    @State private var loadError = false
+    var body: some View {
+        GlassEffectContainer(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label(destination.title.isEmpty ? "PDF" : destination.title, systemImage: "doc.text")
+                        .font(.headline).lineLimit(2)
+                    Spacer()
+                    if pageCount > 0 { Text("\(currentPage) / \(pageCount)").font(.caption).monospacedDigit().foregroundStyle(.secondary) }
+                }.padding(.horizontal, 8).accessibilityIdentifier("lecturePDFTitle")
+                PDFPageView(destination: destination, isVisible: isVisible, currentPage: $currentPage, pageCount: $pageCount, loadError: $loadError)
+                    .clipShape(.rect(cornerRadius: 20))
+                    .accessibilityIdentifier("lecturePDFContent")
+                    .overlay {
+                        if loadError { ContentUnavailableView("Couldn’t open this PDF", systemImage: "doc.questionmark", description: Text("Try attaching the source again.")) }
+                    }
+            }
+            .padding(14).bukoGlass(cornerRadius: 32)
+        }
+        .id(destination.id)
+    }
+}
+
 private struct PDFPageView: UIViewRepresentable {
     let destination: LecturePDFDestination
+    let isVisible: Bool
     @Binding var currentPage: Int
     @Binding var pageCount: Int
     @Binding var loadError: Bool
 
     func makeUIView(context: Context) -> SourcePDFView {
         let view = SourcePDFView()
+        view.isHidden = !isVisible
+        view.accessibilityElementsHidden = !isVisible
         view.backgroundColor = .secondarySystemBackground
         view.autoScales = true; view.displayMode = .singlePageContinuous; view.displayDirection = .vertical
         view.document = PDFDocument(url: destination.url)
@@ -80,7 +85,10 @@ private struct PDFPageView: UIViewRepresentable {
         }
         return view
     }
-    func updateUIView(_ view: SourcePDFView, context: Context) { }
+    func updateUIView(_ view: SourcePDFView, context: Context) {
+        view.isHidden = !isVisible
+        view.accessibilityElementsHidden = !isVisible
+    }
     func makeCoordinator() -> Coordinator { Coordinator(currentPage: $currentPage, pageCount: $pageCount) }
     static func dismantleUIView(_ view: SourcePDFView, coordinator: Coordinator) { NotificationCenter.default.removeObserver(coordinator) }
 

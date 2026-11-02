@@ -13,6 +13,9 @@ struct LecturePDFDestination: Identifiable {
 struct LectureSourcesView: View {
     let noteID: UUID
     let noteTitle: String
+    var close: (() -> Void)? = nil
+    var dragging: (Bool) -> Void = { _ in }
+    var split: ((SourceDragReference) -> Void)? = nil
     var library: LectureLibrary = .shared
     @Environment(\.dismiss) private var dismiss
     @State private var documents: [LectureDocument] = []
@@ -24,69 +27,54 @@ struct LectureSourcesView: View {
     @State private var removing: LectureDocument?
     @State private var preview: LecturePDFDestination?
 
-    private var matchingSample: SampleLecture? {
-        SampleLecture.allCases.first { UserDefaults.standard.string(forKey: $0.storageKey) == noteID.uuidString }
-    }
-
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Text("Attach lecture PDFs to **\(noteTitle)**. Autofill uses these sources and shows the exact passages behind each answer.")
-                        .font(.subheadline)
-                    Button { importing = true } label: { Label("Import lecture PDF", systemImage: "square.and.arrow.down") }
-                        .accessibilityIdentifier("importLecturePDF")
-                        .disabled(busy)
-                    if let sample = matchingSample {
-                        Button { importSample(sample) } label: { Label("Add matching sample PDF", systemImage: "doc.badge.plus") }
-                            .accessibilityIdentifier("importMatchingLecture")
-                            .disabled(busy)
-                    }
-                    Menu {
-                        ForEach(SampleLecture.allCases) { sample in
-                            Button(sample.title.replacingOccurrences(of: "Test ", with: "")) { importSample(sample) }
-                                .accessibilityIdentifier("importSample.\(sample.rawValue)")
+        VStack(spacing: 0) {
+            HStack {
+                Text("Sources").font(.headline)
+                Spacer()
+                Button("Done", systemImage: "checkmark") { if let close { close() } else { dismiss() } }
+                    .labelStyle(.iconOnly).buttonStyle(.glass).controlSize(.large)
+                    .accessibilityIdentifier("closeLectureSources")
+            }.padding(.horizontal, 20).padding(.top, 16)
+            ScrollView {
+                GlassEffectContainer(spacing: 18) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .center, spacing: 16) { sourceHeading; Spacer(); importButton }
+                            VStack(alignment: .leading, spacing: 12) { sourceHeading; importButton }
                         }
-                    } label: {
-                        Label("Sample lecture PDFs", systemImage: "books.vertical")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(busy).accessibilityIdentifier("sampleLectureMenu")
-                } footer: {
-                    Text("Stored and searched on this device. Sources apply only to this notebook. English retrieval and OCR; up to 12 PDFs, 150 pages and 40 MB each.")
-                }
-                if busy {
-                    Section {
-                        HStack { ProgressView(); Text(deleting ? "Deleting source…" : "Reading and indexing PDF…") }
-                        if !deleting { Button("Cancel import", role: .cancel) { operation?.cancel() } }
-                    }
-                }
-                if let error {
-                    Section { Text(error).foregroundStyle(.red).accessibilityIdentifier("lectureImportError") }
-                }
-                Section {
-                    if documents.isEmpty && !busy { Text("No PDFs attached yet.").foregroundStyle(.secondary) }
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)], alignment: .leading, spacing: 24) {
-                        ForEach(documents) { document in
-                            LectureSourceCard(document: document, noteID: noteID, library: library, busy: busy,
-                                open: { open(document) }, delete: { removing = document })
+                        .padding(16)
+                        if busy {
+                            HStack {
+                                ProgressView()
+                                Text(deleting ? "Deleting source…" : "Reading PDF…")
+                                if !deleting { Button("Cancel", role: .cancel) { operation?.cancel() }.buttonStyle(.glass) }
+                            }.padding(16).bukoGlass(cornerRadius: 24)
                         }
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 12, trailing: 0))
-                } header: {
-                    Text("\(documents.count) attached \(documents.count == 1 ? "source" : "sources")")
-                        .textCase(nil).accessibilityIdentifier("attachedSourcesCount")
+                        if let error { Text(error).foregroundStyle(.red).accessibilityIdentifier("lectureImportError") }
+                        Text("\(documents.count) attached \(documents.count == 1 ? "source" : "sources")")
+                            .font(.subheadline.weight(.medium)).accessibilityIdentifier("attachedSourcesCount")
+                        if documents.isEmpty && !busy {
+                            ContentUnavailableView("No sources yet", systemImage: "doc", description: Text("Import a PDF to read alongside your notes and use with autofill."))
+                        }
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], alignment: .leading, spacing: 16) {
+                            ForEach(documents) { document in
+                                LectureSourceCard(document: document, noteID: noteID, library: library, busy: busy,
+                                    open: { open(document) }, delete: { removing = document },
+                                    split: split.map { action in { action(SourceDragReference(noteID: noteID, documentID: document.id)) } })
+                                    .draggable(SourceDragReference(noteID: noteID, documentID: document.id))
+                                    .onDragSessionUpdated { session in
+                                        switch session.phase {
+                                        case .active: dragging(true)
+                                        case .ended, .dataTransferCompleted: dragging(false)
+                                        default: break
+                                        }
+                                    }
+                            }
+                        }
+                    }.padding(20)
                 }
-
             }
-            .navigationTitle("Lecture sources")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }.accessibilityIdentifier("closeLectureSources")
-            } }
             .task { await refresh() }
             .onDisappear { operation?.cancel() }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf]) { result in
@@ -110,6 +98,27 @@ struct LectureSourcesView: View {
                 }
             } message: { Text("The imported copy and its index will be removed. Your original file and handwritten notes stay intact.") }
         }
+        .background(Color(uiColor: .secondarySystemBackground))
+    }
+
+    private var sourceHeading: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(noteTitle).font(.title3.weight(.semibold)).lineLimit(2)
+            Text("Sources for this note").font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+
+    private var importButton: some View {
+        Button { importing = true } label: {
+            Label("Import .pdf", systemImage: "square.and.arrow.down")
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 18).frame(minHeight: 46)
+        }
+            .buttonStyle(.plain)
+            .labelStyle(.titleAndIcon)
+            .glassEffect(.clear.interactive(), in: .capsule)
+            .disabled(busy).fixedSize()
+            .accessibilityIdentifier("importLecturePDF")
     }
 
     private func open(_ document: LectureDocument) {
@@ -126,13 +135,6 @@ struct LectureSourcesView: View {
     private func refresh() async {
         do { documents = try await library.documents(noteID: noteID) }
         catch { self.error = error.localizedDescription }
-    }
-
-    private func importSample(_ sample: SampleLecture) {
-        guard let url = Bundle.main.url(forResource: sample.rawValue, withExtension: "pdf") else {
-            error = "The bundled sample PDF is missing."; return
-        }
-        beginImport(url)
     }
 
     private func beginImport(_ url: URL) {

@@ -10,13 +10,11 @@ struct PersonalAlphabetView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Write over each faint guide with Apple Pencil. Use a finger to scroll. Letters save as you write and replace the samples used by autofill.")
-                        .foregroundStyle(.secondary)
                     let _ = preparation.status.revision
                     let samples = preparation.inspection(preferredID: noteID)
-                    Text("\(PersonalAlphabetStore.letters.filter { samples[$0] != nil }.count) of 52 personal letters ready")
+                    Text("\(PersonalAlphabetStore.letters.filter { samples[$0] != nil }.count) of 52 handwriting examples saved")
                         .font(.subheadline.weight(.medium)).accessibilityIdentifier("alphabetCoverage")
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 16)], spacing: 16) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
                         ForEach(Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(String.init), id: \.self) { capital in
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("\(capital) \(capital.lowercased())").font(.title3.weight(.semibold))
@@ -33,7 +31,7 @@ struct PersonalAlphabetView: View {
             .navigationTitle("Your alphabet").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }.accessibilityIdentifier("closeAlphabet")
+                    Button("Done", systemImage: "checkmark") { dismiss() }.accessibilityIdentifier("closeAlphabet")
                 }
             }
         }
@@ -71,10 +69,12 @@ private struct AlphabetLetterCell: View {
             .frame(height: 172).clipShape(.rect(cornerRadius: 12))
             .accessibilityLabel("Write \(letter) with Apple Pencil")
             .accessibilityIdentifier("alphabetCanvas.\(letter)")
-            Text(error ?? (editing ? (dirty ? "Saving…" : "Your alphabet") : sample?.source ?? "Write your letter"))
-                .font(.caption2).foregroundStyle(error == nil ? Color.secondary : Color.red)
-                .lineLimit(2).frame(minHeight: 28, alignment: .topLeading)
-                .accessibilityIdentifier("alphabetSource.\(letter)")
+            if let error {
+                Text(error).font(.caption2).foregroundStyle(.red)
+                    .accessibilityIdentifier("alphabetSource.\(letter)")
+            } else if dirty {
+                ProgressView("Saving…").font(.caption2)
+            }
             Button("Rewrite", systemImage: "pencil.tip.crop.circle") {
                 saveTask?.cancel(); dirty = false; editing = true; error = nil
                 drawing = PKDrawing()

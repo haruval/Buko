@@ -10,6 +10,9 @@ final class AutofillInsertionState {
     var preparedHandwriting: ((AutofillProposal) async throws -> HandwritingSampler.Result)?
     private var proposal: AutofillProposal?
     private var document: AutofillDocument?
+    private var capturedDocument: AutofillDocument?
+    private var selection: [CGPoint] = []
+    private(set) var isWriting = false
     private var preparation: Task<Void, Never>?
     private var acceptance: Task<Void, Never>?
     var currentDocument: (() -> AutofillDocument?)?
@@ -17,7 +20,7 @@ final class AutofillInsertionState {
     var commit: ((AutofillDocument, AutofillDocument) throws -> Void)?
     var accepted: (() -> Void)?
 
-    var canAccept: Bool { layout?.missing.isEmpty == true && !isAccepting }
+    var canAccept: Bool { layout?.missing.isEmpty == true && !isAccepting && !isWriting }
     var missing: [String] { layout?.missing ?? [] }
 
     var handwritingDetail: String {
@@ -26,9 +29,33 @@ final class AutofillInsertionState {
         return layout.fallbackGlyphCount == 0 ? "Your handwriting · letter by letter" : "Your letters, with a handwriting font for missing characters"
     }
 
-    func capture() {
+    func capture(selection: [CGPoint]) {
         cancel()
+        self.selection = selection
         document = currentDocument?()
+        capturedDocument = document
+    }
+
+    func writingBegan() {
+        acceptance?.cancel(); acceptance = nil; isAccepting = false
+        isWriting = true
+        // Let the real ink remain visible while the Pencil is down. The staged
+        // reflow is rebuilt from all current ink after the stroke completes.
+        previewChanged?(nil, false)
+    }
+
+    func writingEnded() {
+        isWriting = false
+        _ = rebase()
+    }
+
+    @discardableResult func rebase() -> Bool {
+        guard let capturedDocument else { return true }
+        guard let current = currentDocument?(),
+              capturedDocument.matches(current) || capturedDocument.permitsAppending(current, outside: selection) else { return false }
+        document = current
+        if !isWriting { rebuild() }
+        return true
     }
 
     func prepare(_ proposal: AutofillProposal) {
@@ -52,7 +79,7 @@ final class AutofillInsertionState {
     }
 
     func rebuild() {
-        guard let proposal, let document else { return }
+        guard !isWriting, let proposal, let document else { return }
         do {
             guard let current = currentDocument?(), document.matches(current) else { throw AutofillEditError.stale }
             let result = try AutofillLayout.stage(text: proposal.text, drawing: AutofillDocument.drawing(document.ink),
@@ -68,8 +95,8 @@ final class AutofillInsertionState {
         preparation?.cancel(); preparation = nil
         acceptance?.cancel(); acceptance = nil
         sampled = HandwritingSampler.Result()
-        proposal = nil; document = nil; layout = nil; issue = nil
-        isAccepting = false
+        proposal = nil; document = nil; capturedDocument = nil; selection = []; layout = nil; issue = nil
+        isAccepting = false; isWriting = false
         previewChanged?(nil, animatedReturn)
     }
 
@@ -83,7 +110,7 @@ final class AutofillInsertionState {
                 try Task.checkCancellation()
                 guard self.proposal?.requestID == proposal.requestID else { return }
                 guard revision == proposal.sourceRevision else { throw AutofillEditError.sourcesChanged }
-                guard let current = currentDocument?(), document.matches(current) else { throw AutofillEditError.stale }
+                guard !isWriting, let current = currentDocument?(), document.matches(current) else { throw AutofillEditError.stale }
                 guard #available(iOS 27, *), let commit else { throw AutofillEditError.unavailable }
                 let after = try document.inserting(layout, proposal: proposal)
                 try commit(document, after)

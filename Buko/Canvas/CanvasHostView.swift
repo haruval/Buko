@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Stable ink coordinates and camera for a vertically stacked page notebook.
 final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInteractionDelegate {
-    let canvas = PKCanvasView()
+    let canvas = NotebookInkCanvas()
     let circleIntent = CircleIntentState()
     private let circleGesture = CircleGestureRecognizer()
     private let circleContainer = CircleOverlayContainer()
@@ -113,6 +113,12 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         canvas.backgroundColor = .clear
         canvas.isOpaque = false
         canvas.contentInsetAdjustmentBehavior = .never
+        // The notebook's glass controls float over full-width paper, without
+        // an opaque scroll-edge band behind the native navigation bars.
+        canvas.topEdgeEffect.isHidden = true
+        canvas.bottomEdgeEffect.isHidden = true
+        canvas.leftEdgeEffect.isHidden = true
+        canvas.rightEdgeEffect.isHidden = true
         canvas.alwaysBounceVertical = true
         canvas.bouncesZoom = true
         canvas.panGestureRecognizer.allowedScrollTypesMask = .all
@@ -142,6 +148,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
 
     func load(_ drawing: PKDrawing, savedPageCount: Int, pageIndex: Int) {
         canvas.drawing = MonochromeInk.recolor(drawing, to: inkColor)
+        canvas.undoManager?.removeAllActions()
         pageCount = max(1, savedPageCount)
         self.pageIndex = min(max(0, pageIndex), pageCount - 1)
         DispatchQueue.main.async { [weak self] in
@@ -153,7 +160,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
 
     func configure(tool: CanvasSession.Tool, allowsFingerDrawing: Bool, showsGrid: Bool, colorScheme: ColorScheme) {
         setAppearance(colorScheme == .dark ? .dark : .light)
-        if self.tool != tool { cancelCircleInteraction(); circleIntent.cancelPending() }
+        if self.tool != tool { cancelCircleInteraction() }
         self.tool = tool
         circleGesture.singleFinger = tool == .circle
         let policy: PKCanvasViewDrawingPolicy = allowsFingerDrawing ? .anyInput : .pencilOnly
@@ -208,10 +215,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
     }
 
     func drawingDidChange() {
-        // The popup is already idle while a declined preview is springing home.
-        // Undo or programmatic edits must still remove that visual immediately.
-        if previewPageCount != nil { circleIntent.cancel() }
-        else { circleIntent.drawingDidChange() }
+        circleIntent.drawingDidChange()
+        if !circleIntent.hasPreview { showAutofillPreview(nil) }
     }
 
     private func showAutofillPreview(_ result: AutofillLayout.Result?, animatedReturn: Bool = false) {
@@ -325,7 +330,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
             let rect = boundaryRect
             let scale = canvas.zoomScale
             let horizontalMargin = max(0, (bounds.width - rect.width * scale) / 2)
-            let verticalMargin = max(0, (bounds.height - rect.height * scale) / 2)
+            let verticalMargin = isOverview ? max(0, (bounds.height - rect.height * scale) / 2) : 0
             desired = UIEdgeInsets(top: verticalMargin - rect.minY * scale,
                                    left: horizontalMargin - rect.minX * scale,
                                    bottom: verticalMargin + (isOverview ? 0 : 200),
@@ -537,7 +542,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
     }
 
     private func reserveAppend() {
-        circleIntent.cancel()
+        circleIntent.cancelTracing()
         guard !isPullActive, !pageTurnPending, !isSnapping else { return }
         pageTurnPending = true
         // Leave UIKit's callback before cancelling its pan and growing the document.
@@ -569,6 +574,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         pagePull.progress = 1
         syncPageState()
         onPageChange?(pageCount, pageIndex)
+        circleIntent.drawingDidChange()
         canvas.contentSize = CGSize(width: documentSize.width * canvas.zoomScale, height: documentSize.height * canvas.zoomScale)
         canvas.setContentOffset(canvas.contentOffset, animated: false)
         invalidateEdgeSnapshot()
@@ -775,8 +781,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
             if (max - min) * scale <= viewport { return (min + max) / 2 * scale - viewport / 2 }
             return Swift.min(Swift.max(center * scale - viewport / 2, min * scale), max * scale - viewport)
         }
-        return CGPoint(x: axis(center.x, min: rect.minX, max: rect.maxX, viewport: bounds.width),
-                       y: axis(center.y, min: rect.minY, max: rect.maxY, viewport: bounds.height))
+        // A short notebook starts at the same top edge as a longer one.
+        // Center only the read-only overview, preserving the fixed page ratio.
+        let y = !isOverview && rect.height * scale <= bounds.height ? rect.minY * scale
+            : axis(center.y, min: rect.minY, max: rect.maxY, viewport: bounds.height)
+        return CGPoint(x: axis(center.x, min: rect.minX, max: rect.maxX, viewport: bounds.width), y: y)
     }
 
     private func cancelCircleInteraction() {
@@ -830,4 +839,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         }
     }
 
+}
+
+/// The responder-chain manager is shared by sibling editors. Keep Undo and
+/// Redo local to the note whose canvas receives the action.
+final class NotebookInkCanvas: PKCanvasView {
+    private let inkUndoManager = UndoManager()
+    override var undoManager: UndoManager? { inkUndoManager }
 }

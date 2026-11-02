@@ -105,6 +105,31 @@ import SwiftData
         note.pageLayoutVersion = 2; try note.setPages([NotebookPage()]); note.drawingData = originalData
         context.insert(note); try context.save()
         let before = AutofillDocument(note)
+        let appendedInk = PKDrawing(strokes: original.strokes + [stroke(1100, 650)])
+        note.drawingData = appendedInk.dataRepresentation()
+        let appended = AutofillDocument(note)
+        precondition(before.permitsAppending(appended, outside: selection(110)), "Writing elsewhere must preserve an in-progress capture")
+        let rebuilt = try AutofillLayout.stage(text: "abba", drawing: appendedInk,
+            selection: selection(110), pageCount: 1, samples: samples)
+        precondition(rebuilt.existing.strokes.count == appendedInk.strokes.count, "Rebase retains every new stroke")
+        for stroke in rebuilt.inserted.strokes {
+            for point in stroke.path {
+                let width = point.size.width * hypot(stroke.transform.a, stroke.transform.b)
+                precondition(abs(width - 2) < 0.01, "Personal letters must match the surrounding pen width")
+            }
+        }
+        note.drawingData = PKDrawing(strokes: original.strokes + [stroke(1110, 115)]).dataRepresentation()
+        precondition(!before.permitsAppending(AutofillDocument(note), outside: selection(110)), "Writing inside captured content invalidates the request")
+        note.drawingData = PKDrawing(strokes: Array(original.strokes.dropFirst())).dataRepresentation()
+        precondition(!before.permitsAppending(AutofillDocument(note), outside: selection(110)), "Erasing captured ink must refuse a rebase")
+        var movedOriginal = original.strokes
+        movedOriginal[0].transform = CGAffineTransform(translationX: 10, y: 0)
+        note.drawingData = PKDrawing(strokes: movedOriginal).dataRepresentation()
+        precondition(!before.permitsAppending(AutofillDocument(note), outside: selection(110)), "Moving original ink must refuse a rebase")
+        before.apply(to: note)
+        try context.save()
+        print("Concurrent ink: append/reflow retention, changed-selection/erase/move rejection and matched pen weight passed")
+
         let proposal = AutofillProposal(requestID: UUID(), noteID: note.id, capturedAt: .now,
             selectionPolygon: selection(110), selectedText: "Heading:", sourceRevision: "test-revision",
             content: AutofillContent(lines: [.init(text: "abba abba", citationIndices: []), .init(text: "ba", citationIndices: [])], origin: .localArithmetic), citations: [])

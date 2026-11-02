@@ -86,7 +86,7 @@ final class CircleIntentState {
         let question = clarification
         task?.cancel(); timeout?.cancel()
         let id = UUID(); requestID = id
-        insertion.capture()
+        insertion.capture(selection: snapshot.polygon)
         proposal = nil; issue = nil; clarificationIssue = nil; clarification = ""
         citations = []; retrievedHits = []; missingInformation = nil
         sourceLabel = "Determining source…"; sourceDetail = ""; draftDetail = ""
@@ -126,10 +126,11 @@ final class CircleIntentState {
         cancel()
     }
 
-    /// A completed proposal is tied to the captured ink too, not just a running task.
+    /// New notes outside the captured region can coexist with a request. Edits
+    /// to captured ink still invalidate it, including erase, Undo and page changes.
     func drawingDidChange() {
         guard phase != .idle else { return }
-        cancel()
+        if phase == .tracing || !insertion.rebase() { cancel() }
     }
 
     func updateProjection(scale: CGFloat, offset: CGPoint) {
@@ -221,7 +222,7 @@ final class CircleIntentState {
 
     func analyze(drawing: PKDrawing, polygon: [CGPoint], screenPolygon: [CGPoint], scale: CGFloat, offset: CGPoint) {
         guard !hasPreview else { return }
-        insertion.capture()
+        insertion.capture(selection: polygon)
         captureScale = scale; captureOffset = offset; projection = .identity
         selectionBounds = CircleGeometry.path(screenPolygon).boundingBoxOfPath
         closedAt = Date.timeIntervalSinceReferenceDate

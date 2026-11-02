@@ -25,6 +25,16 @@
 			<key>UTTypeIdentifier</key>
 			<string>dev.buko.note-reference</string>
 		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>dev.buko.source-reference</string>
+			<key>UTTypeDescription</key>
+			<string>Buko source reference</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

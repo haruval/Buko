@@ -20,7 +20,7 @@ struct ToolShelf: View {
             if showsGestureTestTools {
                 circleTool
             }
-            ShelfButton(title: "Lecture sources", symbol: "books.vertical", action: openLectureSources)
+            ShelfButton(title: "Sources", symbol: "books.vertical", action: openLectureSources)
                 .accessibilityIdentifier("lectureSources")
                 .accessibilityHint("Attach lecture PDFs for source-grounded autofill.")
             Divider().frame(height: 22).padding(.horizontal, 6)

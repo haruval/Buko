@@ -42,6 +42,22 @@ nonisolated struct AutofillDocument {
         return Self.sameInk(a, b)
     }
 
+    /// A running request may rebase over newly appended handwriting, but never
+    /// over erased/moved captured strokes, replaced pages, or another accepted fill.
+    func permitsAppending(_ current: Self, outside selection: [CGPoint]) -> Bool {
+        guard noteID == current.noteID, layoutVersion == current.layoutVersion,
+              history == current.history, current.pageCount >= pageCount,
+              let oldPages = try? JSONDecoder().decode([NotebookPage].self, from: pages),
+              let newPages = try? JSONDecoder().decode([NotebookPage].self, from: current.pages),
+              newPages.count >= oldPages.count,
+              Array(newPages.prefix(oldPages.count)) == oldPages,
+              let original = try? Self.drawing(ink), let updated = try? Self.drawing(current.ink),
+              updated.strokes.count >= original.strokes.count,
+              Self.sameInk(original, PKDrawing(strokes: Array(updated.strokes.prefix(original.strokes.count)))) else { return false }
+        let protected = CircleGeometry.path(selection).boundingBoxOfPath.insetBy(dx: -8, dy: -8)
+        return updated.strokes.dropFirst(original.strokes.count).allSatisfy { !$0.renderBounds.intersects(protected) }
+    }
+
     /// PKDrawing equality includes internal drawing identity. Compare the actual
     /// stroke content when PencilKit recreates that container during undo/recolor.
     static func sameInk(_ a: PKDrawing, _ b: PKDrawing) -> Bool {

@@ -8,6 +8,7 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Query(filter: #Predicate<Note> { $0.deletedAt == nil }, sort: \Note.updatedAt, order: .reverse)
     private var notes: [Note]
     @Query(filter: #Predicate<Note> { $0.deletedAt != nil }, sort: \Note.deletedAt, order: .reverse)
@@ -23,6 +24,7 @@ struct ContentView: View {
     @State private var lectureSourceNote: Note?
     @State private var canvasRevision = UUID()
     @State private var pagesVisible = false
+    @State private var secondPagesVisible = false
     @State private var renamingPage: NotebookPage?
     @State private var renamePagePresented = false
     @State private var pageTitle = ""
@@ -30,6 +32,17 @@ struct ContentView: View {
     @State private var emptyNoteIDs = Set<UUID>()
     @State private var emptyPageIDs = Set<UUID>()
     @State private var selection: Note?
+    @State private var primaryPDF: LecturePDFDestination?
+    @State private var secondContent: WorkspaceContent?
+    @State private var secondSession = CanvasSession()
+    @State private var secondRevision = UUID()
+    @State private var secondFocused = false
+    @State private var sourceDragging = false
+    @State private var dropSide: Int?
+    @State private var sourceOpenTask: Task<Void, Never>?
+    private var activeNote: Note? { secondFocused ? (secondContent?.note ?? selectedNote) : selectedNote }
+    private var activeSession: CanvasSession { secondFocused && secondContent?.note != nil ? secondSession : session }
+
     @State private var sidebarVisible = true
     @State private var settingsVisible = false
     @State private var showsTrash = false
@@ -63,7 +76,7 @@ struct ContentView: View {
             TextField("Page name", text: $pageTitle)
             Button("Cancel", role: .cancel) { renamingPage = nil }
             Button("Save") {
-                guard let note = selectedNote else { return }
+                guard let note = activeNote else { return }
                 performEdit(notes: [note]) { try NotebookEdits.rename(page.id, in: note, to: pageTitle) }
                 renamingPage = nil
             }
@@ -133,25 +146,24 @@ struct ContentView: View {
         .onChange(of: handwritingStamps) { _, _ in refreshHandwriting() }
         .onChange(of: selectedNote?.id) { _, _ in refreshHandwriting() }
         .onChange(of: session.host?.circleIntent.phase) { _, _ in refreshHandwriting() }
-        .onDisappear { handwriting.setPaused(true) }
-        .sheet(item: $lectureSourceNote) { note in
-            LectureSourcesView(noteID: note.id, noteTitle: note.title)
-        }
+        .onChange(of: secondSession.host?.circleIntent.phase) { _, _ in refreshHandwriting() }
+        .onDisappear { handwriting.setPaused(true); sourceOpenTask?.cancel() }
         .sheet(isPresented: $showsHandwritingPreview) {
-            HandwritingPreviewView(preparation: handwriting, noteID: selectedNote?.id)
+            HandwritingPreviewView(preparation: handwriting, noteID: activeNote?.id)
         }
         .fullScreenCover(isPresented: $showsPersonalAlphabet) {
-            PersonalAlphabetView(preparation: handwriting, noteID: selectedNote?.id)
+            PersonalAlphabetView(preparation: handwriting, noteID: activeNote?.id)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
-                session.host?.circleIntent.cancel(); saveNow()
+                session.host?.circleIntent.cancel(); secondSession.host?.circleIntent.cancel(); saveNow()
             }
             refreshHandwriting()
         }
         .onChange(of: sidebarVisible) { _, _ in titleFocused = false }
         .onChange(of: settingsVisible) { _, _ in titleFocused = false }
         .onChange(of: pagesVisible) { _, _ in titleFocused = false }
+        .onChange(of: secondSession.isDrawing) { _, _ in refreshHandwriting() }
         .onChange(of: session.isDrawing) { _, drawing in
             if drawing { titleFocused = false }
             refreshHandwriting()
@@ -159,78 +171,260 @@ struct ContentView: View {
     }
 
     private var workspace: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
-                Color("CanvasBackground").ignoresSafeArea()
-                if let note = selectedNote, note.pageCount > 0 {
-                    drawingCanvas(for: note, revision: canvasRevision)
-                }
-
-                if let note = selectedNote, note.pageCount == 0 {
-                    ContentUnavailableView {
-                        Label("No pages", systemImage: "doc")
-                    } description: {
-                        Text("Restore a page from Trash or start a new one.")
-                    } actions: {
-                        Button("Add page") { addBlankPage(to: note) }
-                            .buttonStyle(.glass)
+        GeometryReader { outer in
+            let divisions = outer.reservedRegions(kind: .division, options: .includeInactive)
+            let fold = divisions.first(where: \.isActive)?.frame
+            let nativeChrome = horizontalSizeClass == .compact || fold != nil || secondContent != nil
+            let nativeTools = nativeChrome || !divisions.isEmpty
+            let layout = WorkspaceGeometry(size: outer.size, division: fold,
+                compact: horizontalSizeClass == .compact || verticalSizeClass == .compact)
+            let bookLibrary = fold != nil && !layout.vertical && layout.canSplit
+            let separatedLibrary = fold != nil && layout.canSplit && (bookLibrary || secondContent == nil)
+            let sideBySideNotes = !separatedLibrary && layout.canSplit && !layout.vertical && primaryPDF == nil && secondContent?.note != nil
+            let progressNote = secondFocused && secondContent != nil ? secondContent?.note : (primaryPDF == nil ? selectedNote : nil)
+            NavigationStack {
+                WorkspaceToolbarAxis { verticalToolbar in
+                    GeometryReader { safeGeometry in
+                        // Both children stay alive across display changes. The native
+                        // overlay arrangement owns displacement and transition timing.
+                        ArrangementView {
+                            editorWorkspace(nativeChrome: nativeChrome, nativeTools: nativeTools,
+                                            verticalToolbar: verticalToolbar, bookLibrary: bookLibrary,
+                                            separatedLibrary: separatedLibrary,
+                                            safeFrame: safeGeometry.frame(in: .global))
+                                .overlayArrangementEdge(HorizontalEdge.trailing)
+                                .overlayArrangementEdge(VerticalEdge.bottom)
+                        } secondary: {
+                            GeometryReader { libraryGeometry in
+                                ZStack {
+                                    (bookLibrary ? Color.black : Color("CanvasBackground"))
+                                        .accessibilityIdentifier("bookLibraryBackground")
+                                    GlassEffectContainer {
+                                        libraryPanel(size: CGSize(width: max(0, libraryGeometry.size.width - 24),
+                                                                  height: max(0, libraryGeometry.size.height - 24)),
+                                                     expanded: true, canCollapse: false)
+                                    }
+                                    .environment(\.colorScheme, bookLibrary ? .dark : colorScheme)
+                                    .padding(12)
+                                    .accessibilityElement(children: separatedLibrary ? .contain : .ignore)
+                                    .accessibilityIdentifier("bookLibraryPanel")
+                                    .accessibilityHidden(!separatedLibrary)
+                                }
+                            }
+                            .allowsHitTesting(separatedLibrary)
+                            .accessibilityHidden(!separatedLibrary)
+                        }
+                        .arrangementViewStyle(.overlay.axes(secondContent == nil ? Axis.Set.horizontal.union(.vertical) : .horizontal))
+                        .background(.black)
+                        .ignoresSafeArea(.container, edges: nativeTools ? .all : [])
                     }
-                }
-
-                PagePullIndicator(state: session.pagePull)
-                    .ignoresSafeArea()
-
-                if settingsVisible {
-                    Color.clear.contentShape(.rect).ignoresSafeArea()
-                        .onTapGesture { toggleSettings() }
-                        .accessibilityLabel("Dismiss settings")
-                        .accessibilityIdentifier("dismissSettingsBackdrop")
-                }
-
-                floatingPanels(in: geometry.size)
-                    .environment(\.colorScheme, session.pagePull.topOverBlack ? .dark : colorScheme)
-                    .padding(.horizontal, 20)
-                    .padding(.top, WorkspaceChrome.topPadding)
-                    .padding(.bottom, 20)
-            }
-            .overlay(alignment: .trailing) {
-                if let note = selectedNote {
-                    pageNavigation(for: note, height: geometry.size.height)
-                }
-            }
-            .overlay(alignment: .bottom) {
-                VStack(spacing: 12) {
-                    ToolShelf(session: session) {
-                        session.host?.circleIntent.cancel()
-                        lectureSourceNote = selectedNote
+                    .navigationTitle("")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        if nativeTools {
+                            NotebookToolbar(session: activeSession, notes: toggleSidebar, settings: toggleSettings,
+                                showsNotes: nativeChrome && !separatedLibrary, showsSettings: nativeChrome,
+                                sources: { showSources(activeNote) },
+                                switchPane: secondContent == nil ? nil : { secondFocused.toggle() },
+                                showsPageProgress: verticalToolbar && !sideBySideNotes && progressNote != nil) {
+                                    if let note = progressNote {
+                                        PageNavigator(note: note, session: activeSession, availableHeight: outer.size.height, circular: true,
+                                            isExpanded: secondFocused ? $secondPagesVisible : $pagesVisible,
+                                            rename: { page, _ in renamingPage = page; pageTitle = page.title; renamePagePresented = true },
+                                            trash: { trashPage($0, from: note) }, trashSelection: { trashPages($0, from: note) },
+                                            opening: { settingsVisible = false })
+                                    }
+                                }
+                        }
                     }
-                        .simultaneousGesture(TapGesture().onEnded {
-                            if settingsVisible { toggleSettings() }
-                        })
-                        .disabled(selectedNote == nil || selectedNote?.pageCount == 0)
+                    .toolbarVisibility(nativeChrome ? .automatic : .hidden, for: .navigationBar)
+                    .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
                 }
-                .environment(\.colorScheme, session.pagePull.bottomOverBlack ? .dark : colorScheme)
-                .padding(.bottom, 16)
             }
         }
     }
 
-    private func drawingCanvas(for note: Note, revision: UUID) -> some View {
-        NoteCanvas(note: note, session: session, showsGrid: showsGrid,
+    private func editorWorkspace(nativeChrome: Bool, nativeTools: Bool, verticalToolbar: Bool,
+                                 bookLibrary: Bool, separatedLibrary: Bool, safeFrame: CGRect) -> some View {
+        GeometryReader { geometry in
+            let activeFold = geometry.reservedRegions(kind: .division).first?.frame
+            let paperFrame = geometry.frame(in: .global)
+            let visibleSafeFrame = safeFrame.intersection(paperFrame)
+            let controlsFrame = visibleSafeFrame.offsetBy(dx: -paperFrame.minX, dy: -paperFrame.minY)
+            let editorFrame = CGRect(origin: CGPoint.zero, size: geometry.size)
+            let layout = WorkspaceGeometry(size: geometry.size, division: separatedLibrary ? nil : activeFold,
+                compact: bookLibrary || horizontalSizeClass == .compact || verticalSizeClass == .compact)
+            let editorLayout = layout
+            let showsBothPanes = secondContent != nil && editorLayout.canSplit
+            let sideBySideNotes = showsBothPanes && !editorLayout.vertical && primaryPDF == nil && secondContent?.note != nil
+            let firstFrame = showsBothPanes ? editorLayout.first : editorFrame
+            let secondFrame = showsBothPanes ? editorLayout.second : editorFrame
+            let panelFrame = (showsBothPanes ? (secondFocused ? secondFrame : firstFrame) : editorFrame).intersection(controlsFrame)
+            let dropLayout = editorLayout
+            ZStack(alignment: .topLeading) {
+                Color("CanvasBackground").ignoresSafeArea()
+                ArrangementView {
+                    workspacePane(second: false, nativeTools: nativeTools, showsPageNavigator: !sideBySideNotes && !verticalToolbar, visible: !(secondContent != nil && !editorLayout.canSplit && secondFocused),
+                                  controlInsets: controlInsets(for: firstFrame, within: controlsFrame))
+                        .opacity(secondContent != nil && !editorLayout.canSplit && secondFocused ? 0 : 1)
+                        .allowsHitTesting(!(secondContent != nil && !editorLayout.canSplit && secondFocused))
+                        .accessibilityHidden(secondContent != nil && !editorLayout.canSplit && secondFocused)
+                } secondary: {
+                    workspacePane(second: true, nativeTools: nativeTools, showsPageNavigator: !sideBySideNotes && !verticalToolbar, visible: secondContent != nil && (editorLayout.canSplit || secondFocused),
+                                  controlInsets: controlInsets(for: secondFrame, within: controlsFrame))
+                        .opacity(secondContent != nil && (editorLayout.canSplit || secondFocused) ? 1 : 0)
+                        .allowsHitTesting(secondContent != nil && (editorLayout.canSplit || secondFocused))
+                        .accessibilityHidden(secondContent == nil || (!editorLayout.canSplit && !secondFocused))
+                }
+                .arrangementViewStyle(NotebookArrangementStyle(
+                    geometry: editorLayout,
+                    split: secondContent != nil, activePane: secondContent != nil && secondFocused ? 1 : 0))
+                .frame(width: editorFrame.width, height: editorFrame.height)
+                .clipped().contentShape(.rect)
+                .offset(x: editorFrame.minX, y: editorFrame.minY)
+                .onDrop(of: [.bukoNote, .bukoSource], delegate: WorkspaceDropDelegate(
+                    geometry: dropLayout, side: $dropSide, note: openDroppedNote, source: openDroppedSource))
+
+                if secondContent != nil && editorLayout.canSplit {
+                    WorkspaceDivider(vertical: editorLayout.vertical,
+                                     handleOffset: activeFold == nil ? 0 : -(editorLayout.vertical ? editorLayout.divider.height : editorLayout.divider.width) / 2 - 22,
+                                     keepFirst: { closeSplit(keepingSecond: false) },
+                                     keepSecond: { closeSplit(keepingSecond: true) })
+                        .frame(width: editorLayout.divider.width, height: editorLayout.divider.height)
+                        .position(x: editorFrame.minX + editorLayout.divider.midX, y: editorFrame.minY + editorLayout.divider.midY)
+                }
+                if let dropSide {
+                    WorkspaceDropIndicator(title: dropLayout.vertical ? "Open above" : "Open on left", targeted: dropSide == 0)
+                        .frame(width: dropLayout.first.width, height: dropLayout.first.height)
+                        .position(x: editorFrame.minX + dropLayout.first.midX, y: editorFrame.minY + dropLayout.first.midY)
+                    WorkspaceDropIndicator(title: dropLayout.vertical ? "Open below" : "Open on right", targeted: dropSide == 1)
+                        .frame(width: dropLayout.second.width, height: dropLayout.second.height)
+                        .position(x: editorFrame.minX + dropLayout.second.midX, y: editorFrame.minY + dropLayout.second.midY)
+                }
+                if settingsVisible {
+                    Color.clear.contentShape(.rect)
+                        .onTapGesture { toggleSettings() }.accessibilityIdentifier("dismissSettingsBackdrop")
+                }
+                floatingPanels(in: controlsFrame.size, nativeChrome: nativeChrome, showsLibrary: !separatedLibrary, showsTitle: verticalToolbar,
+                               librarySize: !separatedLibrary && sidebarVisible && activeFold != nil && layout.canSplit ? layout.first.intersection(controlsFrame).size : nil)
+                    .padding(.horizontal, nativeChrome ? 12 : 20)
+                    .padding(.top, nativeChrome ? 8 : WorkspaceChrome.topPadding)
+                    .padding(.bottom, 20)
+                    .frame(width: controlsFrame.width, height: controlsFrame.height, alignment: .topLeading)
+                    .position(x: controlsFrame.midX, y: controlsFrame.midY)
+                if let note = lectureSourceNote {
+                    LectureSourcesView(noteID: note.id, noteTitle: note.title,
+                        close: { showSources(nil) }, dragging: { sourceDragging = $0 },
+                        split: { openDroppedSource($0, 1) })
+                        .frame(width: min(560, max(220, panelFrame.width - 24)),
+                               height: max(160, panelFrame.height - 32))
+                        .clipShape(.rect(cornerRadius: 32))
+                        .shadow(color: .black.opacity(0.12), radius: 24, y: 8)
+                        .position(x: panelFrame.midX, y: panelFrame.midY)
+                        .transition(reduceMotion ? .opacity : .scale(scale: 0.15, anchor: .trailing).combined(with: .opacity))
+                        .opacity(sourceDragging ? 0.08 : 1)
+                        .allowsHitTesting(!sourceDragging)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("sourcesPanel")
+                }
+            }
+        }
+    }
+
+    private func controlInsets(for pane: CGRect, within safeFrame: CGRect) -> EdgeInsets {
+        EdgeInsets(top: max(0, safeFrame.minY - pane.minY),
+                   leading: max(0, safeFrame.minX - pane.minX),
+                   bottom: max(0, pane.maxY - safeFrame.maxY),
+                   trailing: max(0, pane.maxX - safeFrame.maxX))
+    }
+
+    @ViewBuilder private func workspacePane(second: Bool, nativeTools: Bool, showsPageNavigator: Bool, visible: Bool, controlInsets: EdgeInsets = EdgeInsets(), foldHandleClearance: CGFloat = 0) -> some View {
+        let note = second ? secondContent?.note : (primaryPDF == nil ? selectedNote : nil)
+        let paneSession = second ? secondSession : session
+        GeometryReader { geometry in
+            let controlsHeight = max(0, geometry.size.height - controlInsets.top - controlInsets.bottom)
+            ZStack {
+                Color("CanvasBackground")
+                if let note, note.pageCount > 0 {
+                    drawingCanvas(for: note, revision: second ? secondRevision : canvasRevision, second: second, visible: visible)
+                    PagePullIndicator(state: paneSession.pagePull).allowsHitTesting(false)
+                } else if let note {
+                    ContentUnavailableView {
+                        Label("No pages", systemImage: "doc")
+                    } description: { Text("Restore a page from Trash or start a new one.") }
+                    actions: { Button("Add page") { addBlankPage(to: note) }.buttonStyle(.glass) }
+                } else if second, case .pdf(let destination) = secondContent {
+                    LecturePDFCard(destination: destination, isVisible: visible)
+                        .padding(12).padding(.top, secondContent == nil ? 0 : 56).padding(controlInsets)
+                } else if !second, let primaryPDF {
+                    LecturePDFCard(destination: primaryPDF, isVisible: visible)
+                        .padding(12).padding(.top, secondContent == nil ? 0 : 56).padding(controlInsets)
+                }
+            }
+            .contentShape(.rect)
+            .simultaneousGesture(TapGesture().onEnded { secondFocused = second })
+            .overlay(alignment: .top) {
+                if secondContent != nil {
+                    HStack(spacing: 8) {
+                        if second { Spacer(minLength: 0) }
+                        Button { secondFocused = second } label: {
+                            Text(note?.title ?? (second ? secondContent?.title : primaryPDF?.title) ?? "")
+                                .font(.subheadline.weight(.semibold)).lineLimit(1)
+                        }.buttonStyle(.glass)
+                            .accessibilityIdentifier(second ? "secondPaneTitle" : "firstPaneTitle")
+                        Button("Full screen", systemImage: "arrow.up.left.and.arrow.down.right") { closeSplit(keepingSecond: second) }
+                            .labelStyle(.iconOnly).buttonStyle(.glass)
+                            .accessibilityIdentifier(second ? "fullscreenSecondPane" : "fullscreenFirstPane")
+                        if !second { Spacer(minLength: 0) }
+                    }.padding(12).padding(.top, controlInsets.top)
+                        .padding(.leading, controlInsets.leading).padding(.trailing, controlInsets.trailing)
+                }
+            }
+            .overlay(alignment: .trailing) {
+                if showsPageNavigator, let note {
+                    if second {
+                        PageNavigator(note: note, session: paneSession, availableHeight: controlsHeight,
+                            isExpanded: $secondPagesVisible, rename: { page, _ in
+                                secondFocused = true; renamingPage = page; pageTitle = page.title; renamePagePresented = true
+                            }, trash: { trashPage($0, from: note) }, trashSelection: { trashPages($0, from: note) }, opening: { settingsVisible = false })
+                            .padding(.trailing, 12 + controlInsets.trailing)
+                            .padding(.top, controlInsets.top).padding(.bottom, controlInsets.bottom)
+                    } else {
+                        pageNavigation(for: note, height: controlsHeight)
+                            .padding(.trailing, foldHandleClearance + controlInsets.trailing)
+                            .padding(.top, controlInsets.top).padding(.bottom, controlInsets.bottom)
+                    }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if !nativeTools, let note, note.pageCount > 0 {
+                    ToolShelf(session: paneSession) { showSources(note) }.padding(.bottom, 16)
+                }
+            }
+            .clipped()
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(second ? "workspaceSecondPane" : "workspaceFirstPane")
+        }
+    }
+
+    private func drawingCanvas(for note: Note, revision: UUID, second: Bool = false, visible: Bool = true) -> some View {
+        let paneSession = second ? secondSession : session
+        return NoteCanvas(note: note, session: paneSession, showsGrid: showsGrid,
                    onPageChange: { (count: Int, index: Int) in
-            recordPosition(note: note, count: count, index: index, revision: revision)
+            recordPosition(note: note, count: count, index: index, revision: revision, second: second)
         }, onDrawingChange: { (data: Data) in
-            guard revision == canvasRevision else { return }
+            guard revision == (second ? secondRevision : canvasRevision) else { return }
             note.drawingData = data
             note.updatedAt = .now
             handwriting.invalidate(noteID: note.id)
             refreshHandwriting()
             scheduleSave()
-        }, preparedHandwriting: { proposal in
+        }, onWritingBegan: { secondFocused = second }, isVisible: visible, preparedHandwriting: { proposal in
             try await handwriting.preparedForPreview(proposal)
         }, onAutofillCommit: { before, after in
-            guard revision == canvasRevision, selectedNote?.id == note.id,
-                  note.deletedAt == nil, !session.isDrawing,
+            guard revision == (second ? secondRevision : canvasRevision),
+                  (second ? secondContent?.note?.id : selectedNote?.id) == note.id,
+                  note.deletedAt == nil, !paneSession.isDrawing,
                   before.matches(AutofillDocument(note)) else { throw AutofillEditError.stale }
             guard saveNow() else { throw AutofillEditError.unavailable }
             do {
@@ -243,11 +437,10 @@ struct ContentView: View {
             }
         })
         .id("\(note.id)-\(revision)")
-        .ignoresSafeArea()
     }
 
-    private func recordPosition(note: Note, count: Int, index: Int, revision: UUID) {
-        guard revision == canvasRevision else { return }
+    private func recordPosition(note: Note, count: Int, index: Int, revision: UUID, second: Bool = false) {
+        guard revision == (second ? secondRevision : canvasRevision) else { return }
         if count > note.pageCount {
             do { try NotebookEdits.appendMetadata(to: note, count: count) }
             catch { persistenceError = error.localizedDescription; return }
@@ -261,6 +454,7 @@ struct ContentView: View {
         PageNavigator(note: note, session: session, availableHeight: height,
                       isExpanded: $pagesVisible,
                       rename: { (page: NotebookPage, _: Int) in
+            secondFocused = false
             renamingPage = page
             pageTitle = page.title
             renamePagePresented = true
@@ -285,42 +479,22 @@ struct ContentView: View {
         }
     }
 
-    private func floatingPanels(in size: CGSize) -> some View {
-        GlassEffectContainer(spacing: 20) {
-            HStack(alignment: .top) {
-                ExpandingGlassPanel(
-                    isExpanded: sidebarVisible,
-                    size: CGSize(width: min(max(320, size.width / 3), size.width - 84), height: max(220, size.height - 124)),
-                    alignment: .topLeading, anchor: .topLeading,
-                    expandedBackingOpacity: 0.5
-                ) {
-                    NotesSidebar(
-                        notes: notes, folders: folders, selectedID: selectedNote?.id,
-                        select: select, create: { createNote(in: $0) }, hide: toggleSidebar,
-                        rename: { note in
-                            newTitle = note.title
-                            renamingNote = note
-                            renamePresented = true
-                        }, trash: moveToTrash,
-                        group: { source, target in
-                            guard source.id != target.id else { return false }
-                            return organize { try LibraryOrganization.group(source, with: target, in: modelContext) }
-                        }, move: { note, folder in
-                            organize { try LibraryOrganization.move(note, to: folder, in: modelContext) }
-                        }, renameFolder: { folder, title in
-                            _ = organize { try LibraryOrganization.rename(folder, to: title, in: modelContext) }
-                        }, ungroup: { folder in
-                            _ = organize { try LibraryOrganization.ungroup(folder, in: modelContext) }
-                        }
-                    )
-                } compact: {
-                    ShelfButton(title: "Show notes", symbol: "sidebar.left", action: toggleSidebar)
-                        .accessibilityIdentifier("showNotes")
-                }
-                .glassEffectID("library", in: glassNamespace)
+    private func showSources(_ note: Note?) {
+        withAnimation(panelAnimation(opening: note != nil)) {
+            lectureSourceNote = note
+        }
+    }
 
-                if !sidebarVisible, let note = selectedNote {
-                    NoteTitlePill(title: note.title, width: min(420, max(100, size.width - 440)), focus: $titleFocused) { title in
+    private func floatingPanels(in size: CGSize, nativeChrome: Bool = false, showsLibrary: Bool = true, showsTitle: Bool = false, librarySize: CGSize? = nil) -> some View {
+        let libraryExpanded = sidebarVisible || librarySize != nil
+        return GlassEffectContainer(spacing: 20) {
+            HStack(alignment: .top) {
+                if showsLibrary && (!nativeChrome || libraryExpanded) {
+                libraryPanel(size: CGSize(width: max(220, librarySize.map { $0.width - 24 } ?? min(max(280, size.width / 3), size.width - 84)), height: max(180, (librarySize?.height ?? size.height) - (nativeChrome ? 36 : 124))), expanded: libraryExpanded)
+                }
+
+                if (!nativeChrome || showsTitle), (!sidebarVisible || !showsLibrary), secondContent == nil, primaryPDF == nil, let note = selectedNote {
+                    NoteTitlePill(title: note.title, width: min(420, max(100, size.width - (nativeChrome ? 36 : 440))), focus: $titleFocused) { title in
                         renameNote(note, to: title)
                     }
                     .id(note.id)
@@ -330,6 +504,7 @@ struct ContentView: View {
 
                 Spacer(minLength: 12)
 
+                if !nativeChrome || settingsVisible {
                 ExpandingGlassPanel(
                     isExpanded: settingsVisible,
                     size: CGSize(width: min(showsTrash ? 300 : showsDevelopment ? 320 : 224, size.width - 104),
@@ -367,8 +542,43 @@ struct ContentView: View {
                 .glassEffectID("settings", in: glassNamespace)
                 .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82), value: showsTrash)
                 .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82), value: showsDevelopment)
+                }
             }
         }
+    }
+
+
+    private func libraryPanel(size: CGSize, expanded: Bool, canCollapse: Bool = true) -> some View {
+        ExpandingGlassPanel(
+            isExpanded: expanded,
+            size: size,
+            alignment: .topLeading, anchor: .topLeading,
+            expandedBackingOpacity: 0.5
+        ) {
+            NotesSidebar(
+                notes: notes, folders: folders, selectedID: activeNote?.id, canCollapse: canCollapse,
+                select: select, create: { createNote(in: $0) }, hide: toggleSidebar,
+                rename: { note in
+                    newTitle = note.title
+                    renamingNote = note
+                    renamePresented = true
+                }, trash: moveToTrash,
+                group: { source, target in
+                    guard source.id != target.id else { return false }
+                    return organize { try LibraryOrganization.group(source, with: target, in: modelContext) }
+                }, move: { note, folder in
+                    organize { try LibraryOrganization.move(note, to: folder, in: modelContext) }
+                }, renameFolder: { folder, title in
+                    _ = organize { try LibraryOrganization.rename(folder, to: title, in: modelContext) }
+                }, openBeside: { note in openDroppedNote(NoteDragReference(id: note.id), 1) }, ungroup: { folder in
+                    _ = organize { try LibraryOrganization.ungroup(folder, in: modelContext) }
+                }
+            )
+        } compact: {
+            ShelfButton(title: "Show notes", symbol: "sidebar.left", action: toggleSidebar)
+                .accessibilityIdentifier("showNotes")
+        }
+        .glassEffectID("library", in: glassNamespace)
     }
 
     private func toggleSettings() {
@@ -386,6 +596,7 @@ struct ContentView: View {
     private func moveToTrash(_ note: Note) {
         guard flushDrawing() else { return }
         let wasSelected = selectedNote?.id == note.id
+        if secondContent?.note?.id == note.id { closeSplit(keepingSecond: false) }
         guard performEdit(notes: [note], { note.deletedAt = .now }) else { return }
         if wasSelected {
             selection = nil
@@ -405,6 +616,9 @@ struct ContentView: View {
     }
 
     private func select(_ note: Note) {
+        if secondContent?.note?.id == note.id { secondFocused = true; sidebarVisible = false; return }
+        secondFocused = false; primaryPDF = nil
+        if horizontalSizeClass == .compact { sidebarVisible = false }
         if settingsVisible { toggleSettings() }
         guard note.id != selectedNote?.id, flushDrawing() else { return }
         guard performEdit(notes: [note], { try NotebookEdits.prepare(note) }) else { return }
@@ -459,7 +673,71 @@ struct ContentView: View {
             try NotebookEdits.prepare(note)
         }) else { return }
         resetCanvas()
+        primaryPDF = nil; secondFocused = false
         selection = note
+    }
+
+    private func resetSecondCanvas() {
+        secondRevision = UUID()
+        secondSession.host?.circleIntent.cancel()
+        secondSession.host?.stopAnimations()
+        secondSession = CanvasSession()
+    }
+
+    private func openDroppedNote(_ reference: NoteDragReference, _ side: Int) {
+        guard let note = notes.first(where: { $0.id == reference.id }), flushDrawing() else { return }
+        guard (primaryPDF != nil || note.id != selectedNote?.id), note.id != secondContent?.note?.id else {
+            secondFocused = note.id == secondContent?.note?.id
+            sidebarVisible = false; dropSide = nil; return
+        }
+        guard performEdit(notes: [note], { try NotebookEdits.prepare(note) }) else { return }
+        place(.note(note), side: side)
+    }
+
+    private func openDroppedSource(_ reference: SourceDragReference, _ side: Int) {
+        sourceOpenTask?.cancel()
+        sourceOpenTask = Task { @MainActor in
+            do {
+                let documents = try await LectureLibrary.shared.documents(noteID: reference.noteID)
+                guard let document = documents.first(where: { $0.id == reference.documentID }) else { return }
+                let url = try await LectureLibrary.shared.pdfURL(noteID: reference.noteID, documentID: reference.documentID)
+                try Task.checkCancellation()
+                guard flushDrawing() else { return }
+                place(.pdf(LecturePDFDestination(url: url, page: 1, title: document.title)), side: side)
+            } catch is CancellationError { }
+            catch { persistenceError = error.localizedDescription }
+        }
+    }
+
+    private func place(_ content: WorkspaceContent, side: Int) {
+        guard flushDrawing() else { return }
+        if side == 0 {
+            if secondContent == nil {
+                secondContent = primaryPDF.map(WorkspaceContent.pdf) ?? selectedNote.map(WorkspaceContent.note)
+                resetSecondCanvas()
+            }
+            resetCanvas()
+            switch content {
+            case .note(let note): selection = note; primaryPDF = nil
+            case .pdf(let pdf): primaryPDF = pdf
+            }
+            secondFocused = false
+        } else {
+            resetSecondCanvas(); secondContent = content; secondFocused = true
+        }
+        sidebarVisible = false; showSources(nil); sourceDragging = false; dropSide = nil
+    }
+
+    private func closeSplit(keepingSecond: Bool) {
+        guard flushDrawing() else { return }
+        if keepingSecond, let secondContent {
+            resetCanvas()
+            switch secondContent {
+            case .note(let note): selection = note; primaryPDF = nil
+            case .pdf(let pdf): primaryPDF = pdf
+            }
+        }
+        resetSecondCanvas(); secondContent = nil; secondFocused = false
     }
 
     private func resetCanvas() {
@@ -469,12 +747,15 @@ struct ContentView: View {
     }
 
     private func flushDrawing() -> Bool {
-        guard !session.isDrawing else {
+        guard !session.isDrawing, !secondSession.isDrawing else {
             persistenceError = "Finish the current Pencil stroke before changing pages or notes."
             return false
         }
         if let canvas = session.canvas, let note = selectedNote {
             note.drawingData = (session.host?.canonicalDrawing ?? MonochromeInk.canonical(canvas.drawing)).dataRepresentation()
+        }
+        if let canvas = secondSession.canvas, let note = secondContent?.note {
+            note.drawingData = (secondSession.host?.canonicalDrawing ?? MonochromeInk.canonical(canvas.drawing)).dataRepresentation()
         }
         return saveNow()
     }
@@ -500,7 +781,7 @@ struct ContentView: View {
         guard flushDrawing(), performEdit(notes: [note], {
             try NotebookEdits.trashPages(ids, in: note, context: modelContext)
         }) else { return false }
-        resetCanvas()
+        if secondContent?.note?.id == note.id { resetSecondCanvas() } else { resetCanvas() }
         return true
     }
 
@@ -508,8 +789,8 @@ struct ContentView: View {
         guard flushDrawing() else { return }
         var restored: Note?
         guard performEdit(notes: (notes + trashedNotes).filter { $0.id == page.noteID }, { restored = try NotebookEdits.restore(page, context: modelContext) }) else { return }
-        resetCanvas()
-        selection = restored
+        if let restored, secondContent?.note?.id == restored.id { resetSecondCanvas() }
+        else { resetCanvas(); primaryPDF = nil; selection = restored }
     }
 
     private func addBlankPage(to note: Note) {
@@ -518,7 +799,7 @@ struct ContentView: View {
             note.currentPageIndex = note.pageCount - 1
             note.updatedAt = .now
         }) else { return }
-        resetCanvas()
+        if secondContent?.note?.id == note.id { resetSecondCanvas() } else { resetCanvas() }
     }
 
     @discardableResult
@@ -562,7 +843,7 @@ struct ContentView: View {
     private func refreshHandwriting() {
         var available = notes
         if let selectedNote, !available.contains(where: { $0.id == selectedNote.id }) { available.insert(selectedNote, at: 0) }
-        handwriting.setPaused(scenePhase != .active || session.isDrawing || (session.host?.circleIntent.phase ?? .idle) != .idle)
+        handwriting.setPaused(scenePhase != .active || session.isDrawing || secondSession.isDrawing || (session.host?.circleIntent.phase ?? .idle) != .idle || (secondSession.host?.circleIntent.phase ?? .idle) != .idle)
         handwriting.update(notes: available, preferredID: selectedNote?.id)
     }
 

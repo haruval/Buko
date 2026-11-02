@@ -18,7 +18,7 @@ nonisolated enum AutofillLayout {
         let letterHeight: CGFloat
         let sampledGlyphCount: Int
         let fallbackGlyphCount: Int
-        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v2" : "note-samples-with-fallback-v3" }
+        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v2" : "note-samples-with-fallback-v4" }
         var drawing: PKDrawing { PKDrawing(strokes: existing.strokes + inserted.strokes) }
         var bounds: CGRect { lines.reduce(.null) { $0.union($1.frame) } }
     }
@@ -70,6 +70,13 @@ nonisolated enum AutofillLayout {
         let style = AutofillTypography.style(selectedRows.last!, neighbors: selectedRows)
         let size = min(96, max(10, letterHeight ?? anchor?.height ?? style.height))
         let scale = size / HandwritingSample.capHeight
+        // Match actual PencilKit point sizes in document coordinates, independently
+        // of letter height. Scaling a normalized alphabet used to thicken its pen.
+        let nearbyWidths: [CGFloat] = selected.flatMap { stroke -> [CGFloat] in
+            let transformScale = hypot(stroke.transform.a, stroke.transform.b)
+            return stroke.path.map { $0.size.width * transformScale }
+        }.filter { $0.isFinite && $0 > 0 }.sorted()
+        let penWidth: CGFloat = nearbyWidths.isEmpty ? 2.5 : nearbyWidths[nearbyWidths.count / 2]
         var split = anchor?.row.maxY ?? selectedBounds.maxY
         for stroke in drawing.strokes.sorted(by: { $0.renderBounds.minY < $1.renderBounds.minY }) {
             let b = stroke.renderBounds
@@ -87,6 +94,23 @@ nonisolated enum AutofillLayout {
             }
         }
         let personal = Set(decoded.keys)
+        for key in personal {
+            guard let glyph = decoded[key] else { continue }
+            let widths = glyph.strokes.flatMap { stroke in
+                stroke.path.map { $0.size.width * hypot(stroke.transform.a, stroke.transform.b) * scale }
+            }.filter { $0.isFinite && $0 > 0 }.sorted()
+            guard !widths.isEmpty else { continue }
+            let ratio = penWidth / widths[widths.count / 2]
+            decoded[key] = PKDrawing(strokes: glyph.strokes.map { stroke in
+                let points = stroke.path.map { point in
+                    PKStrokePoint(location: point.location, timeOffset: point.timeOffset,
+                        size: CGSize(width: point.size.width * ratio, height: point.size.height * ratio),
+                        opacity: point.opacity, force: point.force, azimuth: point.azimuth, altitude: point.altitude)
+                }
+                return PKStroke(ink: stroke.ink, path: PKStrokePath(controlPoints: points, creationDate: stroke.path.creationDate),
+                                transform: stroke.transform, mask: stroke.mask, randomSeed: stroke.randomSeed)
+            })
+        }
         var missing: [String] = []
         for key in Set(text.filter { !$0.isWhitespace }.map(String.init)).sorted() where decoded[key] == nil {
             if let sample = HandwrittenFont.sample(key) { decoded[key] = try PKDrawing(data: sample.drawingData) }
