@@ -244,7 +244,10 @@ nonisolated enum GapSyntaxBinding {
 /// enforceable; interpretation and the information-needs labels remain fallible.
 nonisolated struct ValidatedGapPlan: Sendable {
     let value: MissingInformationPlan
-    private init(value: MissingInformationPlan) { self.value = value }
+    let clarification: String?
+    private init(value: MissingInformationPlan, clarification: String? = nil) {
+        self.value = value; self.clarification = clarification
+    }
     var targetText: String { value.targets.map(\.quote).joined(separator: " ") }
     /// Keep the exact target for planning/writing; search its subject without
     /// requiring sources to contain generic words such as "example" or "steps".
@@ -287,7 +290,13 @@ nonisolated struct ValidatedGapPlan: Sendable {
         return queries
     }
 
-    static func validate(_ plan: MissingInformationPlan, in transcript: GapTranscript) throws -> Self {
+    static func validate(_ plan: MissingInformationPlan, in transcript: GapTranscript, clarifiedBy clarification: String? = nil) throws -> Self {
+        if let clarification {
+            guard !clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, clarification.count <= 500 else {
+                throw GapPlanError.invalidReferences("clarificationLength")
+            }
+            guard !LectureGroundingPolicy.containsInstructionOverride(clarification) else { throw GapPlanError.instructionRisk }
+        }
         func fail(_ detail: String) throws -> Never { throw GapPlanError.invalidReferences(detail) }
         guard (1...3).contains(plan.targets.count), plan.alreadyCovered.count <= 4,
               plan.informationNeeds.count <= 3 else { try fail("fieldCount") }
@@ -343,6 +352,7 @@ nonisolated struct ValidatedGapPlan: Sendable {
         }
         // Exact membership alone cannot reject a real but completed neighbor.
         // Where syntax is unambiguous, also enforce its target/role contract.
+        if clarification == nil {
         switch GapSyntaxBinding.inspect(transcript) {
         case .bound(let binding):
             guard plan.targets == binding.targets, plan.alreadyCovered == binding.alreadyCovered,
@@ -361,7 +371,8 @@ nonisolated struct ValidatedGapPlan: Sendable {
             if taskHeadings.count > 1 { try fail("ambiguousHeadings") }
             if !taskHeadings.isEmpty, plan.targets != taskHeadings { try fail("answerFormTargetMismatch") }
         }
-        return Self(value: plan)
+        }
+        return Self(value: plan, clarification: clarification)
     }
 }
 

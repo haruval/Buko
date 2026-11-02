@@ -1,7 +1,7 @@
 import PencilKit
 
-/// Idle-time preparation independent of the text an autofill may later generate. Complete recognized words can retain joined cursive; ambiguous letter
-/// matches fall back instead of slicing a stroke into invented glyphs.
+/// Sample individual recognized characters so every available personal letter
+/// participates in new words, independent of the eventual completion text.
 actor HandwritingSampler {
     struct Result: Sendable {
         var samples: [String: HandwritingSample] = [:]
@@ -55,26 +55,62 @@ actor HandwritingSampler {
         // words that have never appeared in the source notes.
         let characters = recognized.filter { !$0.isWhitespace }.map(String.init)
             .filter { seen.insert($0).inserted }.prefix(96)
-        let words = Self.words(in: recognized).filter { $0.count > 1 && $0.count <= 128 && seen.insert($0).inserted }.prefix(128)
         let rows = AutofillTypography.rows(complete)
-        for query in Array(characters) + Array(words) {
+        var inspectedStrokeSets = Set<Set<UUID>>()
+        for query in characters where result.samples[query] == nil {
             if ProcessInfo.processInfo.systemUptime - started > 12 { break }
             try Task.checkCancellation()
             let matches = await recognizer.search(query, fullWordsOnly: query.count > 1, caseMatchingOnly: true)
-            for match in matches.prefix(3) {
+            for match in matches.prefix(8) {
                 try Task.checkCancellation()
                 let strokes = complete.filter { match.strokes.contains($0.id) }
                 guard Self.isIsolated(strokes: strokes, bounds: match.bounds, all: complete),
                       rows.contains(where: { $0.bounds.contains(CGPoint(x: match.bounds.midX, y: match.bounds.midY)) }) else { continue }
-                let isolated = await recognizer.recognizedText(strokeIDs: match.strokes) ?? ""
-                guard isolated.trimmingCharacters(in: .whitespacesAndNewlines) == query else { continue }
-                guard let sample = try? HandwritingSample.normalized(drawing: PKDrawing(strokes: strokes), text: query) else { continue }
-                result.samples[query] = sample
-                break
+                guard inspectedStrokeSets.insert(match.strokes).inserted else { continue }
+                let text = (await recognizer.recognizedText(strokeIDs: match.strokes) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                // PencilKit can return a whole word's stroke IDs for a character
+                // search. Never label that entire word as one letter. Separate
+                // disjoint print glyphs only when their count matches the exact
+                // recognized text; connected or ambiguous ink remains unsampled.
+                let letters = Self.letterDrawings(text: text, strokes: strokes)
+                for (key, ink) in letters where result.samples[key] == nil {
+                    if let sample = try? HandwritingSample.normalized(drawing: ink, text: key) {
+                        result.samples[key] = sample
+                    }
+                }
+                if result.samples[query] != nil { break }
             }
         }
         try Task.checkCancellation()
         return result
+    }
+
+    nonisolated static func letterDrawings(text: String, strokes: [PKStroke]) -> [(String, PKDrawing)] {
+        let characters = text.filter { !$0.isWhitespace }.map(String.init)
+        guard !characters.isEmpty, characters.count <= 128, !strokes.isEmpty,
+              !text.contains(where: \.isNewline),
+              strokes.allSatisfy({ $0.mask == nil }) else { return [] }
+        if characters.count == 1 { return [(characters[0], PKDrawing(strokes: strokes))] }
+        // Brush antialiasing can make neighboring printed letters' renderBounds
+        // overlap. Group the centerline paths; dots/crossbars still share x spans.
+        let paths = strokes.compactMap { stroke -> (stroke: PKStroke, bounds: CGRect)? in
+            let points = stroke.path.map { $0.location.applying(stroke.transform) }
+            guard let minX = points.map(\.x).min(), let maxX = points.map(\.x).max(),
+                  let minY = points.map(\.y).min(), let maxY = points.map(\.y).max(),
+                  [minX, maxX, minY, maxY].allSatisfy(\.isFinite) else { return nil }
+            return (stroke, CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY))
+        }
+        guard paths.count == strokes.count else { return [] }
+        var groups: [(bounds: CGRect, strokes: [PKStroke])] = []
+        for (stroke, bounds) in paths.sorted(by: { $0.bounds.minX < $1.bounds.minX }) {
+            if let last = groups.last, bounds.minX <= last.bounds.maxX {
+                groups[groups.count - 1].bounds = last.bounds.union(bounds)
+                groups[groups.count - 1].strokes.append(stroke)
+            } else { groups.append((bounds, [stroke])) }
+        }
+        guard groups.count == characters.count else { return [] }
+        return zip(characters, groups).map { ($0.0, PKDrawing(strokes: $0.1.strokes)) }
     }
 
     nonisolated static func headings(in text: String) -> [String] {

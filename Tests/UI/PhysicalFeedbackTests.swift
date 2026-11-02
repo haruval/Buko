@@ -19,24 +19,22 @@ final class PhysicalFeedbackTests: XCTestCase {
     @MainActor func testAlphabetSaveRelaunchAndImmediateScan() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        app.launchArguments = ["--alphabetFingerTesting"]
         app.launch()
         openAlphabet(app)
-        app.buttons["alphabetLetter.a"].tap()
-        app.buttons["clearAlphabetLetter"].tap()
-        let canvas = app.descendants(matching: .any)["alphabetCanvas"].firstMatch
+        app.buttons["rewriteAlphabet.a"].tap()
+        let canvas = app.descendants(matching: .any)["alphabetCanvas.a"].firstMatch
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7))
             .press(forDuration: 0.05, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.3)))
-        let save = app.buttons["saveAlphabetLetter"]
-        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: save)
-        waitForExpectations(timeout: 5)
-        save.tap()
-        XCTAssertTrue(app.buttons["alphabetLetter.a"].label.contains("saved"))
+        let source = app.staticTexts["alphabetSource.a"]
+        expectation(for: NSPredicate(format: "label == 'Your alphabet'"), evaluatedWith: source)
+        waitForExpectations(timeout: 8)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.lifetime = .keepAlways; add(shot)
         app.buttons["closeAlphabet"].tap()
         app.terminate(); app.launch()
         openAlphabet(app)
-        XCTAssertTrue(app.buttons["alphabetLetter.a"].label.contains("saved"))
+        XCTAssertEqual(app.staticTexts["alphabetSource.a"].label, "Your alphabet")
         app.buttons["closeAlphabet"].tap()
         let scan = app.buttons["scanHandwritingNow"]
         if !scan.isHittable { app.swipeUp() }
@@ -47,10 +45,13 @@ final class PhysicalFeedbackTests: XCTestCase {
     @MainActor private func openAlphabet(_ app: XCUIApplication) {
         XCTAssertTrue(app.buttons["openSettings"].waitForExistence(timeout: 15))
         app.buttons["openSettings"].tap()
+        XCTAssertTrue(app.buttons["openDevelopment"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 0.8)
         app.buttons["openDevelopment"].tap()
+        Thread.sleep(forTimeInterval: 0.5)
         let button = app.buttons["writeAlphabet"]
         XCTAssertTrue(button.waitForExistence(timeout: 5))
-        if !button.isHittable { app.swipeUp() }
+        if !button.isHittable { app.scrollViews.containing(.button, identifier: "writeAlphabet").firstMatch.swipeUp() }
         button.tap()
         XCTAssertTrue(app.buttons["closeAlphabet"].waitForExistence(timeout: 5))
     }

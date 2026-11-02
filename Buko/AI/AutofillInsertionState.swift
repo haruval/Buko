@@ -7,9 +7,10 @@ final class AutofillInsertionState {
     private(set) var isAccepting = false
     var issue: String?
     private var sampled = HandwritingSampler.Result()
-    var preparedHandwriting: ((AutofillProposal) -> HandwritingSampler.Result)?
+    var preparedHandwriting: ((AutofillProposal) async throws -> HandwritingSampler.Result)?
     private var proposal: AutofillProposal?
     private var document: AutofillDocument?
+    private var preparation: Task<Void, Never>?
     private var acceptance: Task<Void, Never>?
     var currentDocument: (() -> AutofillDocument?)?
     var previewChanged: ((AutofillLayout.Result?, Bool) -> Void)?
@@ -22,7 +23,7 @@ final class AutofillInsertionState {
     var handwritingDetail: String {
         guard let layout else { return "" }
         if layout.sampledGlyphCount == 0 { return "Handwriting font · matched to the circled text’s size" }
-        return layout.fallbackGlyphCount == 0 ? "Prepared from your notes" : "Prepared note samples, with a handwriting font for missing letters"
+        return layout.fallbackGlyphCount == 0 ? "Your handwriting · letter by letter" : "Your letters, with a handwriting font for missing characters"
     }
 
     func capture() {
@@ -32,10 +33,22 @@ final class AutofillInsertionState {
 
     func prepare(_ proposal: AutofillProposal) {
         self.proposal = proposal
-        // A stable snapshot of ready samples: no recognition, waiting, or later
-        // handwriting replacement while the user is reviewing the preview.
-        sampled = preparedHandwriting?(proposal) ?? HandwritingSampler.Result()
-        rebuild()
+        preparation?.cancel()
+        layout = nil; issue = nil
+        preparation = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let ready = try await preparedHandwriting?(proposal) ?? HandwritingSampler.Result()
+                try Task.checkCancellation()
+                guard self.proposal?.requestID == proposal.requestID else { return }
+                sampled = ready
+                rebuild()
+            } catch is CancellationError { }
+            catch {
+                guard self.proposal?.requestID == proposal.requestID else { return }
+                issue = error.localizedDescription
+            }
+        }
     }
 
     func rebuild() {
@@ -52,6 +65,7 @@ final class AutofillInsertionState {
     }
 
     func cancel(animatedReturn: Bool = false) {
+        preparation?.cancel(); preparation = nil
         acceptance?.cancel(); acceptance = nil
         sampled = HandwritingSampler.Result()
         proposal = nil; document = nil; layout = nil; issue = nil

@@ -52,7 +52,7 @@ actor HandwritingCache {
         let url = directory?.appendingPathComponent(document.noteID.uuidString + ".json")
         if !ignoringCache, let url, let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= Self.byteLimit,
            let data = try? Data(contentsOf: url), let saved = try? JSONDecoder().decode(Envelope.self, from: data),
-           saved.version == 2, saved.revision == revision, Self.valid(saved.handwriting) {
+           saved.version == 4, saved.revision == revision, Self.valid(saved.handwriting) {
             try Task.checkCancellation()
             return saved.handwriting
         }
@@ -63,7 +63,7 @@ actor HandwritingCache {
             // Failure to save derived data never prevents writing or previewing.
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let data = try JSONEncoder().encode(Envelope(version: 2, revision: revision, handwriting: handwriting))
+                let data = try JSONEncoder().encode(Envelope(version: 4, revision: revision, handwriting: handwriting))
                 if data.count <= Self.byteLimit { try data.write(to: url, options: .atomic) }
             } catch { }
         }
@@ -97,10 +97,10 @@ actor HandwritingCache {
     }
 
     private static func valid(_ profile: PreparedHandwriting) -> Bool {
-        guard profile.samples.count <= 224, profile.headings.count <= 128,
+        guard profile.samples.count <= 96, profile.headings.count <= 128,
               profile.samples.values.reduce(0, { $0 + $1.drawingData.count }) <= byteLimit else { return false }
         for (key, sample) in profile.samples {
-            guard !key.isEmpty, key.count <= 128,
+            guard key.count == 1,
                   let drawing = try? PKDrawing(data: sample.drawingData),
                   (try? HandwritingSample(drawing: drawing)) != nil else { return false }
         }
@@ -125,7 +125,7 @@ nonisolated struct HandwritingInspectionSample: Sendable {
 }
 
 /// One workspace-owned scheduler. Nothing here observes or mutates live ink, and
-/// autofill only reads completed profiles; it never starts or waits for this work.
+/// Autofill can finish a stale current-note profile before laying out its preview.
 @MainActor final class HandwritingPreparation {
     struct Stamp: Equatable {
         let id: UUID
@@ -145,7 +145,7 @@ nonisolated struct HandwritingInspectionSample: Sendable {
     private var generation = UUID()
     private var paused = false
 
-    init(cache: HandwritingCache = HandwritingCache(), idleDelay: Duration = .seconds(2), alphabet: PersonalAlphabetStore? = nil) {
+    init(cache: HandwritingCache = HandwritingCache(), idleDelay: Duration = .milliseconds(350), alphabet: PersonalAlphabetStore? = nil) {
         self.cache = cache; self.idleDelay = idleDelay; self.alphabet = alphabet ?? PersonalAlphabetStore()
     }
 
@@ -197,17 +197,14 @@ nonisolated struct HandwritingInspectionSample: Sendable {
     }
 
     func inspection(preferredID: UUID?) -> [String: HandwritingInspectionSample] {
-        var result: [String: HandwritingInspectionSample] = [:]
+        var result = alphabet.samples.mapValues { HandwritingInspectionSample(sample: $0, source: "Your alphabet") }
         let ids = preferredID.map { [$0] } ?? []
         for id in ids + stamps.map(\.id).filter({ $0 != preferredID }) {
             guard let entry = entries[id], let note = notes.first(where: { $0.id == id }),
                   note.deletedAt == nil, Stamp(note) == entry.stamp else { continue }
-            for (key, sample) in entry.handwriting.samples where result[key] == nil {
+            for (key, sample) in entry.handwriting.samples where key.count == 1 && result[key] == nil {
                 result[key] = HandwritingInspectionSample(sample: sample, source: note.title)
             }
-        }
-        for (key, sample) in alphabet.samples where result[key] == nil {
-            result[key] = HandwritingInspectionSample(sample: sample, source: "Your alphabet")
         }
         return result
     }
@@ -225,7 +222,7 @@ nonisolated struct HandwritingInspectionSample: Sendable {
             guard !self.paused else { return }
             do {
                 if !self.status.isRebuilding { try await Task.sleep(for: delay) }
-                let pending = self.status.isRebuilding ? self.notes : Array(self.notes.prefix(4))
+                let pending = self.notes
                 for (index, note) in pending.enumerated() {
                     try Task.checkCancellation()
                     guard token == self.generation, note.deletedAt == nil else { return }
@@ -239,13 +236,7 @@ nonisolated struct HandwritingInspectionSample: Sendable {
                     self.entries[note.id] = Entry(stamp: stamp, handwriting: handwriting)
                     // Scanning every note persists each derivative, but keeps
                     // only a bounded set of recent profiles resident on iPad.
-                    var residentBytes = 0
-                    for stamp in self.stamps {
-                        guard let entry = self.entries[stamp.id] else { continue }
-                        let bytes = entry.handwriting.samples.values.reduce(0) { $0 + $1.drawingData.count }
-                        if residentBytes + bytes > 24_000_000 { self.entries[stamp.id] = nil }
-                        else { residentBytes += bytes }
-                    }
+                    self.trimResidentProfiles(preferredID: self.stamps.first?.id)
                     self.status.revision += 1
                 }
                 self.status.message = self.notes.isEmpty ? "No active notes to sample" : "Ready · \(self.entries.count) notes prepared"
@@ -258,9 +249,37 @@ nonisolated struct HandwritingInspectionSample: Sendable {
         }
     }
 
+    func preparedForPreview(_ proposal: AutofillProposal) async throws -> HandwritingSampler.Result {
+        if let note = notes.first(where: { $0.id == proposal.noteID && $0.deletedAt == nil }) {
+            let stamp = Stamp(note)
+            if entries[note.id]?.stamp != stamp {
+                let document = AutofillDocument(note)
+                let handwriting = try await cache.prepared(for: document)
+                try Task.checkCancellation()
+                guard note.deletedAt == nil, Stamp(note) == stamp else { throw AutofillEditError.stale }
+                entries[note.id] = Entry(stamp: stamp, handwriting: handwriting)
+                trimResidentProfiles(preferredID: note.id)
+                status.revision += 1
+            }
+        }
+        return prepared(for: proposal)
+    }
+
+    private func trimResidentProfiles(preferredID: UUID?) {
+        var seen = Set<UUID>(), bytes = 0
+        let ordered = (preferredID.map { [$0] } ?? []) + stamps.map(\.id) + Array(entries.keys)
+        for id in ordered where seen.insert(id).inserted {
+            guard let entry = entries[id] else { continue }
+            let size = entry.handwriting.samples.values.reduce(0) { $0 + $1.drawingData.count }
+            if bytes + size > 24_000_000 { entries[id] = nil }
+            else { bytes += size }
+        }
+    }
+
     func prepared(for proposal: AutofillProposal) -> HandwritingSampler.Result {
         var result = HandwritingSampler.Result()
-        let keys = Set(HandwritingSampler.words(in: proposal.text) + proposal.text.filter { !$0.isWhitespace }.map(String.init))
+        let keys = Set(proposal.text.filter { !$0.isWhitespace }.map(String.init))
+        for key in keys { result.samples[key] = alphabet.samples[key] }
         let ids = [proposal.noteID] + stamps.map(\.id).filter { $0 != proposal.noteID }
         for id in ids {
             guard let entry = entries[id], let note = notes.first(where: { $0.id == id }),
@@ -270,7 +289,6 @@ nonisolated struct HandwritingInspectionSample: Sendable {
                 result.targetBounds = entry.handwriting.targetBounds(proposal.insertionTarget, selection: proposal.selectionPolygon)
             }
         }
-        for key in keys where result.samples[key] == nil { result.samples[key] = alphabet.samples[key] }
         return result
     }
 }

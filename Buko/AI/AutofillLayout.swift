@@ -18,7 +18,7 @@ nonisolated enum AutofillLayout {
         let letterHeight: CGFloat
         let sampledGlyphCount: Int
         let fallbackGlyphCount: Int
-        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v2" : "note-samples-with-fallback-v2" }
+        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v2" : "note-samples-with-fallback-v3" }
         var drawing: PKDrawing { PKDrawing(strokes: existing.strokes + inserted.strokes) }
         var bounds: CGRect { lines.reduce(.null) { $0.union($1.frame) } }
     }
@@ -80,7 +80,7 @@ nonisolated enum AutofillLayout {
             ?? min(selectedBounds.minX, PageGeometry.pageOriginX + PageGeometry.pageWidth * 0.35))
         let right = PageGeometry.pageOriginX + PageGeometry.pageWidth - margin
         var decoded: [String: PKDrawing] = [:]
-        for (key, value) in samples {
+        for (key, value) in samples where key.count == 1 {
             let source = try PKDrawing(data: value.drawingData)
             if let normalized = try? HandwritingSample.normalized(drawing: source, text: key) {
                 decoded[key] = try PKDrawing(data: normalized.drawingData)
@@ -110,14 +110,6 @@ nonisolated enum AutofillLayout {
                         advance: max(size * 0.14, (glyph?.bounds.width ?? 40) * scale) + size * 0.12,
                         personal: personal.contains(key))
         }
-        func units(_ word: String) -> [Unit] {
-            let core = word.trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.symbols))
-            if core.count > 1, personal.contains(core), let range = word.range(of: core) {
-                return word[..<range.lowerBound].map { unit(String($0)) } + [unit(core)]
-                    + word[range.upperBound...].map { unit(String($0)) }
-            }
-            return word.map { unit(String($0)) }
-        }
         var rows: [[Unit]] = []
         // Only the first line shares the heading's row. Every continuation,
         // paragraph and new-page line returns to the heading's left edge.
@@ -125,7 +117,7 @@ nonisolated enum AutofillLayout {
         for paragraph in text.components(separatedBy: .newlines) {
             var line: [Unit] = [], used: CGFloat = 0
             for word in paragraph.split(whereSeparator: \.isWhitespace).map(String.init) {
-                var letters = units(word)
+                let letters = word.map { unit(String($0)) }
                 let wordWidth = letters.reduce(CGFloat.zero) { $0 + $1.advance }
                 if !line.isEmpty && used + space + wordWidth > availableWidth() {
                     rows.append(line); line = []; used = 0
@@ -135,9 +127,6 @@ nonisolated enum AutofillLayout {
                 if line.isEmpty && rows.isEmpty && firstLeft > continuationLeft && wordWidth > availableWidth() {
                     rows.append([])
                 }
-                // A whole-word sample wider than the column yields to individual
-                // glyphs; its shape is never squeezed horizontally to force a fit.
-                if letters.contains(where: { $0.advance > availableWidth() }) { letters = word.map { unit(String($0)) } }
                 if !line.isEmpty { line.append(Unit(text: " ", glyph: nil, advance: space, personal: false)); used += space }
                 for letter in letters {
                     if used + letter.advance > availableWidth() && !line.isEmpty { rows.append(line); line = []; used = 0 }

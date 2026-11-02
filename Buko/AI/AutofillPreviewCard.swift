@@ -23,6 +23,8 @@ struct AutofillPreviewCard: View {
     @State private var sourcePreview: LecturePDFDestination?
     @State private var sourceError: String?
     @State private var sourceTask: Task<Void, Never>?
+    @State private var clarificationReply = ""
+    @FocusState private var clarificationFocused: Bool
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {
@@ -56,13 +58,17 @@ struct AutofillPreviewCard: View {
             }
             .padding(16)
             .fixedSize(horizontal: false, vertical: true)
-            // Measure the destination content, independent of the glass spring.
-            .onGeometryChange(for: CGSize.self) { CGSize(width: $0.size.width, height: ceil($0.size.height)) } action: { sizeChanged($0) }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("intentPopup")
+        // The outer animated frame proposes its previous height. Measure the
+        // intrinsic sections instead so newly loaded source crops and controls
+        // enlarge both the glass clip and UIKit's touch boundary.
+        .onAppear { sizeChanged(CGSize(width: 0, height: desiredHeight)) }
+        .onChange(of: desiredHeight) { _, height in sizeChanged(CGSize(width: 0, height: height)) }
         .fullScreenCover(item: $sourcePreview) { LecturePDFView(destination: $0) }
         .onDisappear { sourceTask?.cancel() }
+        .onChange(of: state.canClarify) { _, ready in
+            if ready { clarificationReply = "" }
+        }
     }
 
     private var hasContent: Bool {
@@ -73,6 +79,9 @@ struct AutofillPreviewCard: View {
     private var hasFooter: Bool { state.proposal != nil || sourceError != nil || state.insertion.issue != nil }
     private var fixedHeight: CGFloat {
         32 + headerHeight + (hasContent ? 12 : 0) + (hasFooter ? footerHeight + 12 : 0)
+    }
+    private var desiredHeight: CGFloat {
+        ceil(fixedHeight + (hasContent ? min(contentHeight, max(44, maximumHeight - fixedHeight)) : 0))
     }
 
     private var header: some View {
@@ -114,6 +123,7 @@ struct AutofillPreviewCard: View {
         if detailed {
             VStack(alignment: .leading, spacing: 18) {
                 DetailedAutofillPreview(state: state)
+                if state.canClarify { clarificationInput }
                 if !state.citations.isEmpty { sources(state.citations, title: "Approved lecture evidence") }
                 if !state.retrievedHits.isEmpty {
                     DisclosureGroup("Retrieved lecture passages (\(state.retrievedHits.count))") {
@@ -131,9 +141,33 @@ struct AutofillPreviewCard: View {
                 Text("Calculated on this iPad from the matrices in your notes.").font(.subheadline).foregroundStyle(.secondary)
             }
         } else {
-            Text(finishedMessage).font(.subheadline).textSelection(.enabled)
-                .accessibilityIdentifier("autofillUnavailable")
+            VStack(alignment: .leading, spacing: 12) {
+                Text(finishedMessage).font(.subheadline).textSelection(.enabled)
+                    .accessibilityIdentifier("autofillUnavailable")
+                if state.canClarify { clarificationInput }
+            }
         }
+    }
+
+    private var clarificationInput: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Type the topic or what you’d like to add", text: $clarificationReply, axis: .vertical)
+                .lineLimit(1...4).textFieldStyle(.roundedBorder)
+                .focused($clarificationFocused).submitLabel(.go)
+                .accessibilityIdentifier("autofillClarificationInput")
+                .onSubmit(submitClarification)
+            if let issue = state.clarificationIssue { Text(issue).font(.caption).foregroundStyle(.red) }
+            Button("Try autofill", systemImage: "arrow.up") { submitClarification() }
+                .buttonStyle(.glassProminent)
+                .disabled(clarificationReply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || clarificationReply.count > 500)
+                .accessibilityIdentifier("submitAutofillClarification")
+            if clarificationReply.count > 500 { Text("Use 500 characters or fewer.").font(.caption).foregroundStyle(.secondary) }
+        }
+    }
+
+    private func submitClarification() {
+        clarificationFocused = false
+        state.submitClarification(clarificationReply)
     }
 
     private var stageAnimation: Animation? {
@@ -229,9 +263,14 @@ struct AutofillPreviewCard: View {
                     catch { sourceError = error.localizedDescription }
                 }
             } label: {
-                Label("\(prefix)\(passage.title) · p. \(passage.page)", systemImage: "doc.text")
-                    .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("\(prefix)\(passage.title) · p. \(passage.page)", systemImage: "doc.text")
+                        .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    if let noteID = state.noteID {
+                        LectureSourceThumbnail(noteID: noteID, passage: passage, quote: quote)
+                    }
+                }
             }.buttonStyle(.plain).accessibilityIdentifier("autofillSourceLink")
             Text(quote).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("autofillSourcePassage")

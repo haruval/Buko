@@ -3,53 +3,31 @@ import SwiftUI
 
 struct PersonalAlphabetView: View {
     let preparation: HandwritingPreparation
+    var noteID: UUID? = nil
     @Environment(\.dismiss) private var dismiss
-    @State private var letter = "a"
-    @State private var drafts: [String: PKDrawing] = [:]
-    @State private var saved = Set<String>()
-    @State private var error: String?
-
-    private var drawing: Binding<PKDrawing> {
-        Binding(get: { drafts[letter] ?? PKDrawing() }, set: { drafts[letter] = $0 })
-    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Write each letter in your usual handwriting. Samples from your notes always come first; this alphabet fills the gaps.")
+                    Text("Write over each faint guide with Apple Pencil. Use a finger to scroll. Letters save as you write and replace the samples used by autofill.")
                         .foregroundStyle(.secondary)
-                    Text("\(saved.count) of 52 letters saved").font(.subheadline.weight(.medium))
-                        .accessibilityIdentifier("alphabetCoverage")
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
-                        ForEach(PersonalAlphabetStore.letters, id: \.self) { key in
-                            Button { letter = key } label: {
-                                Text(key).font(.title3).frame(maxWidth: .infinity, minHeight: 44)
-                                    .background(letter == key ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 12))
-                                    .overlay(alignment: .topTrailing) {
-                                        if saved.contains(key) { Image(systemName: "checkmark").font(.system(size: 9)).padding(4) }
-                                    }
+                    let _ = preparation.status.revision
+                    let samples = preparation.inspection(preferredID: noteID)
+                    Text("\(PersonalAlphabetStore.letters.filter { samples[$0] != nil }.count) of 52 personal letters ready")
+                        .font(.subheadline.weight(.medium)).accessibilityIdentifier("alphabetCoverage")
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 16)], spacing: 16) {
+                        ForEach(Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(String.init), id: \.self) { capital in
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("\(capital) \(capital.lowercased())").font(.title3.weight(.semibold))
+                                HStack(alignment: .top, spacing: 12) {
+                                    letter(capital, samples: samples)
+                                    letter(capital.lowercased(), samples: samples)
+                                }
                             }
-                            .buttonStyle(.plain).accessibilityLabel("\(key), \(saved.contains(key) ? "saved" : "not saved")")
-                            .accessibilityIdentifier("alphabetLetter.\(key)")
+                            .padding(14).background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 20))
                         }
                     }
-                    Text("Write \(letter)").font(.title2.weight(.medium))
-                    AlphabetCanvas(drawing: drawing)
-                        .frame(height: 220)
-                        .clipShape(.rect(cornerRadius: 20))
-                        .accessibilityLabel("Write the letter \(letter)")
-                        .accessibilityIdentifier("alphabetCanvas")
-                    HStack {
-                        Button("Clear", systemImage: "eraser") { drafts[letter] = PKDrawing() }
-                            .buttonStyle(.glass).accessibilityIdentifier("clearAlphabetLetter")
-                        Spacer()
-                        Button("Save & next", systemImage: "checkmark") { saveAndAdvance() }
-                            .buttonStyle(.glassProminent).disabled(drawing.wrappedValue.strokes.isEmpty)
-                            .accessibilityIdentifier("saveAlphabetLetter")
-                    }
-                    Text("Use Apple Pencil or a finger. Save replaces only this letter; Clear affects the unsaved drawing.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }.padding(24)
             }
             .navigationTitle("Your alphabet").navigationBarTitleDisplayMode(.inline)
@@ -59,51 +37,130 @@ struct PersonalAlphabetView: View {
                 }
             }
         }
-        .onAppear {
-            saved = Set(preparation.alphabet.samples.keys)
-            for (key, sample) in preparation.alphabet.samples where drafts[key] == nil {
-                if let drawing = try? PKDrawing(data: sample.drawingData) {
-                    drafts[key] = drawing.transformed(using: CGAffineTransform(translationX: 60, y: 0))
-                }
-            }
-        }
-        .alert("Letter couldn’t be saved", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
-            Button("OK", role: .cancel) { }
-        } message: { Text(error ?? "Try writing the letter again.") }
     }
 
-    private func saveAndAdvance() {
-        do {
-            try preparation.saveAlphabet(drawing.wrappedValue, letter: letter)
-            saved.insert(letter)
-            let letters = PersonalAlphabetStore.letters
-            if let index = letters.firstIndex(of: letter), index + 1 < letters.count { letter = letters[index + 1] }
-        } catch { self.error = "Your previous saved alphabet is unchanged. Try a clear letter with no erased strokes, or try saving again." }
+    private func letter(_ key: String, samples: [String: HandwritingInspectionSample]) -> some View {
+        AlphabetLetterCell(letter: key, sample: samples[key]) { drawing in
+            try preparation.saveAlphabet(drawing, letter: key)
+        }
+    }
+}
+
+private struct AlphabetLetterCell: View {
+    let letter: String
+    let sample: HandwritingInspectionSample?
+    let save: (PKDrawing) throws -> Void
+    @State private var drawing = PKDrawing()
+    @State private var editing = false
+    @State private var dirty = false
+    @State private var saveTask: Task<Void, Never>?
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(letter == letter.uppercased() ? "Capital \(letter)" : "Lowercase \(letter)")
+                .font(.caption.weight(.medium))
+            AlphabetCanvas(letter: letter, drawing: $drawing, changed: {
+                dirty = true; editing = true; error = nil
+                saveTask?.cancel()
+                saveTask = Task {
+                    do { try await Task.sleep(for: .milliseconds(450)) } catch { return }
+                    persist()
+                }
+            })
+            .frame(height: 172).clipShape(.rect(cornerRadius: 12))
+            .accessibilityLabel("Write \(letter) with Apple Pencil")
+            .accessibilityIdentifier("alphabetCanvas.\(letter)")
+            Text(error ?? (editing ? (dirty ? "Saving…" : "Your alphabet") : sample?.source ?? "Write your letter"))
+                .font(.caption2).foregroundStyle(error == nil ? Color.secondary : Color.red)
+                .lineLimit(2).frame(minHeight: 28, alignment: .topLeading)
+                .accessibilityIdentifier("alphabetSource.\(letter)")
+            Button("Rewrite", systemImage: "pencil.tip.crop.circle") {
+                saveTask?.cancel(); dirty = false; editing = true; error = nil
+                drawing = PKDrawing()
+            }.buttonStyle(.glass).controlSize(.small)
+                .accessibilityLabel("Rewrite \(letter)").accessibilityIdentifier("rewriteAlphabet.\(letter)")
+        }
+        .frame(maxWidth: .infinity)
+        .onAppear { loadSample() }
+        .onChange(of: sample?.sample.drawingData) { _, _ in if !editing { loadSample() } }
+        .onDisappear { saveTask?.cancel(); persist() }
+    }
+
+    private func loadSample() {
+        guard !editing, let sample, let ink = try? PKDrawing(data: sample.sample.drawingData) else { return }
+        drawing = ink.transformed(using: CGAffineTransform(translationX: max(0, (140 - ink.bounds.width) / 2 - ink.bounds.minX), y: 0))
+    }
+
+    private func persist() {
+        guard dirty, !drawing.strokes.isEmpty else { return }
+        do { try save(drawing); dirty = false; error = nil }
+        catch { self.error = "Couldn’t save. Add the rest of the letter or rewrite it." }
     }
 }
 
 private struct AlphabetCanvas: UIViewRepresentable {
+    let letter: String
     @Binding var drawing: PKDrawing
+    let changed: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeUIView(context: Context) -> PKCanvasView {
-        let canvas = PKCanvasView()
-        canvas.backgroundColor = .secondarySystemBackground
-        canvas.overrideUserInterfaceStyle = .light
-        canvas.drawingPolicy = .anyInput
-        canvas.isScrollEnabled = false
-        canvas.tool = PKInkingTool(.pen, color: .black, width: 2.5)
-        canvas.drawing = drawing
-        canvas.delegate = context.coordinator
-        return canvas
+    func makeUIView(context: Context) -> AlphabetWritingView {
+        let view = AlphabetWritingView(letter: letter)
+        view.canvas.drawing = drawing
+        view.canvas.delegate = context.coordinator
+        return view
     }
-    func updateUIView(_ canvas: PKCanvasView, context: Context) {
+    func updateUIView(_ view: AlphabetWritingView, context: Context) {
         context.coordinator.parent = self
-        if canvas.drawing != drawing { canvas.drawing = drawing; canvas.undoManager?.removeAllActions() }
+        if view.canvas.drawing != drawing {
+            context.coordinator.updating = true
+            view.canvas.drawing = drawing
+            view.canvas.undoManager?.removeAllActions()
+            context.coordinator.updating = false
+        }
     }
     final class Coordinator: NSObject, PKCanvasViewDelegate {
         var parent: AlphabetCanvas
+        var updating = false
         init(_ parent: AlphabetCanvas) { self.parent = parent }
-        func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) { parent.drawing = canvasView.drawing }
+        func canvasViewDrawingDidChange(_ canvas: PKCanvasView) {
+            guard !updating, canvas.drawing != parent.drawing else { return }
+            parent.drawing = canvas.drawing
+            parent.changed()
+        }
+    }
+}
+
+private final class AlphabetWritingView: UIView {
+    let canvas = PKCanvasView()
+    private let guide = UILabel()
+    init(letter: String) {
+        super.init(frame: .zero)
+        backgroundColor = .white
+        guide.attributedText = NSAttributedString(string: letter, attributes: [
+            .font: UIFont.systemFont(ofSize: 96, weight: .regular),
+            .strokeColor: UIColor.black.withAlphaComponent(0.15), .strokeWidth: 1.2,
+            .foregroundColor: UIColor.clear
+        ])
+        guide.textAlignment = .center
+        guide.isUserInteractionEnabled = false
+        guide.isAccessibilityElement = false
+        addSubview(guide)
+        canvas.backgroundColor = .clear; canvas.isOpaque = false
+        canvas.overrideUserInterfaceStyle = .light
+        canvas.drawingPolicy = .pencilOnly
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--alphabetFingerTesting") { canvas.drawingPolicy = .anyInput }
+        #endif
+        canvas.isScrollEnabled = false
+        canvas.tool = PKInkingTool(.pen, color: .black, width: 2.5)
+        addSubview(canvas)
+    }
+    required init?(coder: NSCoder) { fatalError("Use init(letter:)") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guide.frame = CGRect(x: 0, y: 13, width: bounds.width, height: 136)
+        canvas.frame = bounds
     }
 }

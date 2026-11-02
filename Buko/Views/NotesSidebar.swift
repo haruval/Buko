@@ -201,8 +201,8 @@ private struct LibraryPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .bukoGlass(cornerRadius: 28)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 1.035 : 1)
-            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 1.055 : 1)
+            .animation(reduceMotion ? nil : (configuration.isPressed ? .easeIn(duration: 0.45) : .spring(response: 0.24, dampingFraction: 0.8)), value: configuration.isPressed)
     }
 }
 

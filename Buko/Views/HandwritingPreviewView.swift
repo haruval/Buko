@@ -6,7 +6,6 @@ struct HandwritingPreviewView: View {
     let noteID: UUID?
     @Environment(\.dismiss) private var dismiss
     @State private var tiles: [HandwritingPreviewTile] = []
-    @State private var showsWords = false
     private let renderer = HandwritingPreviewRenderer()
 
     var body: some View {
@@ -16,7 +15,7 @@ struct HandwritingPreviewView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(preparation.status.message).font(.subheadline)
                             .accessibilityIdentifier("handwritingPreparationStatus")
-                        Text("Notes take priority, then your saved alphabet. Remaining letters use Buko’s handwriting font. Scan notes now refreshes samples from every active note.")
+                        Text("Your saved alphabet overrides note samples. Each available personal letter is used immediately; remaining characters use Buko’s handwriting font. Scan notes now refreshes samples from every active note.")
                             .font(.caption).foregroundStyle(.secondary)
                         Button(action: preparation.rebuild) {
                             Label(preparation.status.isRebuilding ? "Scanning notes…" : "Scan notes now", systemImage: "arrow.clockwise")
@@ -24,25 +23,10 @@ struct HandwritingPreviewView: View {
                         }.buttonStyle(.glass).disabled(preparation.status.isRebuilding)
                             .accessibilityIdentifier("rebuildHandwritingCache")
                     }
-                    Picker("Samples", selection: $showsWords) {
-                        Text("Letters & symbols").tag(false)
-                        Text("Prepared words").tag(true)
-                    }.pickerStyle(.segmented)
-                    if showsWords {
-                        let words = tiles.filter { $0.key.count > 1 }
-                        if words.isEmpty {
-                            Text("No complete word samples are ready yet.").foregroundStyle(.secondary)
-                        } else {
-                            sampleGrid(words, minimum: 140)
-                        }
-                        Text("A prepared word can preserve connected handwriting even when its individual letters use the fallback.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        let letters = tiles.filter { $0.key.count == 1 }
-                        Text("\(letters.filter(\.prepared).count) prepared · \(letters.filter { !$0.prepared }.count) fallback")
-                            .font(.subheadline.weight(.medium)).accessibilityIdentifier("handwritingCoverage")
-                        sampleGrid(letters, minimum: 76)
-                    }
+                    let letters = tiles.filter { $0.key.count == 1 }
+                    Text("\(letters.filter(\.prepared).count) prepared · \(letters.filter { !$0.prepared }.count) fallback")
+                        .font(.subheadline.weight(.medium)).accessibilityIdentifier("handwritingCoverage")
+                    sampleGrid(letters, minimum: 76)
                 }.padding(24)
             }
             .navigationTitle("Handwriting samples").navigationBarTitleDisplayMode(.inline)

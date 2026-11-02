@@ -65,6 +65,10 @@ import SwiftData
         }
         precondition(staged.existing.strokes[1].renderBounds.minY > staged.bounds.maxY)
         precondition(original.dataRepresentation() == originalData, "Staging cannot mutate original ink")
+        let lettersOnly = try AutofillLayout.stage(text: "aba", drawing: original, selection: selection(110),
+            pageCount: 1, samples: ["a": samples["a"]!, "aba": samples["b"]!])
+        precondition(lettersOnly.sampledGlyphCount == 2 && lettersOnly.fallbackGlyphCount == 1,
+            "An old word cache must never hide personal letter samples or missing-letter fallback")
         let unavailable = try AutofillLayout.stage(text: "abc", drawing: original, selection: selection(110),
             pageCount: 1, samples: samples)
         precondition(unavailable.missing.isEmpty && !unavailable.inserted.strokes.isEmpty && unavailable.fallbackGlyphCount == 1)

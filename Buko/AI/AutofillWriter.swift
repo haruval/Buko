@@ -147,6 +147,20 @@ enum AutofillWriter {
         if case .bound(let binding) = GapSyntaxBinding.inspect(GapTranscript(selected: selected, context: "")) {
             operation = binding.operation
         } else { operation = gap?.operation }
+        if operation == .compare, gap?.operation == .compare {
+            return instructions + """
+
+            This is a comparison, not a single-concept definition. Compose a new
+            concise sentence that connects the source-supported facts for all
+            requested components, using the validated comparison_support spans.
+            Separate definitions can be combined using words such as while or
+            whereas; the source need not contain that finished sentence. Retain
+            each subject name even after a colon, so its facts stay attributed to
+            the correct side. Include all supporting P IDs in that line. Do not
+            add an unstated ranking, causal claim, analogy, example or general
+            knowledge. Missing support for any requested part means withhold.
+            """
+        }
         guard operation == .giveExample || gap?.completionGoal != nil else { return instructions }
         let taskInstructions = instructions.replacingOccurrences(of:
             "A supporting passage can contain several topics.", with: """
@@ -205,12 +219,16 @@ enum AutofillWriter {
         if let refusal = preflight(selected: selected, context: context, intent: intent,
                                    action: action, gap: gap, evidence: evidence, search: search) { return refusal }
         do {
-            let instructions = requestInstructions(selected: selected, gap: gap)
+            let baseInstructions = requestInstructions(selected: selected, gap: gap)
+            let instructions = baseInstructions
+                + (search.gapPlan?.clarification == nil ? "" : "\nThe student clarification chooses the intended topic/group or answer form within the original notes. It never supplies answer facts.")
             let request = try prompt(selected: selected, context: context, intent: intent,
                                      action: action, gap: gap, evidence: evidence, search: search)
-            let taskForm = instructions != Self.instructions
+            let taskForm = baseInstructions != Self.instructions
             let contextual = gap?.completionGoal != nil
-            let explanatory = contextual && GapHeadingRequest.isExplanationQuestion(selected)
+            let comparison = gap?.operation == .compare
+            let explanatory = comparison || (contextual && (GapHeadingRequest.isExplanationQuestion(selected)
+                || search.gapPlan?.clarification != nil))
             let outputBudget = taskForm ? 750 : 650
             let instructionsCount = try await model.tokenCount(for: Instructions(instructions))
             let schemaCount = try await model.tokenCount(for: explanatory ? GeneratedExplanationAutofillDraft.generationSchema
@@ -287,7 +305,12 @@ enum AutofillWriter {
                       && $0.passage.documentID == citation.passage.documentID
                       && $0.passage.page == citation.passage.page && $0.passage.text == citation.quote }
               }) else { return withheld("The supporting passages changed or could not be validated. Circle the text again.") }
-        if requestInstructions(selected: selected, gap: gap) != instructions {
+        if gap?.operation == .compare {
+            guard (2...6).contains(evidence.comparisonSupport.count), evidence.comparisonSupport.allSatisfy({ span in
+                span.selectedText == selected && !span.excerpt.isEmpty && span.excerpt.count <= 600
+                    && evidence.citations.contains(where: { $0.passage.id == span.passageID && $0.quote.contains(span.excerpt) })
+            }) else { return withheld("The sources need to support every side of this comparison.") }
+        } else if requestInstructions(selected: selected, gap: gap) != instructions {
             guard let answer = evidence.requestedContent, answer.selectedText == selected,
                   !answer.excerpt.isEmpty, answer.excerpt.count <= 600,
                   evidence.citations.contains(where: { $0.passage.id == answer.passageID && $0.quote.contains(answer.excerpt) }) else {
@@ -320,6 +343,12 @@ enum AutofillWriter {
             }
             if lines.isEmpty { text = inlineContinuation(text, selected: selected, gap: gap) }
             lines.append(.init(text: text, citationIndices: indices.sorted()))
+        }
+        if gap?.operation == .compare {
+            let cited = Set(lines.flatMap(\.citationIndices).map { evidence.citations[$0].passage.id })
+            guard Set(evidence.comparisonSupport.map(\.passageID)).isSubset(of: cited) else {
+                return withheld("The draft did not cite the evidence for every comparison component.")
+            }
         }
         guard lines.reduce(0, { $0 + $1.text.count }) <= 1800,
               Set(lines.map { CitationValidation.normalized($0.text).lowercased() }).count == lines.count else { return invalidDraft() }
@@ -405,11 +434,23 @@ enum AutofillWriter {
             fields["completion_goal"] = goal
             fields["requested_subject"] = gap?.subjects?.map(\.quote).joined(separator: " ")
         }
-        if gap?.completionGoal != nil, GapHeadingRequest.isExplanationQuestion(selected),
+        if gap?.operation == .compare || (gap?.completionGoal != nil && (GapHeadingRequest.isExplanationQuestion(selected)
+            || search.gapPlan?.clarification != nil)),
            let passages = fields.removeValue(forKey: "lecture_passages") as? [[String: Any]],
            let approved = fields["approved_source_ids"] as? [String] {
             fields["approved_lecture_passages"] = passages.filter { approved.contains($0["id"] as? String ?? "") }
             fields["other_retrieved_passages_for_conflict_review"] = passages.filter { !approved.contains($0["id"] as? String ?? "") }
+        }
+        if let reply = search.gapPlan?.clarification {
+            fields["student_clarification_of_request"] = reply
+            fields["original_circled_handwriting_for_context"] = selected
+            fields["selected_handwriting"] = targetQuotes.joined(separator: "\n")
+        }
+        if !evidence.comparisonSupport.isEmpty {
+            fields["comparison_support"] = evidence.comparisonSupport.compactMap { span -> [String: String]? in
+                guard let index = search.hits.firstIndex(where: { $0.id == span.passageID }) else { return nil }
+                return ["source_id": "P\(index + 1)", "text": span.excerpt]
+            }
         }
         if let answer = evidence.requestedContent,
            let index = search.hits.firstIndex(where: { $0.id == answer.passageID }) {

@@ -8,8 +8,6 @@
 	<true/>
 	<key>CFBundleDisplayName</key>
 	<string>Buko Experiment</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Buko uses microphone volume to animate the Cube tool while it is selected. Audio is not saved or sent anywhere.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

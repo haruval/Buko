@@ -14,15 +14,19 @@ struct CircleIntentOverlay: View {
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
     @State private var measuredHeight: CGFloat = 76
     @State private var dragOrigin: CGPoint?
+    @State private var keyboardFrame = CGRect.null
 
     var body: some View {
         GeometryReader { geometry in
-            let maximumHeight = max(120, min(620, geometry.size.height - 160))
+            let keyboardTop = keyboardFrame.isNull ? geometry.size.height
+                : keyboardFrame.minY - geometry.frame(in: .global).minY
+            let viewport = CGSize(width: geometry.size.width, height: min(geometry.size.height, max(240, keyboardTop)))
+            let maximumHeight = max(120, min(620, viewport.height - 160))
             let popupSize = CGSize(
                 width: min(detailedPreview ? 390 : 330, CirclePopupPlacement.preferredWidth(
                     viewport: geometry.size, region: state.selectionBounds.applying(state.projection))),
                 height: min(measuredHeight, maximumHeight))
-            let layout = PopupLayout(size: popupSize, viewport: geometry.size,
+            let layout = PopupLayout(size: popupSize, viewport: viewport,
                 insertedBounds: state.insertion.layout?.bounds, stage: AutofillPreviewStage(state), detailed: detailedPreview)
             ZStack(alignment: .topLeading) {
                 if state.phase != .idle {
@@ -37,7 +41,7 @@ struct CircleIntentOverlay: View {
                                 guard let origin = dragOrigin else { return }
                                 var transaction = Transaction(); transaction.disablesAnimations = true
                                 withTransaction(transaction) {
-                                    state.movePopup(to: CGPoint(x: origin.x + translation.width, y: origin.y + translation.height), viewport: geometry.size)
+                                    state.movePopup(to: CGPoint(x: origin.x + translation.width, y: origin.y + translation.height), viewport: viewport)
                                 }
                             } else { dragOrigin = nil }
                         }) { size in
@@ -46,13 +50,15 @@ struct CircleIntentOverlay: View {
                             // Place from the measured destination immediately. A content
                             // measurement can arrive after the stage's layout change.
                             repositionPopup(CGSize(width: popupSize.width, height: min(size.height, maximumHeight)),
-                                            viewport: geometry.size, animated: true)
+                                            viewport: viewport, animated: true)
                         }
-                            .frame(width: popupSize.width, alignment: .topLeading)
+                            .frame(width: popupSize.width, height: popupSize.height, alignment: .topLeading)
                             .transaction { $0.animation = nil }
                             .modifier(PopupPresentation(bounds: CGRect(origin: state.popupBounds.origin, size: popupSize), state: state))
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("intentPopup")
                             .animation(stageAnimation, value: popupSize)
-                            .onAppear { positionPopup(popupSize, viewport: geometry.size) }
+                            .onAppear { positionPopup(popupSize, viewport: viewport) }
                             .onChange(of: layout) { previous, current in
                                 // Choose the destination once, never from intermediate spring sizes.
                                 // Camera/viewport changes remain direct; only pipeline changes spring.
@@ -68,6 +74,10 @@ struct CircleIntentOverlay: View {
             .coordinateSpace(name: "autofillOverlay")
         }
         .ignoresSafeArea()
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect ?? .null
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardFrame = .null }
         .onChange(of: state.phase) { _, phase in
             if phase == .idle { measuredHeight = 76; dragOrigin = nil }
         }
@@ -145,8 +155,7 @@ private struct PopupPresentation: ViewModifier, Animatable {
         // This non-observed cache has no layout/state feedback. Updating it from
         // the interpolated value keeps moving controls from leaking taps to ink.
         state.popupHitBounds = bounds
-        return content.frame(width: bounds.width, height: bounds.height, alignment: .topLeading)
-            .clipShape(.rect(cornerRadius: CirclePopupPlacement.cornerRadius))
+        return content.clipShape(.rect(cornerRadius: CirclePopupPlacement.cornerRadius))
             .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.18)), in: .rect(cornerRadius: CirclePopupPlacement.cornerRadius))
             .offset(x: bounds.minX, y: bounds.minY)
     }
@@ -187,7 +196,7 @@ private struct GestureJellyShape: Shape {
         }
         guard let droplet else { return Path() }
         let blob = CircleJellyGeometry.smoothPath(droplet.contour(at: now, reduceMotion: reduceMotion))
-        let head = reduceMotion ? droplet.target : droplet.sample(at: now).position
+        let head = droplet.target
         let tip = tailAnchor.map { CircleJellyGeometry.paint([$0, head]) } ?? CGMutablePath()
         return Path(paint.union(tip).union(blob))
     }

@@ -62,6 +62,42 @@ final class CircleIntentState {
     private var task: Task<Void, Never>?
     private var timeout: Task<Void, Never>?
 
+    private struct RequestSnapshot {
+        let reading: CircleInkReader.Result
+        let spatialLines: [SpatialLine]?
+        let noteID: UUID?
+        let capturedAt: Date
+        let polygon: [CGPoint]
+    }
+    @ObservationIgnored private var snapshot: RequestSnapshot?
+    var clarificationIssue: String?
+
+    var canClarify: Bool { phase == .finished && !clarification.isEmpty && snapshot != nil }
+
+    func submitClarification(_ text: String) {
+        guard #available(iOS 27, *), canClarify, let snapshot, snapshot.noteID == noteID else { return }
+        let reply = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty, reply.count <= 500 else {
+            clarificationIssue = "Enter a topic or request in 500 characters or fewer."; return
+        }
+        guard !LectureGroundingPolicy.containsInstructionOverride(reply) else {
+            clarificationIssue = LectureGroundingPolicy.Refusal.instructionRisk.explanation; return
+        }
+        let question = clarification
+        task?.cancel(); timeout?.cancel()
+        let id = UUID(); requestID = id
+        insertion.capture()
+        proposal = nil; issue = nil; clarificationIssue = nil; clarification = ""
+        citations = []; retrievedHits = []; missingInformation = nil
+        sourceLabel = "Determining source…"; sourceDetail = ""; draftDetail = ""
+        intentSeconds = 0; proposalSeconds = 0; draftingSeconds = 0; retrievalSeconds = 0
+        pipeline = PipelineTrace(); phase = .inferring
+        task = Task { [weak self] in
+            await self?.complete(snapshot, id: id, question: question, reply: reply)
+        }
+        armTimeout(id: id)
+    }
+
     var processing: Bool { phase == .recognizing || phase == .inferring || phase == .retrieving || phase == .proposing || phase == .drafting }
 
     var progressLabel: String {
@@ -152,6 +188,7 @@ final class CircleIntentState {
         task?.cancel(); task = nil
         timeout?.cancel(); timeout = nil
         arithmeticChecked = false
+        snapshot = nil; clarification = ""; clarificationIssue = nil
         citations = []; sourceLabel = "Determining source…"; sourceDetail = ""
         retrievedHits = []; pipeline = PipelineTrace()
         retrievalSeconds = 0; retrievedPassageCount = 0; retrievalMethod = ""
@@ -205,7 +242,6 @@ final class CircleIntentState {
         }
         task?.cancel(); timeout?.cancel()
         let id = UUID(); requestID = id
-        let observer: PipelineObserver = { [weak self] event in await self?.record(event, request: id) }
         let planningMode = AppBuildConfiguration.capturePlanningMode()
         let capturedNoteID = noteID
         let capturedAt = Date()
@@ -259,120 +295,141 @@ final class CircleIntentState {
                 phase = .finished; timeout?.cancel()
                 return
             }
-            let model = SystemLanguageModel.default
-            guard case .available = model.availability else {
-                finishIssue(Self.unavailableMessage(model), id: id); return
+            let snapshot = RequestSnapshot(reading: reading, spatialLines: spatialLines, noteID: capturedNoteID,
+                capturedAt: capturedAt, polygon: polygon)
+            self.snapshot = snapshot
+            await complete(snapshot, id: id)
+        }
+        armTimeout(id: id)
+    }
+
+    @available(iOS 27, *)
+    private func complete(_ snapshot: RequestSnapshot, id: UUID, question: String = "", reply: String? = nil) async {
+        guard requestID == id, !Task.isCancelled else { return }
+        let recognizedText = snapshot.reading.text
+        let context = String(snapshot.reading.context.prefix(IntentPrompts.contextCharacterLimit))
+        let spatialLines = snapshot.spatialLines, capturedNoteID = snapshot.noteID
+        let capturedAt = snapshot.capturedAt, polygon = snapshot.polygon
+        let observer: PipelineObserver = { [weak self] event in await self?.record(event, request: id) }
+        let model = SystemLanguageModel.default
+        guard case .available = model.availability else {
+            finishIssue(Self.unavailableMessage(model), id: id); return
+        }
+        let modelStarted = ProcessInfo.processInfo.systemUptime
+        modelStartedAt = modelStarted
+        var proposalStarted: Double?
+        do {
+            let plan: CirclePlan
+            if let reply {
+                plan = try await CirclePlanner.clarify(selected: recognizedText, context: context,
+                    question: question, reply: reply, model: model, observer: observer)
+            } else if let spatialLines {
+                plan = try await SpatialPlanner.infer(selected: recognizedText, context: context,
+                    lines: spatialLines, model: model, observer: observer)
+            } else {
+                plan = try await CirclePlanner.infer(selected: recognizedText, context: context, model: model, observer: observer)
             }
-            let modelStarted = ProcessInfo.processInfo.systemUptime
-            modelStartedAt = modelStarted
-            var proposalStarted: Double?
-            do {
-                let plan: CirclePlan
-                if let spatialLines {
-                    plan = try await SpatialPlanner.infer(selected: recognizedText, context: context,
-                        lines: spatialLines, model: model, observer: observer)
-                } else {
-                    plan = try await CirclePlanner.infer(selected: recognizedText, context: context, model: model, observer: observer)
-                }
+            guard requestID == id, !Task.isCancelled else { return }
+            intent = plan.intent
+            action = plan.action
+            missingInformation = plan.gap?.value
+            intentSeconds = ProcessInfo.processInfo.systemUptime - modelStarted
+            elapsed = intentSeconds
+            evidence = plan.evidence
+            clarification = plan.clarification
+            if clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Every app request must identify its missing information.
+                // Never silently retrieve with the benchmark's baseline path.
+                guard let gap = plan.gap else { throw GapPlanError.invalidReferences("missingPlan") }
+                phase = .retrieving
+                pipeline.receive(.began(id: "retrieval", title: "Search lecture PDFs", instructions: nil,
+                    input: "Selected: \(recognizedText)\nIntent: \(intent)\nTarget: \(gap.targetText)\nNeeds: \(gap.value.informationNeeds.joined(separator: ", "))"))
+                guard let noteID = capturedNoteID else { throw LectureLibrary.LibraryError.missingDocument }
+                let search = try await LectureLibrary.shared.search(noteID: noteID, selected: recognizedText, intent: intent, gap: gap)
                 guard requestID == id, !Task.isCancelled else { return }
-                intent = plan.intent
-                action = plan.action
-                missingInformation = plan.gap?.value
-                intentSeconds = ProcessInfo.processInfo.systemUptime - modelStarted
-                elapsed = intentSeconds
-                evidence = plan.evidence
-                clarification = plan.clarification
-                if clarification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    // Every app request must identify its missing information.
-                    // Never silently retrieve with the benchmark's baseline path.
-                    guard let gap = plan.gap else { throw GapPlanError.invalidReferences("missingPlan") }
-                    phase = .retrieving
-                    pipeline.receive(.began(id: "retrieval", title: "Search lecture PDFs", instructions: nil,
-                        input: "Selected: \(recognizedText)\nIntent: \(intent)\nTarget: \(gap.targetText)\nNeeds: \(gap.value.informationNeeds.joined(separator: ", "))"))
-                    guard let noteID = capturedNoteID else { throw LectureLibrary.LibraryError.missingDocument }
-                    let search = try await LectureLibrary.shared.search(noteID: noteID, selected: recognizedText, intent: intent, gap: gap)
+                retrievalSeconds = search.seconds
+                retrievedHits = search.hits
+                pipeline.receive(.completed(id: "retrieval", summary: "\(search.hits.count) passages from \(search.documentCount) attached PDFs"))
+                retrievedPassageCount = search.hits.count
+                retrievalMethod = search.hasUnverifiedText ? "Paused · source text needs review"
+                    : search.semanticAvailable ? "BM25 + semantic rank fusion" : "BM25 · sentence embedding unavailable"
+                phase = .proposing
+                proposalStarted = ProcessInfo.processInfo.systemUptime
+                switch CircleCompletionRoute.select(for: recognizedText, hasLectureEvidence: !search.hits.isEmpty) {
+                case .arithmetic(let checked):
+                    pipeline.receive(.began(id: "arithmetic", title: "Calculate locally", instructions: nil, input: recognizedText))
+                    pipeline.receive(.completed(id: "arithmetic", summary: checked.lines.joined(separator: "\n") + checked.clarification))
+                    guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
+                    if checked.clarification.isEmpty, !checked.lines.isEmpty {
+                        proposal = AutofillProposal(requestID: id, noteID: noteID, capturedAt: capturedAt,
+                            selectionPolygon: polygon, selectedText: recognizedText, sourceRevision: search.revision,
+                            content: AutofillContent(lines: checked.lines.map { .init(text: $0, citationIndices: []) },
+                                                     origin: .localArithmetic), citations: [])
+                        draftDetail = "Calculated on this device from the recognized operands."
+                    }
+                    clarification = checked.clarification
+                    arithmeticChecked = checked.clarification.isEmpty
+                    citations = []
+                    sourceLabel = "Local arithmetic"
+                    sourceDetail = checked.clarification.isEmpty
+                        ? "Computed from the recognized matrix operands on this device."
+                        : "Confirm the recognized matrices before calculating."
+                case .lecture:
+                    sourceLabel = "Assessing lecture evidence…"
+                    let completion = try await LectureComposer.complete(selected: recognizedText, context: context,
+                        intent: intent, action: action, search: search, model: model, observer: observer)
                     guard requestID == id, !Task.isCancelled else { return }
-                    retrievalSeconds = search.seconds
-                    retrievedHits = search.hits
-                    pipeline.receive(.completed(id: "retrieval", summary: "\(search.hits.count) passages from \(search.documentCount) attached PDFs"))
-                    retrievedPassageCount = search.hits.count
-                    retrievalMethod = search.hasUnverifiedText ? "Paused · source text needs review"
-                        : search.semanticAvailable ? "BM25 + semantic rank fusion" : "BM25 · sentence embedding unavailable"
-                    phase = .proposing
-                    proposalStarted = ProcessInfo.processInfo.systemUptime
-                    switch CircleCompletionRoute.select(for: recognizedText, hasLectureEvidence: !search.hits.isEmpty) {
-                    case .arithmetic(let checked):
-                        pipeline.receive(.began(id: "arithmetic", title: "Calculate locally", instructions: nil, input: recognizedText))
-                        pipeline.receive(.completed(id: "arithmetic", summary: checked.lines.joined(separator: "\n") + checked.clarification))
-                        guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
-                        if checked.clarification.isEmpty, !checked.lines.isEmpty {
-                            proposal = AutofillProposal(requestID: id, noteID: noteID, capturedAt: capturedAt,
-                                selectionPolygon: polygon, selectedText: recognizedText, sourceRevision: search.revision,
-                                content: AutofillContent(lines: checked.lines.map { .init(text: $0, citationIndices: []) },
-                                                         origin: .localArithmetic), citations: [])
-                            draftDetail = "Calculated on this device from the recognized operands."
-                        }
-                        clarification = checked.clarification
-                        arithmeticChecked = checked.clarification.isEmpty
-                        citations = []
-                        sourceLabel = "Local arithmetic"
-                        sourceDetail = checked.clarification.isEmpty
-                            ? "Computed from the recognized matrix operands on this device."
-                            : "Confirm the recognized matrices before calculating."
-                    case .lecture:
-                        sourceLabel = "Assessing lecture evidence…"
-                        let completion = try await LectureComposer.complete(selected: recognizedText, context: context,
-                            intent: intent, action: action, search: search, model: model, observer: observer)
+                    guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
+                    citations = completion.citations
+                    retrievedPassageCount = completion.evidenceCount
+                    sourceLabel = completion.extractive ? "Lecture PDFs · original excerpts" : "Lecture PDFs · no completion"
+                    sourceDetail = completion.explanation
+                    if completion.extractive {
+                        phase = .drafting
+                        let draftingStarted = ProcessInfo.processInfo.systemUptime
+                        let draft = try await AutofillWriter.draft(selected: recognizedText, context: context,
+                            intent: intent, action: action, gap: gap.value, evidence: completion,
+                            search: search, model: model, observer: observer)
                         guard requestID == id, !Task.isCancelled else { return }
                         guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
-                        citations = completion.citations
-                        retrievedPassageCount = completion.evidenceCount
-                        sourceLabel = completion.extractive ? "Lecture PDFs · original excerpts" : "Lecture PDFs · no completion"
-                        sourceDetail = completion.explanation
-                        if completion.extractive {
-                            phase = .drafting
-                            let draftingStarted = ProcessInfo.processInfo.systemUptime
-                            let draft = try await AutofillWriter.draft(selected: recognizedText, context: context,
-                                intent: intent, action: action, gap: gap.value, evidence: completion,
-                                search: search, model: model, observer: observer)
-                            guard requestID == id, !Task.isCancelled else { return }
-                            guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
-                            draftingSeconds = ProcessInfo.processInfo.systemUptime - draftingStarted
-                            draftDetail = draft.explanation
-                            if let content = draft.content {
-                                proposal = AutofillProposal(requestID: id, noteID: noteID, capturedAt: capturedAt,
-                                    selectionPolygon: polygon, selectedText: recognizedText, sourceRevision: search.revision,
-                                    content: content, citations: completion.citations,
-                                    insertionTarget: gap.value.targets.count == 1 ? gap.value.targets[0].quote : nil)
-                            }
-                        } else {
-                            draftDetail = completion.explanation
+                        draftingSeconds = ProcessInfo.processInfo.systemUptime - draftingStarted
+                        draftDetail = draft.explanation
+                        if let content = draft.content {
+                            proposal = AutofillProposal(requestID: id, noteID: noteID, capturedAt: capturedAt,
+                                selectionPolygon: polygon, selectedText: recognizedText, sourceRevision: search.revision,
+                                content: content, citations: completion.citations,
+                                insertionTarget: gap.value.targets.count == 1 ? gap.value.targets[0].quote : nil)
                         }
-                    case .noEvidence:
-                        guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
-                        sourceLabel = search.hasUnverifiedText ? "Lecture PDFs · check source text"
-                            : search.documentCount == 0 ? "Lecture PDFs · none attached" : "Lecture PDFs · no match"
-                        sourceDetail = LectureGroundingPolicy.abstain(
-                            search.hasUnverifiedText ? .unverifiedText : search.documentCount == 0 ? .noDocuments : .noMatch,
-                            evidenceCount: 0).explanation
-                        proposal = nil; citations = []
-                        draftDetail = sourceDetail
+                    } else {
+                        draftDetail = completion.explanation
                     }
-                    proposalSeconds = ProcessInfo.processInfo.systemUptime - (proposalStarted ?? modelStarted)
-                } else {
-                    sourceLabel = "Clarification needed"
-                    sourceDetail = "Confirm the circled request before retrieving a completion."
+                case .noEvidence:
+                    guard try await sourcesUnchanged(search, noteID: noteID, request: id) else { return }
+                    sourceLabel = search.hasUnverifiedText ? "Lecture PDFs · check source text"
+                        : search.documentCount == 0 ? "Lecture PDFs · none attached" : "Lecture PDFs · no match"
+                    sourceDetail = LectureGroundingPolicy.abstain(
+                        search.hasUnverifiedText ? .unverifiedText : search.documentCount == 0 ? .noDocuments : .noMatch,
+                        evidenceCount: 0).explanation
+                    proposal = nil; citations = []
+                    draftDetail = sourceDetail
                 }
-                elapsed = intentSeconds + proposalSeconds
-                phase = .finished; pipeline.stopRunning(); timeout?.cancel()
-            } catch {
-                guard requestID == id, !Task.isCancelled else { return }
-                if let proposalStarted { proposalSeconds = ProcessInfo.processInfo.systemUptime - proposalStarted }
-                else { intentSeconds = ProcessInfo.processInfo.systemUptime - modelStarted }
-                elapsed = intentSeconds + proposalSeconds
-                finishIssue("Autofill couldn’t finish: \(error.localizedDescription)", id: id)
+                proposalSeconds = ProcessInfo.processInfo.systemUptime - (proposalStarted ?? modelStarted)
+            } else {
+                sourceLabel = "Clarification needed"
+                sourceDetail = "Confirm the circled request before retrieving a completion."
             }
+            elapsed = intentSeconds + proposalSeconds
+            phase = .finished; pipeline.stopRunning(); timeout?.cancel()
+        } catch {
+            guard requestID == id, !Task.isCancelled else { return }
+            if let proposalStarted { proposalSeconds = ProcessInfo.processInfo.systemUptime - proposalStarted }
+            else { intentSeconds = ProcessInfo.processInfo.systemUptime - modelStarted }
+            elapsed = intentSeconds + proposalSeconds
+            finishIssue("Autofill couldn’t finish: \(error.localizedDescription)", id: id)
         }
+    }
+
+    private func armTimeout(id: UUID) {
         timeout = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(IntentPrompts.timeoutSeconds)) } catch { return }
             guard let self, self.requestID == id, self.processing else { return }

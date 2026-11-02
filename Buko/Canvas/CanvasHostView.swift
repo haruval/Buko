@@ -6,15 +6,12 @@ import SwiftUI
 final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInteractionDelegate {
     let canvas = PKCanvasView()
     let circleIntent = CircleIntentState()
-    let cube = CubeState()
-    private let cubeContainer = CubeOverlayContainer()
-    private var cubeHosting: UIHostingController<CubeOverlay>?
     private let circleGesture = CircleGestureRecognizer()
     private let circleContainer = CircleOverlayContainer()
     private var circleHosting: UIHostingController<CircleIntentOverlay>?
 
     var onPageChange: ((Int, Int) -> Void)?
-    var preparedHandwriting: ((AutofillProposal) -> HandwritingSampler.Result)?
+    var preparedHandwriting: ((AutofillProposal) async throws -> HandwritingSampler.Result)?
     var captureAutofillDocument: (() -> AutofillDocument?)?
     var persistAutofill: ((AutofillDocument, AutofillDocument) throws -> Void)?
     var onUndoStateChange: (() -> Void)?
@@ -88,7 +85,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         surface.addSubview(autofillPreview)
         surface.addSubview(edgeBlur)
         circleIntent.insertion.currentDocument = { [weak self] in self?.captureAutofillDocument?() }
-        circleIntent.insertion.preparedHandwriting = { [weak self] proposal in self?.preparedHandwriting?(proposal) ?? HandwritingSampler.Result() }
+        circleIntent.insertion.preparedHandwriting = { [weak self] proposal in try await self?.preparedHandwriting?(proposal) ?? HandwritingSampler.Result() }
         circleIntent.insertion.previewChanged = { [weak self] in self?.showAutofillPreview($0, animatedReturn: $1) }
         autofillPreview.didSettle = { [weak self] count in self?.finishAutofillReflow(pageCount: count) }
         circleIntent.insertion.commit = { [weak self] before, after in
@@ -103,16 +100,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         circleContainer.state = circleIntent
         addSubview(circleContainer)
         circleContainer.addSubview(hosting.view)
-        let cubeHosting = UIHostingController(rootView: CubeOverlay(state: cube))
-        cubeHosting.view.backgroundColor = .clear
-        self.cubeHosting = cubeHosting
-        cubeContainer.state = cube
-        addSubview(cubeContainer)
-        cubeContainer.addSubview(cubeHosting.view)
         circleGesture.addTarget(self, action: #selector(circleChanged(_:)))
         circleGesture.delegate = self
         circleGesture.cancelsTouchesInView = true
         circleGesture.preview = { [weak self] in self?.circleIntent.trace($0) }
+        circleGesture.cancelPreview = { [weak self] in self?.circleIntent.cancelTracing() }
         addGestureRecognizer(circleGesture)
         canvas.panGestureRecognizer.require(toFail: circleGesture)
         canvas.pinchGestureRecognizer?.require(toFail: circleGesture)
@@ -163,7 +155,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         setAppearance(colorScheme == .dark ? .dark : .light)
         if self.tool != tool { cancelCircleInteraction(); circleIntent.cancelPending() }
         self.tool = tool
-        if tool != .cube { cube.despawn() }
         circleGesture.singleFinger = tool == .circle
         let policy: PKCanvasViewDrawingPolicy = allowsFingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
@@ -171,32 +162,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         backdrop.showsGrid = showsGrid
         applyTool()
         updateViewport()
-        syncCubeTool()
-    }
-
-    private func syncCubeTool() {
-        guard tool == .cube, !cube.active, window != nil, bounds.width > 0, canvas.isUserInteractionEnabled else { return }
-        cube.scrollWhileDragging = { [weak self] delta in self?.scrollForCube(by: delta) }
-        cube.updateNotebook(bounds: boundaryRect, viewportHeight: bounds.height)
-        cube.spawn(bounds: boundaryRect, at: viewportCenter(), scale: canvas.zoomScale, offset: canvas.contentOffset)
-    }
-
-    private func scrollForCube(by delta: CGFloat) {
-        guard tool == .cube, !isOverview, !isPinching, !isSnapping, !pageTurnPending else { return }
-        let minimum = -canvas.contentInset.top
-        let maximum = max(minimum, boundaryRect.maxY * canvas.zoomScale - bounds.height)
-        let y = min(maximum, max(minimum, canvas.contentOffset.y + delta))
-        guard abs(y - canvas.contentOffset.y) > 0.01 else { return }
-        // This is viewport travel only. It must never arm pull-to-create pages.
-        isUpdatingViewport = true
-        canvas.setContentOffset(CGPoint(x: canvas.contentOffset.x, y: y), animated: false)
-        isUpdatingViewport = false
-        updateViewport()
-    }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if window == nil { cube.shutdown() } else { syncCubeTool() }
     }
 
     private func applyTool() {
@@ -216,7 +181,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         presentationStyle = style
         backdrop.overrideUserInterfaceStyle = style
         circleHosting?.overrideUserInterfaceStyle = style
-        cubeHosting?.overrideUserInterfaceStyle = style
         invalidateEdgeSnapshot()
         applyAppearance()
     }
@@ -313,8 +277,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        cubeContainer.frame = bounds
-        cubeHosting?.view.frame = bounds
         circleContainer.frame = bounds
         circleHosting?.view.frame = bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
@@ -346,7 +308,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         lastViewportSize = bounds.size
         isLayingOut = false
         applyAppearance()
-        syncCubeTool()
     }
 
     private func resetCamera() {
@@ -425,10 +386,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         circleIntent.updateProjection(scale: scale, offset: offset)
 
         autofillPreview.project(from: canvas, style: presentationStyle, showsGrid: backdrop.showsGrid, document: documentSize)
-        if cube.visible {
-            cube.updateNotebook(bounds: boundaryRect, viewportHeight: bounds.height)
-            cube.updateProjection(scale: scale, offset: offset)
-        }
         backdrop.update(scale: scale, offset: offset, document: documentSize)
         let pull: CGFloat
         if isPullActive && !isPinching {
@@ -503,7 +460,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         pagePull.scrollProgress = travel > 0 ? min(1, max(0, canvas.contentOffset.y / travel)) : 0
         pagePull.rightOverBlack = !documentFrame.contains(CGPoint(x: bounds.width - 48, y: bounds.midY))
         updateAccessibilityValue()
-        let canDraw = tool != .cube && tool != .circle && !isOverview && !isPinching && !isSnapping && !pageTurnPending
+        let canDraw = tool != .circle && !isOverview && !isPinching && !isSnapping && !pageTurnPending
         if canvas.drawingGestureRecognizer.isEnabled != canDraw { canvas.drawingGestureRecognizer.isEnabled = canDraw }
     }
 
@@ -754,7 +711,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         if gestureRecognizer === circleGesture {
-            return tool != .cube && !circleIntent.hasPreview && !isOverview && !isPinching && !isSnapping && !pageTurnPending
+            return !circleIntent.hasPreview && !isOverview && !isPinching && !isSnapping && !pageTurnPending
                 && touch.type == .direct && !circleContainer.point(inside: touch.location(in: circleContainer), with: nil)
         }
         return isOverview && !isPinching && !isSnapping

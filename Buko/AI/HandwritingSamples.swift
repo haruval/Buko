@@ -16,7 +16,7 @@ nonisolated struct HandwritingSample: Codable, Sendable {
 
     enum SampleError: Error { case invalidInk }
 
-    /// Normalize actual transformed ink, not its containing row. Whole words
+    /// Normalize actual transformed ink, not its containing row. Personal letters
     /// share the fallback's cap/x-height and baseline, including descenders.
     static func normalized(drawing: PKDrawing, text: String) throws -> HandwritingSample {
         guard !drawing.strokes.isEmpty, drawing.strokes.count <= 1_200,

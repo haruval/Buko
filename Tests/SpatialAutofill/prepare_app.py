@@ -18,8 +18,15 @@ for original,replacement in [
     ('PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests;', 'PRODUCT_BUNDLE_IDENTIFIER = dev.buko.SpatialIntegrationUITests;'),
     ('REGISTER_APP_GROUPS = YES;', 'REGISTER_APP_GROUPS = NO;'),
     ('INFOPLIST_FILE = Configuration/Info.plist;', 'INFOPLIST_FILE = Configuration/ExperimentInfo.plist;')]:
-    assert s.count(original)==2
+    if original.startswith("PRODUCT_BUNDLE_IDENTIFIER = \"devplaceholder"):
+        assert s.count(original) in (0, 2)
+    else:
+        assert s.count(original) == 2
     s=s.replace(original,replacement)
+import re
+assert set(re.findall(r'PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);', s)) == {
+    'dev.buko.SpatialIntegrationValidation', 'dev.buko.SpatialIntegrationUITests'
+}, 'Refusing a fixture copy with a non-isolated bundle identity'
 p.write_text(s)
 # The fixture scheme must select the isolated configuration even from Xcode.
 scheme=root/'Buko.xcodeproj/xcshareddata/xcschemes/BukoValidation.xcscheme'

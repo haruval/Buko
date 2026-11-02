@@ -7,8 +7,14 @@ import PencilKit
         func record() { count += 1 }
     }
     static func run(root: URL, sample: HandwritingSample) async throws {
+        let printed = LectureHandwriting.drawing(pages: [["ink"]])
+        let split = HandwritingSampler.letterDrawings(text: "ink", strokes: printed.strokes)
+        precondition(split.map(\.0) == ["i", "n", "k"], "Print words must split into exact letter groups, including the i dot")
+        precondition(split.reduce(0) { $0 + $1.1.strokes.count } == printed.strokes.count)
+        precondition(HandwritingSampler.letterDrawings(text: "in", strokes: printed.strokes).isEmpty, "Mismatched recognition must never label a word as a letter")
+        precondition(HandwritingSampler.letterDrawings(text: "i\nnk", strokes: printed.strokes).isEmpty)
         let directory = root.appendingPathComponent("handwriting-cache")
-        let profile = PreparedHandwriting(samples: ["a": sample, "tokens": sample],
+        let profile = PreparedHandwriting(samples: ["a": sample, "t": sample],
             headings: [.init(text: "Parsing:", bounds: CGRect(x: 1070, y: 180, width: 120, height: 30))])
         let builds = Builds()
         let cache = HandwritingCache(directory: directory) { _ in await builds.record(); return profile }
@@ -49,7 +55,7 @@ import PencilKit
         precondition(inspected["z"] == nil, "The inspector must distinguish missing letters from prepared ink")
         try preparation.saveAlphabet(PKDrawing(data: sample.drawingData), letter: "a")
         try preparation.saveAlphabet(PKDrawing(data: sample.drawingData), letter: "z")
-        precondition(preparation.inspection(preferredID: note.id)["a"]?.source == "Renamed", "Note samples must outrank explicit alphabet samples")
+        precondition(preparation.inspection(preferredID: note.id)["a"]?.source == "Your alphabet", "Manual rewrites must override automatically sampled letters")
         precondition(preparation.inspection(preferredID: note.id)["z"]?.source == "Your alphabet")
         let reopenedAlphabet = PersonalAlphabetStore(url: alphabetURL)
         precondition(reopenedAlphabet.samples.keys.sorted() == ["a", "z"], "Alphabet must survive relaunch")
@@ -83,7 +89,7 @@ import PencilKit
         precondition(pausedCount == 2, "Drawing/background/autofill must pause preparation")
         preparation.setPaused(false)
         for _ in 0..<200 {
-            if preparation.prepared(for: proposal).samples["tokens"] != nil { break }
+            if preparation.prepared(for: proposal).samples["t"] != nil { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         let updatedCount = await builds.count

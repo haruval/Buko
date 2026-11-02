@@ -141,7 +141,7 @@ struct ContentView: View {
             HandwritingPreviewView(preparation: handwriting, noteID: selectedNote?.id)
         }
         .fullScreenCover(isPresented: $showsPersonalAlphabet) {
-            PersonalAlphabetView(preparation: handwriting)
+            PersonalAlphabetView(preparation: handwriting, noteID: selectedNote?.id)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
@@ -227,7 +227,7 @@ struct ContentView: View {
             refreshHandwriting()
             scheduleSave()
         }, preparedHandwriting: { proposal in
-            handwriting.prepared(for: proposal)
+            try await handwriting.preparedForPreview(proposal)
         }, onAutofillCommit: { before, after in
             guard revision == canvasRevision, selectedNote?.id == note.id,
                   note.deletedAt == nil, !session.isDrawing,

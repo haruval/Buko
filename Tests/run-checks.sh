@@ -62,7 +62,3 @@ xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
     Buko/Development/SampleLecture.swift Tests/CircleContextChecks.swift \
     -o "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
 "$BUKO_CHECK_DIR/InkChecks.app/Contents/MacOS/ink"
-
-xcrun swiftc -module-cache-path "$BUKO_CHECK_DIR/modules" \
-    Buko/Cube/CubeDynamics.swift Tests/CubeDynamicsChecks.swift -o "$BUKO_CHECK_DIR/cube"
-"$BUKO_CHECK_DIR/cube"

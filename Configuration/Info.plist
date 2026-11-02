@@ -12,8 +12,6 @@
 			<key>UTTypeConformsTo</key><array><string>public.data</string></array>
 		</dict>
 	</array>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Buko uses microphone volume to animate the Cube tool while it is selected. Audio is not saved or sent anywhere.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

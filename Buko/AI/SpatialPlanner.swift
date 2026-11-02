@@ -438,7 +438,11 @@ nonisolated enum SpatialPlanner {
             return clarify("These notes already supply the shared pattern. What would you like to add?")
         }
         guard let focus = ContextualRoleMap.focus(inventory.map, candidate: candidate, in: transcript) else {
-            return clarify("The notes do not establish one missing counterpart.")
+            let choices = anchors.filter { $0.blockID.hasPrefix("S") }.map(\.quote)
+            let names = choices.joined(separator: " or ")
+            return clarify((2...4).contains(choices.count) && names.count <= 220
+                ? "Which topic or group do you mean: \(names)?"
+                : "Which topic or group should I complete, and what would you like to add?")
         }
         let originalSubjects = try focus.subjects(in: transcript)
         let subjects = originalSubjects.compactMap { uniqueTarget($0,in:transcript) }
