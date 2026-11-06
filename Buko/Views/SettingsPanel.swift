@@ -16,6 +16,7 @@ struct SettingsPanel: View {
     let restore: (Note) -> Void
     let restorePage: (TrashedPage) -> Void
     let emptyTrash: () -> Void
+    var historySession: CanvasSession? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -139,6 +140,27 @@ struct SettingsPanel: View {
                 }
                 .scrollBounceBehavior(.basedOnSize)
             } else {
+                if let historySession {
+                    Button(action: historySession.undo) {
+                        Label("Undo", systemImage: "arrow.uturn.backward")
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain).disabled(!historySession.canUndo)
+                    .accessibilityIdentifier("undo")
+                    Button(action: historySession.redo) {
+                        Label("Redo", systemImage: "arrow.uturn.forward")
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain).disabled(!historySession.canRedo)
+                    .accessibilityIdentifier("redo")
+                    Divider()
+                }
                 Toggle(isOn: $showsGrid) {
                     Label("Grid", systemImage: "square.grid.3x3")
                         .font(.subheadline)

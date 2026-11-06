@@ -45,6 +45,8 @@ struct ContentView: View {
 
     @State private var sidebarVisible = true
     @State private var settingsVisible = false
+    private enum SettingsDestination { case handwriting, alphabet, emptyTrash }
+    @State private var pendingSettingsDestination: SettingsDestination?
     @State private var showsTrash = false
     @State private var session = CanvasSession()
     @State private var handwriting = HandwritingPreparation()
@@ -184,13 +186,15 @@ struct ContentView: View {
             let progressNote = secondFocused && secondContent != nil ? secondContent?.note : (primaryPDF == nil ? selectedNote : nil)
             NavigationStack {
                 WorkspaceToolbarAxis { verticalToolbar in
+                    let settingsPopover = verticalToolbar
+                    let combinesHistory = bookLibrary || (verticalToolbar && horizontalSizeClass == .compact)
                     GeometryReader { safeGeometry in
                         // Both children stay alive across display changes. The native
                         // overlay arrangement owns displacement and transition timing.
                         ArrangementView {
                             editorWorkspace(nativeChrome: nativeChrome, nativeTools: nativeTools,
                                             verticalToolbar: verticalToolbar, bookLibrary: bookLibrary,
-                                            separatedLibrary: separatedLibrary,
+                                            separatedLibrary: separatedLibrary, settingsPopover: settingsPopover,
                                             safeFrame: safeGeometry.frame(in: .global))
                                 .overlayArrangementEdge(HorizontalEdge.trailing)
                                 .overlayArrangementEdge(VerticalEdge.bottom)
@@ -222,8 +226,11 @@ struct ContentView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         if nativeTools {
-                            NotebookToolbar(session: activeSession, notes: toggleSidebar, settings: toggleSettings,
-                                showsNotes: nativeChrome && !separatedLibrary, showsSettings: nativeChrome,
+                            NotebookToolbar(session: activeSession, notes: toggleSidebar, settings: toggleSettings, settingsPresented: $settingsVisible,
+                                settingsDismissed: finishSettingsPopoverDismissal,
+                                showsNotes: nativeChrome && !separatedLibrary, showsSettings: nativeChrome || verticalToolbar,
+                                settingsInDrawingBar: verticalToolbar, settingsPopoverEnabled: settingsPopover,
+                                combinesHistory: combinesHistory,
                                 sources: { showSources(activeNote) },
                                 switchPane: secondContent == nil ? nil : { secondFocused.toggle() },
                                 showsPageProgress: verticalToolbar && !sideBySideNotes && progressNote != nil) {
@@ -234,6 +241,10 @@ struct ContentView: View {
                                             trash: { trashPage($0, from: note) }, trashSelection: { trashPages($0, from: note) },
                                             opening: { settingsVisible = false })
                                     }
+                                } settingsContent: {
+                                    let size = settingsPanelSize(in: outer.size, combinesHistory: combinesHistory)
+                                    settingsPanel(combinesHistory: combinesHistory, presentedInPopover: true)
+                                        .frame(width: size.width, height: size.height)
                                 }
                         }
                     }
@@ -245,7 +256,7 @@ struct ContentView: View {
     }
 
     private func editorWorkspace(nativeChrome: Bool, nativeTools: Bool, verticalToolbar: Bool,
-                                 bookLibrary: Bool, separatedLibrary: Bool, safeFrame: CGRect) -> some View {
+                                 bookLibrary: Bool, separatedLibrary: Bool, settingsPopover: Bool, safeFrame: CGRect) -> some View {
         GeometryReader { geometry in
             let activeFold = geometry.reservedRegions(kind: .division).first?.frame
             let paperFrame = geometry.frame(in: .global)
@@ -301,11 +312,14 @@ struct ContentView: View {
                         .frame(width: dropLayout.second.width, height: dropLayout.second.height)
                         .position(x: editorFrame.minX + dropLayout.second.midX, y: editorFrame.minY + dropLayout.second.midY)
                 }
-                if settingsVisible {
+                if settingsVisible && !settingsPopover {
                     Color.clear.contentShape(.rect)
                         .onTapGesture { toggleSettings() }.accessibilityIdentifier("dismissSettingsBackdrop")
                 }
                 floatingPanels(in: controlsFrame.size, nativeChrome: nativeChrome, showsLibrary: !separatedLibrary, showsTitle: verticalToolbar,
+                               nativeSettings: nativeChrome || verticalToolbar, settingsPopover: settingsPopover,
+                               combinesHistory: bookLibrary || (verticalToolbar && horizontalSizeClass == .compact),
+                               libraryCanCollapse: !(verticalToolbar && horizontalSizeClass == .compact),
                                librarySize: !separatedLibrary && sidebarVisible && activeFold != nil && layout.canSplit ? layout.first.intersection(controlsFrame).size : nil)
                     .padding(.horizontal, nativeChrome ? 12 : 20)
                     .padding(.top, nativeChrome ? 8 : WorkspaceChrome.topPadding)
@@ -313,7 +327,7 @@ struct ContentView: View {
                     .frame(width: controlsFrame.width, height: controlsFrame.height, alignment: .topLeading)
                     .position(x: controlsFrame.midX, y: controlsFrame.midY)
                 if let note = lectureSourceNote {
-                    LectureSourcesView(noteID: note.id, noteTitle: note.title,
+                    LectureSourcesView(noteID: note.id,
                         close: { showSources(nil) }, dragging: { sourceDragging = $0 },
                         split: { openDroppedSource($0, 1) })
                         .frame(width: min(560, max(220, panelFrame.width - 24)),
@@ -485,15 +499,18 @@ struct ContentView: View {
         }
     }
 
-    private func floatingPanels(in size: CGSize, nativeChrome: Bool = false, showsLibrary: Bool = true, showsTitle: Bool = false, librarySize: CGSize? = nil) -> some View {
+    private func floatingPanels(in size: CGSize, nativeChrome: Bool = false, showsLibrary: Bool = true, showsTitle: Bool = false,
+                                nativeSettings: Bool = false, settingsPopover: Bool = false, combinesHistory: Bool = false,
+                                libraryCanCollapse: Bool = true, librarySize: CGSize? = nil) -> some View {
         let libraryExpanded = sidebarVisible || librarySize != nil
         return GlassEffectContainer(spacing: 20) {
             HStack(alignment: .top) {
                 if showsLibrary && (!nativeChrome || libraryExpanded) {
-                libraryPanel(size: CGSize(width: max(220, librarySize.map { $0.width - 24 } ?? min(max(280, size.width / 3), size.width - 84)), height: max(180, (librarySize?.height ?? size.height) - (nativeChrome ? 36 : 124))), expanded: libraryExpanded)
+                libraryPanel(size: CGSize(width: max(220, librarySize.map { $0.width - 24 } ?? min(max(280, size.width / 3), size.width - 84)), height: max(180, (librarySize?.height ?? size.height) - (nativeChrome ? 36 : 124))), expanded: libraryExpanded, canCollapse: libraryCanCollapse)
                 }
 
-                if (!nativeChrome || showsTitle), (!sidebarVisible || !showsLibrary), secondContent == nil, primaryPDF == nil, let note = selectedNote {
+                if (!nativeChrome || showsTitle), (!sidebarVisible || !showsLibrary),
+                   (!nativeSettings || settingsPopover || !settingsVisible), secondContent == nil, primaryPDF == nil, let note = selectedNote {
                     NoteTitlePill(title: note.title, width: min(420, max(100, size.width - (nativeChrome ? 36 : 440))), focus: $titleFocused) { title in
                         renameNote(note, to: title)
                     }
@@ -504,37 +521,13 @@ struct ContentView: View {
 
                 Spacer(minLength: 12)
 
-                if !nativeChrome || settingsVisible {
+                if !settingsPopover && (!nativeSettings || settingsVisible) {
                 ExpandingGlassPanel(
                     isExpanded: settingsVisible,
-                    size: CGSize(width: min(showsTrash ? 300 : showsDevelopment ? 320 : 224, size.width - 104),
-                                 height: showsTrash ? max(220, min(440, size.height - 120)) : showsDevelopment ? min(390, size.height - 120) : 208),
+                    size: settingsPanelSize(in: size, combinesHistory: combinesHistory),
                     alignment: .topTrailing, anchor: .topTrailing
                 ) {
-                    SettingsPanel(
-                        trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash,
-                        showsDevelopment: $showsDevelopment, showsGrid: $showsGrid,
-                        previewHandwriting: {
-                            session.host?.circleIntent.cancel()
-                            showsHandwritingPreview = true
-                        }, writeAlphabet: {
-                            session.host?.circleIntent.cancel()
-                            showsPersonalAlphabet = true
-                        }, scanHandwriting: {
-                            session.host?.circleIntent.cancel()
-                            saveNow()
-                            refreshHandwriting()
-                            handwriting.rebuild()
-                        }, handwritingStatus: handwriting.status, recreateTestNote: { lecture in
-                            recreateTestNote(lecture)
-                            if settingsVisible { toggleSettings() }
-                        }, restore: restore, restorePage: restorePage,
-                        emptyTrash: {
-                            emptyNoteIDs = Set(trashedNotes.map(\.id))
-                            emptyPageIDs = Set(trashedPages.map(\.id))
-                            emptyTrashPresented = true
-                        }
-                    )
+                    settingsPanel(combinesHistory: combinesHistory)
                 } compact: {
                     ShelfButton(title: "Settings", symbol: "ellipsis", action: toggleSettings)
                         .accessibilityIdentifier("openSettings")
@@ -547,6 +540,60 @@ struct ContentView: View {
         }
     }
 
+
+    private func settingsPanelSize(in size: CGSize, combinesHistory: Bool) -> CGSize {
+        CGSize(width: min(showsTrash ? 300 : showsDevelopment ? 320 : 224, size.width - 104),
+               height: showsTrash ? max(220, min(440, size.height - 120))
+                   : showsDevelopment ? min(390, size.height - 120) : (combinesHistory ? 333 : 208))
+    }
+
+    private func settingsPanel(combinesHistory: Bool, presentedInPopover: Bool = false) -> some View {
+        SettingsPanel(
+            trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash,
+            showsDevelopment: $showsDevelopment, showsGrid: $showsGrid,
+            previewHandwriting: {
+                session.host?.circleIntent.cancel()
+                presentSettingsDestination(.handwriting, afterPopover: presentedInPopover)
+            }, writeAlphabet: {
+                session.host?.circleIntent.cancel()
+                presentSettingsDestination(.alphabet, afterPopover: presentedInPopover)
+            }, scanHandwriting: {
+                session.host?.circleIntent.cancel()
+                saveNow()
+                refreshHandwriting()
+                handwriting.rebuild()
+            }, handwritingStatus: handwriting.status, recreateTestNote: { lecture in
+                recreateTestNote(lecture)
+                if settingsVisible { toggleSettings() }
+            }, restore: restore, restorePage: restorePage,
+            emptyTrash: {
+                emptyNoteIDs = Set(trashedNotes.map(\.id))
+                emptyPageIDs = Set(trashedPages.map(\.id))
+                presentSettingsDestination(.emptyTrash, afterPopover: presentedInPopover)
+            }, historySession: combinesHistory ? activeSession : nil
+        )
+    }
+
+    private func presentSettingsDestination(_ destination: SettingsDestination, afterPopover: Bool) {
+        if afterPopover {
+            // Wait for native dismissal before presenting another modal from the
+            // editor; otherwise it competes with the toolbar's popover presenter.
+            pendingSettingsDestination = destination
+            settingsVisible = false
+        } else {
+            switch destination {
+            case .handwriting: showsHandwritingPreview = true
+            case .alphabet: showsPersonalAlphabet = true
+            case .emptyTrash: emptyTrashPresented = true
+            }
+        }
+    }
+
+    private func finishSettingsPopoverDismissal() {
+        guard let destination = pendingSettingsDestination else { return }
+        pendingSettingsDestination = nil
+        presentSettingsDestination(destination, afterPopover: false)
+    }
 
     private func libraryPanel(size: CGSize, expanded: Bool, canCollapse: Bool = true) -> some View {
         ExpandingGlassPanel(

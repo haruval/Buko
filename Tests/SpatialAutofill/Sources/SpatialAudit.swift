@@ -27,12 +27,14 @@ enum SpatialAudit {
             return args[index + 1]
         }
         guard !FileManager.default.fileExists(atPath: output.path) else { throw GapPlanError.invalidReferences("outputExists") }
+        if args.contains("--binding-ink") { try await SpatialBindingIntegrationAudit.run(args:args,output:output); return }
         if args.contains("--capture-checks") { try await CaptureAudit.run(args:args,output:output); return }
         if args.contains("--ink-guards") { try await InkGuardAudit.run(output:output); return }
         if args.contains("--cancel-spatial") { try await cancellationChecks(output:output); return }
         if args.contains("--self-check") {
             try selfChecks(); try WrapAudit.run(); try await explicitBindingChecks(); planningModeChecks()
-            try save(["passed": 56], to: output); return
+            let bindingChecks = try SpatialBindingAudit.run()
+            try save(["passed": 56 + bindingChecks, "spatialOwnershipChecks": bindingChecks], to: output); return
         }
         if args.contains("--ink") { try await InkAudit.run(args: args, output: output); return }
         guard let path = option("--fixtures") else { throw GapPlanError.invalidReferences("missingFixtures") }

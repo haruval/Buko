@@ -7,7 +7,7 @@ import shutil
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = [
-    'Buko/AppBuildConfiguration.swift', 'Buko/AI/SpatialPlanner.swift', 'Buko/AI/SpatialInkReader.swift', 'Buko/AI/SpatialCircleBridge.swift',
+    'Buko/AppBuildConfiguration.swift', 'Buko/AI/SpatialPlanner.swift', 'Buko/AI/SpatialScopeCue.swift', 'Buko/AI/SpatialInkReader.swift', 'Buko/AI/SpatialCircleBridge.swift',
     'Buko/AI/PipelineDiagnostics.swift', 'Buko/AI/IntentPrompts.swift',
     'Buko/AI/MissingInformationPlan.swift', 'Buko/AI/CirclePlanner.swift',
     'Buko/AI/AutofillProposal.swift', 'Buko/AI/AutofillWriter.swift',
@@ -36,7 +36,7 @@ def prepare(destination, instrument_reader=False):
         if name.endswith('ContextualIntentChecks.swift'):
             boundary = '        if args.contains("--cancel-repair") {'
             assert copied.count(boundary) == 1
-            copied = copied.replace(boundary, '''        if args.contains("--capture-checks") || args.contains("--ink-guards") || args.contains("--cancel-spatial") || args.contains("--ink") || args.contains("--spatial") || args.contains("--self-check") {
+            copied = copied.replace(boundary, '''        if args.contains("--binding-ink") || args.contains("--capture-checks") || args.contains("--ink-guards") || args.contains("--cancel-spatial") || args.contains("--ink") || args.contains("--spatial") || args.contains("--self-check") {
             try await SpatialAudit.run(args: args, output: output)
             return
         }

@@ -93,7 +93,35 @@ nonisolated struct SpatialGroups: Codable, Sendable {
         return grouped.values.sorted { ($0.first ?? "") < ($1.first ?? "") }
     }
 
-    func allows(_ inventory: GroundedPatternMap, transcript: GapTranscript) -> Bool {
+    /// Compile model-interpreted roles into region-scoped exact text references.
+    /// Identical text in another region is valid; ambiguity within one region is not.
+    /// IDs are derived from measured membership, never supplied by the model.
+    func sourceAnchors(for inventory: GroundedPatternMap, transcript: GapTranscript) -> [GapTextReference]? {
+        guard let verified = try? Self.validated(lines, transcript: transcript),
+              verified.groups == groups, inventory.topics.count == groups.count else { return nil }
+        var result: [GapTextReference] = []
+        for (index, topic) in inventory.topics.enumerated() {
+            let blocks = transcript.blocks.filter { $0.selected && groups[index].contains($0.id) }
+            for role in topic.supplied {
+                guard !role.quote.isEmpty else { return nil }
+                let matches = blocks.filter { $0.text.contains(role.quote) }
+                guard matches.count == 1, let block = matches.first,
+                      let range = block.text.range(of: role.quote),
+                      block.text[range.upperBound...].range(of: role.quote) == nil else { return nil }
+                result.append(.init(blockID: block.id, quote: role.quote))
+            }
+        }
+        guard allows(inventory, transcript: transcript, sourceAnchors: result) else { return nil }
+        // Broadening quote identity must not accidentally broaden task scope.
+        // For newly accepted duplicate text, require an explicit unqualified
+        // request and complete, non-conflicting role values. Other cases retain
+        // the previous conservative refusal instead of trusting a missed negation.
+        if !allows(inventory, transcript: transcript),
+           !SpatialScopeCue.qualifies(inventory, transcript: transcript) { return nil }
+        return result
+    }
+
+    func allows(_ inventory: GroundedPatternMap, transcript: GapTranscript, sourceAnchors: [GapTextReference]? = nil) -> Bool {
         // A topic and every supplied quote must have unique exact anchors in the
         // same measured component. Geometry does not create semantic role labels.
         func group(containing quote: String, topic: Bool = false) -> Int? {
@@ -109,9 +137,20 @@ nonisolated struct SpatialGroups: Codable, Sendable {
             return owners.count == 1 ? owners.first : nil
         }
         var topicGroups: [Int] = []
+        var anchorIndex = 0
+        if let sourceAnchors, sourceAnchors.count != inventory.topics.flatMap(\.supplied).count { return false }
         for topic in inventory.topics {
             guard let index = group(containing: topic.topic, topic: true),
-                  topic.supplied.allSatisfy({ group(containing: $0.quote) == index }) else { return false }
+                  topic.supplied.allSatisfy({ role in
+                      defer { anchorIndex += 1 }
+                      guard let sourceAnchors else { return group(containing: role.quote) == index }
+                      let reference = sourceAnchors[anchorIndex]
+                      guard reference.quote == role.quote, groups[index].contains(reference.blockID),
+                            let block = transcript.blocks.first(where: { $0.selected && $0.id == reference.blockID }),
+                            let range = block.text.range(of: reference.quote), !reference.quote.isEmpty,
+                            block.text[range.upperBound...].range(of: reference.quote) == nil else { return false }
+                      return true
+                  }) else { return false }
             topicGroups.append(index)
         }
         return Set(topicGroups).count == topicGroups.count && Set(topicGroups) == Set(groups.indices)
@@ -334,8 +373,8 @@ nonisolated enum SpatialPlanner {
             let anchored = anchoredInventory(value, layout: layout, transcript: transcript)
             let candidate = ContextualGapReferences(alreadyCovered: [], targets: [], informationNeeds: [], subjectQuotes: value.regions.map(\.topic))
             if value.regions.map(\.regionID) == layout.groups.indices.map({ "G\($0 + 1)" }),
-               layout.allows(anchored, transcript: transcript),
-               ContextualRoleMap.focus(anchored.map, candidate: candidate, in: transcript) != nil {
+               let roleAnchors = layout.sourceAnchors(for: anchored, transcript: transcript),
+               ContextualRoleMap.focus(anchored.map, candidate: candidate, in: transcript, sourceAnchors: roleAnchors) != nil {
                 value.kind = .parallelPattern
             }
         }
@@ -351,9 +390,11 @@ nonisolated enum SpatialPlanner {
         func validPattern(_ value: SpatialInventory) -> Bool {
             let candidate = ContextualGapReferences(alreadyCovered: [], targets: [], informationNeeds: [], subjectQuotes: value.regions.map(\.topic))
             let inventory = anchoredInventory(value, layout: layout, transcript: transcript)
-            guard value.kind == .parallelPattern, value.regions.map(\.regionID) == layout.groups.indices.map({ "G\($0+1)" }), layout.allows(inventory, transcript: transcript) else { return false }
-            return ContextualRoleMap.isComplete(inventory.map, candidate: candidate, in: transcript)
-                || ContextualRoleMap.focus(inventory.map, candidate: candidate, in: transcript) != nil
+            guard value.kind == .parallelPattern,
+                  value.regions.map(\.regionID) == layout.groups.indices.map({ "G\($0+1)" }),
+                  let roleAnchors = layout.sourceAnchors(for: inventory, transcript: transcript) else { return false }
+            return ContextualRoleMap.isComplete(inventory.map, candidate: candidate, in: transcript, sourceAnchors: roleAnchors)
+                || ContextualRoleMap.focus(inventory.map, candidate: candidate, in: transcript, sourceAnchors: roleAnchors) != nil
         }
         var firstRepairPrompt = "", firstRegionText = ""
         if value.kind == .parallelPattern && !validPattern(value) {
@@ -431,13 +472,13 @@ nonisolated enum SpatialPlanner {
         }, requiredRoles: value.requiredRoles)
         let expectedRegions = layout.groups.indices.map { "G\($0+1)" }
         guard value.kind == .parallelPattern, value.regions.map(\.regionID) == expectedRegions,
-              layout.allows(inventory, transcript: transcript) else {
+              let roleAnchors = layout.sourceAnchors(for: inventory, transcript: transcript) else {
             return clarify("The note groups do not identify one reliable missing contribution.")
         }
-        if ContextualRoleMap.isComplete(inventory.map, candidate: candidate, in: transcript) {
+        if ContextualRoleMap.isComplete(inventory.map, candidate: candidate, in: transcript, sourceAnchors: roleAnchors) {
             return clarify("These notes already supply the shared pattern. What would you like to add?")
         }
-        guard let focus = ContextualRoleMap.focus(inventory.map, candidate: candidate, in: transcript) else {
+        guard let focus = ContextualRoleMap.focus(inventory.map, candidate: candidate, in: transcript, sourceAnchors: roleAnchors) else {
             let choices = anchors.filter { $0.blockID.hasPrefix("S") }.map(\.quote)
             let names = choices.joined(separator: " or ")
             return clarify((2...4).contains(choices.count) && names.count <= 220

@@ -12,7 +12,6 @@ struct LecturePDFDestination: Identifiable {
 
 struct LectureSourcesView: View {
     let noteID: UUID
-    let noteTitle: String
     var close: (() -> Void)? = nil
     var dragging: (Bool) -> Void = { _ in }
     var split: ((SourceDragReference) -> Void)? = nil
@@ -39,11 +38,13 @@ struct LectureSourcesView: View {
             ScrollView {
                 GlassEffectContainer(spacing: 18) {
                     VStack(alignment: .leading, spacing: 20) {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .center, spacing: 16) { sourceHeading; Spacer(); importButton }
-                            VStack(alignment: .leading, spacing: 12) { sourceHeading; importButton }
+                        HStack(alignment: .center, spacing: 12) {
+                            Text("\(documents.count) attached \(documents.count == 1 ? "source" : "sources")")
+                                .font(.subheadline.weight(.medium))
+                                .accessibilityIdentifier("attachedSourcesCount")
+                            Spacer(minLength: 0)
+                            importButton
                         }
-                        .padding(16)
                         if busy {
                             HStack {
                                 ProgressView()
@@ -52,11 +53,6 @@ struct LectureSourcesView: View {
                             }.padding(16).bukoGlass(cornerRadius: 24)
                         }
                         if let error { Text(error).foregroundStyle(.red).accessibilityIdentifier("lectureImportError") }
-                        Text("\(documents.count) attached \(documents.count == 1 ? "source" : "sources")")
-                            .font(.subheadline.weight(.medium)).accessibilityIdentifier("attachedSourcesCount")
-                        if documents.isEmpty && !busy {
-                            ContentUnavailableView("No sources yet", systemImage: "doc", description: Text("Import a PDF to read alongside your notes and use with autofill."))
-                        }
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], alignment: .leading, spacing: 16) {
                             ForEach(documents) { document in
                                 LectureSourceCard(document: document, noteID: noteID, library: library, busy: busy,
@@ -99,13 +95,6 @@ struct LectureSourcesView: View {
             } message: { Text("The imported copy and its index will be removed. Your original file and handwritten notes stay intact.") }
         }
         .background(Color(uiColor: .secondarySystemBackground))
-    }
-
-    private var sourceHeading: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(noteTitle).font(.title3.weight(.semibold)).lineLimit(2)
-            Text("Sources for this note").font(.subheadline).foregroundStyle(.secondary)
-        }
     }
 
     private var importButton: some View {

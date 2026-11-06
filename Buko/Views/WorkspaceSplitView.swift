@@ -107,16 +107,22 @@ struct WorkspaceDropIndicator: View {
 }
 
 /// Semantic native toolbar placements automatically move to Duo's outer edge.
-struct NotebookToolbar<PageProgress: View>: ToolbarContent {
+struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarContent {
     @Bindable var session: CanvasSession
     let notes: () -> Void
     let settings: () -> Void
+    @Binding var settingsPresented: Bool
+    var settingsDismissed: () -> Void = {}
     var showsNotes = true
     var showsSettings = true
+    var settingsInDrawingBar = false
+    var settingsPopoverEnabled = false
+    var combinesHistory = false
     let sources: () -> Void
     var switchPane: (() -> Void)? = nil
     var showsPageProgress = false
     @ViewBuilder var pageProgress: () -> PageProgress
+    @ViewBuilder var settingsContent: () -> SettingsContent
     @AppStorage("showsGestureTestTools") private var showsCircle = true
     var body: some ToolbarContent {
         if showsNotes {
@@ -124,7 +130,7 @@ struct NotebookToolbar<PageProgress: View>: ToolbarContent {
                 Button("Notes", systemImage: "sidebar.left", action: notes).accessibilityIdentifier("showNotes")
             }
         }
-        if showsSettings {
+        if showsSettings && !settingsInDrawingBar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Settings", systemImage: "gearshape", action: settings).accessibilityIdentifier("openSettings")
             }
@@ -134,6 +140,23 @@ struct NotebookToolbar<PageProgress: View>: ToolbarContent {
                 .axisBehavior(.verticalPreferred)
                 .sharedBackgroundVisibility(.hidden)
                 .visibilityPriority(.high)
+            ToolbarSpacer(.fixed, placement: .bottomBar)
+        }
+        if showsSettings && settingsInDrawingBar {
+            ToolbarItem(placement: .bottomBar) {
+                Button("Settings", systemImage: "ellipsis", action: settings)
+                    .accessibilityIdentifier("openSettings")
+                    .popover(isPresented: Binding(
+                        get: { settingsPopoverEnabled && settingsPresented },
+                        set: { settingsPresented = $0 }
+                    ), attachmentAnchor: .rect(.bounds), arrowEdge: .trailing) {
+                        settingsContent()
+                            .presentationCompactAdaptation(.popover)
+                            .onDisappear(perform: settingsDismissed)
+                    }
+            }
+            .axisBehavior(.verticalPreferred)
+            .visibilityPriority(.high)
             ToolbarSpacer(.fixed, placement: .bottomBar)
         }
         ToolbarItemGroup(placement: .bottomBar) {
@@ -151,8 +174,10 @@ struct NotebookToolbar<PageProgress: View>: ToolbarContent {
         }
         ToolbarItemGroup(placement: .bottomBar) {
             Button("Sources", systemImage: "books.vertical", action: sources).accessibilityIdentifier("lectureSources")
-            Button("Undo", systemImage: "arrow.uturn.backward", action: session.undo).disabled(!session.canUndo)
-            Button("Redo", systemImage: "arrow.uturn.forward", action: session.redo).disabled(!session.canRedo)
+            if !combinesHistory {
+                Button("Undo", systemImage: "arrow.uturn.backward", action: session.undo).disabled(!session.canUndo)
+                Button("Redo", systemImage: "arrow.uturn.forward", action: session.redo).disabled(!session.canRedo)
+            }
         }
         if let switchPane {
             ToolbarItem(placement: .topBarPinnedTrailing) {

@@ -1,6 +1,6 @@
 """Isolated app-only fixture and observations; model and production sources remain real."""
 from pathlib import Path
-import subprocess, sys, shutil
+import subprocess, sys, shutil, hashlib, json
 repo = Path(__file__).resolve().parents[2]
 root = Path(sys.argv[1]).resolve()
 subprocess.run([sys.executable, str(repo/'Tests/DeviceRoundTwo/prepare_ui.py'), str(root)], check=True)
@@ -8,7 +8,24 @@ p = root/'Buko.xcodeproj/project.pbxproj'
 p.write_text(p.read_text().replace('dev.buko.DeviceRoundTwoValidation', 'dev.buko.DuoUIValidation').replace('dev.buko.DeviceRoundTwoUITests', 'dev.buko.DuoUITests'))
 for p in (root/'Tests/UI').glob('*.swift'): p.unlink()
 shutil.copyfile(repo/'Tests/UI/DuoWorkspaceTests.swift', root/'Tests/UI/DuoWorkspaceTests.swift')
+shutil.copyfile(repo/'Tests/UI/DuoChromeTests.swift', root/'Tests/UI/DuoChromeTests.swift')
 shutil.copyfile(repo/'Tests/UI/DeviceRoundTwoTests.swift', root/'Tests/UI/DeviceRoundTwoTests.swift')
+if '--production-ui' in sys.argv:
+    # Actual-pose chrome checks attach to the running app after Device Hub changes
+    # pose. Keep every app source exact, without a fixture strip taking bar space.
+    shutil.rmtree(root/'Buko')
+    shutil.copytree(repo/'Buko', root/'Buko')
+    if '--finger-input' in sys.argv:
+        p = root/'Buko/Canvas/CanvasSession.swift'
+        p.write_text(p.read_text().replace('var allowsFingerDrawing = false', 'var allowsFingerDrawing = true'))
+    files = []
+    for p in sorted((repo/'Buko').rglob('*.swift')):
+        relative = p.relative_to(repo)
+        original = hashlib.sha256(p.read_bytes()).hexdigest()
+        copied = hashlib.sha256((root/relative).read_bytes()).hexdigest()
+        files.append({'path': str(relative), 'original': original, 'copy': copied, 'changed': original != copied})
+    (root/'source-manifest.json').write_text(json.dumps({'files': files, 'bundleID': 'dev.buko.DuoUIValidation'}, indent=2))
+    sys.exit(0)
 p = root/'Buko/ContentView.swift'; s=p.read_text()
 s=s.replace('    @State private var spatialOriginal:', '    @State private var duoFold = CommandLine.arguments.contains("--duo-fold-fixture") ? 1 : 0\n    @State private var duoCheck = "idle"\n    @State private var spatialOriginal:', 1)
 s=s.replace('                    Button("Load fixture")', '''                    Button("Second note") {

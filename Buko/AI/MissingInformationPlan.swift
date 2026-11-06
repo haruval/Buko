@@ -607,8 +607,8 @@ nonisolated struct ContextualRoleMap: Codable {
 
     /// Generic role coverage, not a catalog of request kinds. All semantic role
     /// labels/associations come from the model; exact text anchors are checked here.
-    static func focus(_ map: Self, candidate: ContextualGapReferences, in transcript: GapTranscript) -> ContextualGapReferences? {
-        guard let coverage = coverage(map, candidate: candidate, in: transcript) else { return nil }
+    static func focus(_ map: Self, candidate: ContextualGapReferences, in transcript: GapTranscript, sourceAnchors: [GapTextReference]? = nil) -> ContextualGapReferences? {
+        guard let coverage = coverage(map, candidate: candidate, in: transcript, sourceAnchors: sourceAnchors) else { return nil }
         let (subjects, required, available) = coverage
         let incomplete = available.indices.filter { !required.isSubset(of: available[$0]) }
         guard incomplete.count == 1, let index = incomplete.first else { return nil }
@@ -622,14 +622,14 @@ nonisolated struct ContextualRoleMap: Codable {
         // evidence/writer stages; otherwise they can repeat a supplied role.
         // Prefer the focused topic's content within the existing four-span
         // budget. The full selected transcript still accompanies every stage.
-        let orderedRoles = map.content.filter { !$0.quote.isEmpty }.sorted {
-            let left = $0.topic.localizedCaseInsensitiveCompare(subject.quote) == .orderedSame
-            let right = $1.topic.localizedCaseInsensitiveCompare(subject.quote) == .orderedSame
+        let orderedRoles = map.content.enumerated().filter { !$0.element.quote.isEmpty }.sorted {
+            let left = $0.element.topic.localizedCaseInsensitiveCompare(subject.quote) == .orderedSame
+            let right = $1.element.topic.localizedCaseInsensitiveCompare(subject.quote) == .orderedSame
             return left && !right
         }
         var supplied: [GapTextReference] = []
-        for role in orderedRoles {
-            guard let block = transcript.blocks.first(where: { $0.selected && $0.text.contains(role.quote) }),
+        for (index, role) in orderedRoles {
+            guard let block = transcript.blocks.first(where: { $0.selected && (sourceAnchors == nil || sourceAnchors?[index].blockID == $0.id) && $0.text.contains(role.quote) }),
                   let range = block.text.range(of: role.quote) else { return nil }
             // Deduplicate overlapping role quotations; they still describe
             // already-present content. Do not loosen final span validation.
@@ -642,15 +642,16 @@ nonisolated struct ContextualRoleMap: Codable {
         focused.alreadyCovered = supplied
         return focused
     }
-    static func isComplete(_ map: Self, candidate: ContextualGapReferences, in transcript: GapTranscript) -> Bool {
-        guard let (_, required, available) = coverage(map, candidate: candidate, in: transcript) else { return false }
+    static func isComplete(_ map: Self, candidate: ContextualGapReferences, in transcript: GapTranscript, sourceAnchors: [GapTextReference]? = nil) -> Bool {
+        guard let (_, required, available) = coverage(map, candidate: candidate, in: transcript, sourceAnchors: sourceAnchors) else { return false }
         return available.allSatisfy { required.isSubset(of: $0) }
     }
 
-    private static func coverage(_ map: Self, candidate: ContextualGapReferences, in transcript: GapTranscript)
+    private static func coverage(_ map: Self, candidate: ContextualGapReferences, in transcript: GapTranscript, sourceAnchors: [GapTextReference]? = nil)
         -> ([GapTextReference], Set<String>, [Set<String>])? {
         func key(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
         let subjects = (try? candidate.subjects(in: transcript)) ?? []
+        guard sourceAnchors == nil || sourceAnchors?.count == map.content.count else { return nil }
         guard (2...3).contains(subjects.count), Set(subjects.map { key($0.quote) }).count == subjects.count,
               (1...8).contains(map.content.count),
               Set(map.content.map { key($0.topic) }) == Set(subjects.map { key($0.quote) }),
@@ -674,8 +675,9 @@ nonisolated struct ContextualRoleMap: Codable {
                 }
             }
         }
-        for role in map.content where !role.quote.isEmpty {
-            let matches = blocks.compactMap { block -> (GapTranscript.Block, Range<String.Index>)? in
+        for (roleIndex, role) in map.content.enumerated() where !role.quote.isEmpty {
+            if let sourceAnchors, sourceAnchors[roleIndex].quote != role.quote { return nil }
+            let matches = blocks.filter { sourceAnchors == nil || sourceAnchors?[roleIndex].blockID == $0.id }.compactMap { block -> (GapTranscript.Block, Range<String.Index>)? in
                 guard let range = block.text.range(of: role.quote) else { return nil }
                 return (block, range)
             }
