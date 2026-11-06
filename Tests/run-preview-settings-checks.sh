@@ -51,14 +51,11 @@ private final class PDFZoomTestArea: UIAccessibilityElement {
     }
 }
 ''')
-project = root / 'Buko.xcodeproj/project.pbxproj'
-project.write_text(project.read_text().replace('"devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)"', 'dev.buko.PreviewValidation'))
 PY
+python3 Tests/simulator_isolation.py configure "$BUKO_PREVIEW_DIR/Buko.xcodeproj/project.pbxproj" dev.buko.PreviewValidation
 printf 'Source/settings UI harness: %s\n' "$BUKO_PREVIEW_DIR"
-# This bundle belongs only to this disposable suite, never the user's Buko app.
-xcrun simctl uninstall "$BUKO_PREVIEW_SIM" dev.buko.PreviewValidation >/dev/null 2>&1 || true
-xcodebuild -project "$BUKO_PREVIEW_DIR/Buko.xcodeproj" -scheme BukoValidation -configuration Debug \
-    -destination "id=$BUKO_PREVIEW_SIM" -derivedDataPath "$BUKO_PREVIEW_DIR/DerivedData" \
-    -resultBundlePath "$BUKO_PREVIEW_DIR/Interactions.xcresult" CODE_SIGNING_ALLOWED=NO \
-    test > "$BUKO_PREVIEW_DIR/ui-test.log" 2>&1
+source Tests/SimulatorIsolation.sh
+shift
+if [[ $# -gt 0 ]]; then shift; fi
+buko_run_isolated_ui_checks "$BUKO_PREVIEW_DIR" dev.buko.PreviewValidation "$BUKO_PREVIEW_SIM" "$@"
 printf 'PASS: preview UI checks (%s)\n' "$BUKO_PREVIEW_MODE"

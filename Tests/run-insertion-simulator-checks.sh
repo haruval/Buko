@@ -15,9 +15,13 @@ for name in ['Buko', 'Buko.xcodeproj', 'Configuration']:
 shutil.copyfile('Tests/Fixtures/AutofillRuntimeHarness.swift', root / 'Buko/MyApp.swift')
 (root / 'Tests/UI').mkdir(parents=True)
 shutil.copyfile('Tests/Fixtures/AutofillInteractionTests.swift', root / 'Tests/UI/AutofillInteractionTests.swift')
-project = root / 'Buko.xcodeproj/project.pbxproj'
-project.write_text(project.read_text().replace('"devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)"', 'dev.buko.InsertionValidation'))
 # A same-file test accessor keeps fixture injection out of production code.
+with (root / 'Buko/AI/AutofillInsertionState.swift').open('a') as f:
+    f.write('''
+extension AutofillInsertionState {
+    func validationWaitForPreparation() async { await preparation?.value }
+}
+''')
 with (root / 'Buko/AI/CircleIntentState.swift').open('a') as f:
     f.write('''
 extension CircleIntentState {
@@ -70,18 +74,20 @@ extension CanvasHostView {
 }
 ''')
 PY
+python3 Tests/simulator_isolation.py configure "$BUKO_INSERTION_HARNESS/Buko.xcodeproj/project.pbxproj" dev.buko.InsertionValidation
+printf 'Isolated insertion harness: %s\n' "$BUKO_INSERTION_HARNESS"
 if [[ "$BUKO_INSERTION_MODE" == "--ui-checks" ]]; then
-    xcodebuild -project "$BUKO_INSERTION_HARNESS/Buko.xcodeproj" -scheme BukoValidation -configuration Debug \
-        -destination "id=$BUKO_INSERTION_SIM" -derivedDataPath "$BUKO_INSERTION_HARNESS/DerivedData" \
-        -resultBundlePath "$BUKO_INSERTION_HARNESS/Interactions.xcresult" CODE_SIGNING_ALLOWED=NO \
-        test > "$BUKO_INSERTION_HARNESS/ui-test.log" 2>&1
+    source Tests/SimulatorIsolation.sh
+    shift 2
+    buko_run_isolated_ui_checks "$BUKO_INSERTION_HARNESS" dev.buko.InsertionValidation "$BUKO_INSERTION_SIM" "$@"
     printf 'UI validation: %s\n' "$BUKO_INSERTION_HARNESS"
     exit 0
 fi
 xcodebuild -project "$BUKO_INSERTION_HARNESS/Buko.xcodeproj" -scheme Buko -configuration Debug \
     -sdk iphonesimulator -destination "id=$BUKO_INSERTION_SIM" \
     -derivedDataPath "$BUKO_INSERTION_HARNESS/DerivedData" CODE_SIGNING_ALLOWED=NO \
-    PRODUCT_BUNDLE_IDENTIFIER=dev.buko.InsertionValidation build > "$BUKO_INSERTION_HARNESS/build.log" 2>&1
+    build > "$BUKO_INSERTION_HARNESS/build.log" 2>&1
+python3 Tests/simulator_isolation.py verify "$BUKO_INSERTION_HARNESS/DerivedData" dev.buko.InsertionValidation --app-only
 xcrun simctl install "$BUKO_INSERTION_SIM" "$BUKO_INSERTION_HARNESS/DerivedData/Build/Products/Debug-iphonesimulator/Buko.app"
 BUKO_INSERTION_DATA="$(xcrun simctl get_app_container "$BUKO_INSERTION_SIM" dev.buko.InsertionValidation data)"
 rm -f "$BUKO_INSERTION_DATA/Documents/result.txt"

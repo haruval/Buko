@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Copy the integrated app and add synthetic UI fixtures only in the disposable copy."""
-import argparse, hashlib, json, pathlib, shutil
+import argparse, hashlib, json, pathlib, shutil, sys
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from simulator_isolation import configure
 import xml.etree.ElementTree as ET
 p=argparse.ArgumentParser(); p.add_argument('destination',type=pathlib.Path); a=p.parse_args()
 repo=pathlib.Path(__file__).resolve().parents[2]; experiment=pathlib.Path(__file__).resolve().parent
@@ -11,17 +13,13 @@ for name in ['Buko','Buko.xcodeproj','Configuration']: shutil.copytree(repo/name
 (root/'Tests/UI').mkdir(parents=True)
 shutil.copyfile(experiment/'Integration/SpatialAppTests.swift',root/'Tests/UI/SpatialAppTests.swift')
 p=root/'Buko.xcodeproj/project.pbxproj'
-s=p.read_text().replace('dev.buko.LayoutExperiment.M4.UITests','dev.buko.SpatialIntegrationUITests').replace('dev.buko.LayoutExperiment.M4','dev.buko.SpatialIntegrationValidation')
+configure(p, 'dev.buko.SpatialIntegrationValidation')
+s=p.read_text()
 # Every configuration in this disposable copy must remain isolated.
 for original,replacement in [
-    ('PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)";', 'PRODUCT_BUNDLE_IDENTIFIER = dev.buko.SpatialIntegrationValidation;'),
-    ('PRODUCT_BUNDLE_IDENTIFIER = dev.buko.UITests;', 'PRODUCT_BUNDLE_IDENTIFIER = dev.buko.SpatialIntegrationUITests;'),
     ('REGISTER_APP_GROUPS = YES;', 'REGISTER_APP_GROUPS = NO;'),
     ('INFOPLIST_FILE = Configuration/Info.plist;', 'INFOPLIST_FILE = Configuration/ExperimentInfo.plist;')]:
-    if original.startswith("PRODUCT_BUNDLE_IDENTIFIER = \"devplaceholder"):
-        assert s.count(original) in (0, 2)
-    else:
-        assert s.count(original) == 2
+    assert s.count(original) == 2
     s=s.replace(original,replacement)
 import re
 assert set(re.findall(r'PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);', s)) == {

@@ -29,6 +29,7 @@ private struct InsertionHarnessView: UIViewRepresentable {
     let session = CanvasSession()
     let handwriting = HandwritingPreparation(idleDelay: .zero)
     var coordinator: NoteCanvas.Coordinator?
+    weak var undoStatus: UILabel?
     var failSave = false
     var isFlowExample: Bool { ProcessInfo.processInfo.arguments.contains("--flow-preview") }
     var heading: String { isFlowExample ? "Precedence vs associativity:" : "Parsing:" }
@@ -62,11 +63,12 @@ private struct InsertionHarnessView: UIViewRepresentable {
         host.overrideUserInterfaceStyle = dark ? .dark : .light
         host.configure(tool: .pen, allowsFingerDrawing: true, showsGrid: true, colorScheme: dark ? .dark : .light)
         session.host = host; session.canvas = host.canvas
-        let coordinator = NoteCanvas.Coordinator(session: session) { [weak self] data in
+        let coordinator = NoteCanvas.Coordinator(session: session, onDrawingChange: { [weak self] data in
             guard let self else { return }
             self.note.drawingData = data
             try! self.container.mainContext.save()
-        }
+            self.refreshUndoStatus()
+        }, onWritingBegan: {})
         coordinator.host = host; coordinator.hasLoadedDrawing = true
         self.coordinator = coordinator; host.canvas.delegate = coordinator
         host.preparedHandwriting = { [weak self] in self?.handwriting.prepared(for: $0) ?? HandwritingSampler.Result() }
@@ -78,6 +80,10 @@ private struct InsertionHarnessView: UIViewRepresentable {
                 if self.failSave { throw AutofillEditError.unavailable }
             }
         }
+    }
+
+    private func refreshUndoStatus() {
+        undoStatus?.text = original.matches(AutofillDocument(note)) ? "Original restored" : "Edited"
     }
 
     func preview(source: String? = nil) async throws {
@@ -95,7 +101,7 @@ private struct InsertionHarnessView: UIViewRepresentable {
             content: AutofillContent(lines: text.components(separatedBy: .newlines).map {
                 .init(text: $0, citationIndices: citations.isEmpty ? [] : [0])
             }, origin: .lectureDraft), citations: citations, insertionTarget: heading)
-        host.circleIntent.insertion.capture()
+        host.circleIntent.insertion.capture(selection: polygon)
         if ProcessInfo.processInfo.arguments.contains("--pipeline-preview") {
             host.circleIntent.validationBegin(proposal, scale: host.canvas.zoomScale, offset: host.canvas.contentOffset)
             try await Task.sleep(for: .seconds(6))
@@ -104,7 +110,8 @@ private struct InsertionHarnessView: UIViewRepresentable {
             try await Task.sleep(for: .seconds(6))
         }
         host.circleIntent.validationPreview(proposal, scale: host.canvas.zoomScale, offset: host.canvas.contentOffset)
-        precondition(host.circleIntent.insertion.canAccept, "Prepared or fallback handwriting must be ready immediately")
+        await host.circleIntent.insertion.validationWaitForPreparation()
+        precondition(host.circleIntent.insertion.canAccept, "Prepared or fallback handwriting must be ready after preparation")
         try await Task.sleep(for: .milliseconds(200))
         precondition(original.matches(AutofillDocument(note)), "Preview mutated persistence")
         precondition(AutofillDocument.sameInk(host.canonicalDrawing, try! AutofillDocument.drawing(original.ink)), "Preview mutated live ink")
@@ -217,15 +224,14 @@ private struct InsertionHarnessView: UIViewRepresentable {
                 let status = UILabel(frame: CGRect(x: 240, y: host.bounds.height - 64, width: 300, height: 44))
                 status.accessibilityIdentifier = "validationUndoStatus"
                 status.text = "Ready"; host.addSubview(status)
+                undoStatus = status
                 let button = UIButton(type: .system)
                 button.frame = CGRect(x: 24, y: host.bounds.height - 64, width: 200, height: 44)
                 button.setTitle("Validation undo", for: .normal)
-                button.addAction(UIAction { [weak self, weak status] _ in
+                button.addAction(UIAction { [weak self] _ in
                     guard let self else { return }
                     self.session.undo()
-                    DispatchQueue.main.async {
-                        status?.text = self.original.matches(AutofillDocument(self.note)) ? "Original restored" : "Edited"
-                    }
+                    self.refreshUndoStatus()
                 }, for: .touchUpInside)
                 host.addSubview(button)
             }
@@ -279,7 +285,7 @@ private struct InsertionHarnessView: UIViewRepresentable {
             original.apply(to: note); try container.mainContext.save()
             try await preview()
             if #available(iOS 27, *) { try await checkOtherNotesAndGeneratedExclusion() }
-            try Data("PASS: prepared current/other-note sampling, immediate preview acceptance, generated-ink exclusion, inline placement, preview/decline, failure rollback/retry, native atomic undo/redo, source and document staleness, cancellation".utf8)
+            try Data("PASS: prepared current/other-note sampling, preview acceptance after preparation, generated-ink exclusion, inline placement, preview/decline, failure rollback/retry, native atomic undo/redo, source and document staleness, cancellation".utf8)
                 .write(to: URL.documentsDirectory.appendingPathComponent("result.txt"), options: .atomic)
         } catch {
             try? Data("FAIL: \(error)".utf8).write(to: URL.documentsDirectory.appendingPathComponent("result.txt"))
