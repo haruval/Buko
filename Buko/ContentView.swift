@@ -220,7 +220,7 @@ struct ContentView: View {
                         }
                         .arrangementViewStyle(.overlay.axes(secondContent == nil ? Axis.Set.horizontal.union(.vertical) : .horizontal))
                         .background(.black)
-                        .ignoresSafeArea(.container, edges: nativeTools ? .all : [])
+                        .ignoresSafeArea(.container, edges: nativeTools ? .all : .top)
                     }
                     .navigationTitle("")
                     .navigationBarTitleDisplayMode(.inline)

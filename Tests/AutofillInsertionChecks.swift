@@ -5,6 +5,7 @@ import SwiftData
 @main struct AutofillInsertionChecks {
     enum Injected: Error { case failure }
     @MainActor static func main() async throws {
+        try await AutofillPreparationRaceChecks.run()
         AutofillReflowChecks.run()
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -28,4 +28,3 @@ struct WorkspaceGeometry {
         return CGRect(x: first.maxX, y: 0, width: max(10, second.minX - first.maxX), height: size.height)
     }
 }
-

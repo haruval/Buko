@@ -151,21 +151,22 @@ struct AutofillPreviewCard: View {
     private var clarificationInput: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("A little more detail…", text: $clarificationReply, axis: .vertical)
+                TextField("", text: $clarificationReply, axis: .vertical)
                     .lineLimit(1...4).textFieldStyle(.plain)
                     .padding(.leading, 16).padding(.vertical, 12)
                     .focused($clarificationFocused).submitLabel(.send)
+                    .accessibilityLabel("Clarification")
                     .accessibilityIdentifier("autofillClarificationInput")
                     .onSubmit(submitClarification)
                 Button(action: submitClarification) {
-                    Image(systemName: "arrow.up").font(.body.weight(.semibold))
-                        .frame(width: 44, height: 44)
+                    Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold))
                 }
                 .buttonStyle(.glassProminent).buttonBorderShape(.circle).tint(.blue)
+                .controlSize(.small)
+                .frame(width: 44, height: 44).contentShape(.rect)
                 .accessibilityLabel("Send clarification")
                 .disabled(clarificationReply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || clarificationReply.count > 500)
                 .accessibilityIdentifier("submitAutofillClarification")
-                .padding(4)
             }
             .glassEffect(.clear.interactive(), in: .capsule)
             if let issue = state.clarificationIssue { Text(issue).font(.caption).foregroundStyle(.red) }
