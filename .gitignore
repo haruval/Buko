@@ -8,3 +8,6 @@ build/
 *.xcuserstate
 xcuserdata/
 .xcodebuildmcp/
+
+# Legacy generated validation copies are private, never shipping source.
+/DeviceApp/

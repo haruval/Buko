@@ -1,0 +1,697 @@
+{
+  "formatVersion": 1,
+  "partition": "Authored synthetic repeated-content development cases; not held-out human handwriting",
+  "cases": [
+    {
+      "id": "field-capacity-left",
+      "selected": "Luma\nNeral\nPurpose: buffer inputs.\nPurpose: buffer inputs.\nCapacity: eight entries.",
+      "context": "For each component, record its purpose and capacity.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Luma",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Neral",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: buffer inputs.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: buffer inputs.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Capacity: eight entries.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [
+        "Neral"
+      ],
+      "needs": [
+        "capacity"
+      ],
+      "clarify": false
+    },
+    {
+      "id": "field-capacity-right",
+      "selected": "Luma\nNeral\nPurpose: buffer inputs.\nPurpose: buffer inputs.\nCapacity: five entries.",
+      "context": "Record capacity and purpose for every component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Luma",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Neral",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: buffer inputs.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: buffer inputs.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Capacity: five entries.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [
+        "Luma"
+      ],
+      "needs": [
+        "capacity"
+      ],
+      "clarify": false
+    },
+    {
+      "id": "field-setting",
+      "selected": "Solar cell\nTurbine\nPurpose: generate electricity.\nPurpose: generate electricity.\nSetting: a rooftop.",
+      "context": "Write purpose and setting for each device.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Solar cell",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Turbine",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: generate electricity.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: generate electricity.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Setting: a rooftop.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [
+        "Turbine"
+      ],
+      "needs": [
+        "setting"
+      ],
+      "clarify": false
+    },
+    {
+      "id": "field-ownership",
+      "selected": "Semaphore\nMutex\nPurpose: coordinate access.\nPurpose: coordinate access.\nOwnership: no owning thread.",
+      "context": "List each primitive's purpose and ownership.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Semaphore",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Mutex",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: coordinate access.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: coordinate access.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Ownership: no owning thread.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [
+        "Mutex"
+      ],
+      "needs": [
+        "ownership"
+      ],
+      "clarify": false
+    },
+    {
+      "id": "field-stacked",
+      "selected": "Rilo\nPurpose: track requests.\nPavo\nPurpose: track requests.\nLimit: ten pending requests.",
+      "context": "Give purpose and limit for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60,
+            100,
+            650,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75,
+            138,
+            635,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            60,
+            380,
+            650,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75,
+            418,
+            635,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: ten pending requests.",
+          "page": "p1",
+          "rect": [
+            75,
+            456,
+            635,
+            22
+          ]
+        }
+      ],
+      "subjects": [
+        "Rilo"
+      ],
+      "needs": [
+        "limit"
+      ],
+      "clarify": false
+    },
+    {
+      "id": "field-three-regions",
+      "selected": "Rilo\nPavo\nTuro\nPurpose: track requests.\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.\nLimit: four requests.",
+      "context": "Record purpose and limit for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            266.6666666666667,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            353.3333333333333,
+            100,
+            266.6666666666667,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Turo",
+          "page": "p1",
+          "rect": [
+            646.6666666666666,
+            100,
+            266.6666666666667,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            251.66666666666669,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            368.3333333333333,
+            138,
+            251.66666666666669,
+            22
+          ]
+        },
+        {
+          "blockID": "S6",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            661.6666666666666,
+            138,
+            251.66666666666669,
+            22
+          ]
+        },
+        {
+          "blockID": "S7",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            251.66666666666669,
+            22
+          ]
+        },
+        {
+          "blockID": "S8",
+          "text": "Limit: four requests.",
+          "page": "p1",
+          "rect": [
+            661.6666666666666,
+            176,
+            251.66666666666669,
+            22
+          ]
+        }
+      ],
+      "subjects": [
+        "Pavo"
+      ],
+      "needs": [
+        "limit"
+      ],
+      "clarify": false
+    },
+    {
+      "id": "field-two-missing-roles",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.\nLatency: two milliseconds.",
+      "context": "For each component, write purpose, limit, and latency.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S6",
+          "text": "Latency: two milliseconds.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            214,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [
+        "Pavo"
+      ],
+      "needs": [
+        "limit",
+        "latency"
+      ],
+      "clarify": false
+    },
+    {
+      "id": "field-complete",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.\nLimit: six requests.",
+      "context": "Record purpose and limit for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S6",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-two-incomplete",
+      "selected": "Rilo\nPavo\nTuro\nPurpose: track requests.\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.",
+      "context": "Record purpose and limit for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            266.6666666666667,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            353.3333333333333,
+            100,
+            266.6666666666667,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Turo",
+          "page": "p1",
+          "rect": [
+            646.6666666666666,
+            100,
+            266.6666666666667,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            251.66666666666669,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            368.3333333333333,
+            138,
+            251.66666666666669,
+            22
+          ]
+        },
+        {
+          "blockID": "S6",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            661.6666666666666,
+            138,
+            251.66666666666669,
+            22
+          ]
+        },
+        {
+          "blockID": "S7",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            251.66666666666669,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    }
+  ]
+}

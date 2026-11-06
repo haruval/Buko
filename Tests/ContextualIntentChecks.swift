@@ -189,9 +189,12 @@ import Darwin
 
     @available(macOS 27, *)
     static func cancellationChecks(output: URL) async throws {
-        let fixture = fixtures.first { $0.id == "disambiguated-reference" }!
+        let reference = fixtures.first { $0.id == "disambiguated-reference" }!
+        let question = Fixture(id: "question-reference-repair", selected: "Why is matrix multiplication not commutative?",
+            context: "", needs: ["why"], subjects: ["matrix multiplication"])
         var reports: [[String: Any]] = []
-        for stage in ["referenceRepair", "referenceRepair.scopeBinding"] {
+        for (fixture, stage) in [(reference, "referenceRepair"), (reference, "referenceRepair.scopeBinding"),
+                                 (question, "referenceRepair")] {
             let recorder = Recorder()
             let task = Task {
                 let observer: PipelineObserver = { event in
@@ -207,7 +210,7 @@ import Darwin
             let steps = await recorder.trace.steps
             precondition(steps.last?.id == stage && steps.last?.status == .completed,
                          "Cancellation must occur at the real review boundary and prevent later stages")
-            reports.append(["cancelledAfter": stage, "stages": steps.map(\.id), "passed": true])
+            reports.append(["case": fixture.id, "cancelledAfter": stage, "stages": steps.map(\.id), "passed": true])
             print("PASS cancellation after \(stage): no subsequent stage or plan")
         }
         try JSONSerialization.data(withJSONObject: reports, options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)

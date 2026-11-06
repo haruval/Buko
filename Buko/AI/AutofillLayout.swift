@@ -18,7 +18,7 @@ nonisolated enum AutofillLayout {
         let letterHeight: CGFloat
         let sampledGlyphCount: Int
         let fallbackGlyphCount: Int
-        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v1" : "note-samples-with-fallback-v1" }
+        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v4" : "note-samples-with-fallback-v6" }
         var drawing: PKDrawing { PKDrawing(strokes: existing.strokes + inserted.strokes) }
         var bounds: CGRect { lines.reduce(.null) { $0.union($1.frame) } }
     }
@@ -34,6 +34,7 @@ nonisolated enum AutofillLayout {
     }
 
     static let margin: CGFloat = 36
+    private static let strokeWidthScale: CGFloat = 0.81
 
     /// Returns a top coordinate on paper, choosing the previous page only when
     /// the entire band fits there. It never leaves a line across the page gutter.
@@ -70,6 +71,13 @@ nonisolated enum AutofillLayout {
         let style = AutofillTypography.style(selectedRows.last!, neighbors: selectedRows)
         let size = min(96, max(10, letterHeight ?? anchor?.height ?? style.height))
         let scale = size / HandwritingSample.capHeight
+        // Match actual PencilKit point sizes in document coordinates, independently
+        // of letter height. Scaling a normalized alphabet used to thicken its pen.
+        let nearbyWidths: [CGFloat] = selected.flatMap { stroke -> [CGFloat] in
+            let transformScale = hypot(stroke.transform.a, stroke.transform.b)
+            return stroke.path.map { $0.size.width * transformScale }
+        }.filter { $0.isFinite && $0 > 0 }.sorted()
+        let penWidth: CGFloat = nearbyWidths.isEmpty ? 2.5 : nearbyWidths[nearbyWidths.count / 2]
         var split = anchor?.row.maxY ?? selectedBounds.maxY
         for stroke in drawing.strokes.sorted(by: { $0.renderBounds.minY < $1.renderBounds.minY }) {
             let b = stroke.renderBounds
@@ -80,12 +88,35 @@ nonisolated enum AutofillLayout {
             ?? min(selectedBounds.minX, PageGeometry.pageOriginX + PageGeometry.pageWidth * 0.35))
         let right = PageGeometry.pageOriginX + PageGeometry.pageWidth - margin
         var decoded: [String: PKDrawing] = [:]
-        for (key, value) in samples { decoded[key] = try PKDrawing(data: value.drawingData) }
+        for (key, value) in samples where key.count == 1 {
+            let source = try PKDrawing(data: value.drawingData)
+            if let normalized = try? HandwritingSample.normalized(drawing: source, text: key) {
+                decoded[key] = try PKDrawing(data: normalized.drawingData)
+            }
+        }
         let personal = Set(decoded.keys)
         var missing: [String] = []
         for key in Set(text.filter { !$0.isWhitespace }.map(String.init)).sorted() where decoded[key] == nil {
             if let sample = HandwrittenFont.sample(key) { decoded[key] = try PKDrawing(data: sample.drawingData) }
             else { missing.append(key) }
+        }
+        for (key, glyph) in decoded {
+            let widths = glyph.strokes.flatMap { stroke in
+                stroke.path.map { $0.size.width * hypot(stroke.transform.a, stroke.transform.b) * scale }
+            }.filter { $0.isFinite && $0 > 0 }.sorted()
+            guard !widths.isEmpty else { continue }
+            // Keep the surrounding pen's character while making every generated
+            // glyph slightly lighter, including fallback letters and symbols.
+            let ratio = (personal.contains(key) ? penWidth / widths[widths.count / 2] : 1) * strokeWidthScale
+            decoded[key] = PKDrawing(strokes: glyph.strokes.map { stroke in
+                let points = stroke.path.map { point in
+                    PKStrokePoint(location: point.location, timeOffset: point.timeOffset,
+                        size: CGSize(width: point.size.width * ratio, height: point.size.height * ratio),
+                        opacity: point.opacity, force: point.force, azimuth: point.azimuth, altitude: point.altitude)
+                }
+                return PKStroke(ink: stroke.ink, path: PKStrokePath(controlPoints: points, creationDate: stroke.path.creationDate),
+                                transform: stroke.transform, mask: stroke.mask, randomSeed: stroke.randomSeed)
+            })
         }
         let used = decoded.values
         let sampleTop = min(54, used.map { $0.bounds.minY }.min() ?? 54)
@@ -105,14 +136,6 @@ nonisolated enum AutofillLayout {
                         advance: max(size * 0.14, (glyph?.bounds.width ?? 40) * scale) + size * 0.12,
                         personal: personal.contains(key))
         }
-        func units(_ word: String) -> [Unit] {
-            let core = word.trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.symbols))
-            if core.count > 1, personal.contains(core), let range = word.range(of: core) {
-                return word[..<range.lowerBound].map { unit(String($0)) } + [unit(core)]
-                    + word[range.upperBound...].map { unit(String($0)) }
-            }
-            return word.map { unit(String($0)) }
-        }
         var rows: [[Unit]] = []
         // Only the first line shares the heading's row. Every continuation,
         // paragraph and new-page line returns to the heading's left edge.
@@ -120,7 +143,7 @@ nonisolated enum AutofillLayout {
         for paragraph in text.components(separatedBy: .newlines) {
             var line: [Unit] = [], used: CGFloat = 0
             for word in paragraph.split(whereSeparator: \.isWhitespace).map(String.init) {
-                var letters = units(word)
+                let letters = word.map { unit(String($0)) }
                 let wordWidth = letters.reduce(CGFloat.zero) { $0 + $1.advance }
                 if !line.isEmpty && used + space + wordWidth > availableWidth() {
                     rows.append(line); line = []; used = 0
@@ -130,9 +153,6 @@ nonisolated enum AutofillLayout {
                 if line.isEmpty && rows.isEmpty && firstLeft > continuationLeft && wordWidth > availableWidth() {
                     rows.append([])
                 }
-                // A whole-word sample wider than the column yields to individual
-                // glyphs; its shape is never squeezed horizontally to force a fit.
-                if letters.contains(where: { $0.advance > availableWidth() }) { letters = word.map { unit(String($0)) } }
                 if !line.isEmpty { line.append(Unit(text: " ", glyph: nil, advance: space, personal: false)); used += space }
                 for letter in letters {
                     if used + letter.advance > availableWidth() && !line.isEmpty { rows.append(line); line = []; used = 0 }

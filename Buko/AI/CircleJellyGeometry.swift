@@ -72,7 +72,7 @@ nonisolated enum CircleJellyGeometry {
             basePaint = paint(Array(traced.dropLast()))
             finalPaint = paint(completed)
             let motion = droplet.sample(at: time)
-            initialHead = motion.position
+            initialHead = droplet.target
             initialBlob = droplet.contour(at: time, reduceMotion: false)
             tail = traced.dropLast().last
             // completedLoop preserves the raw samples before appending the gap.
@@ -175,7 +175,7 @@ nonisolated enum CircleJellyGeometry {
 
     static func roundedRectangle(_ rect: CGRect) -> Boundary {
         let half = CGSize(width: rect.width / 2, height: rect.height / 2)
-        let corner = min(14, min(half.width, half.height))
+        let corner = min(26, min(half.width, half.height))
         let radii = (0..<sampleCount).map { i -> CGFloat in
             let theta = angle(at: i)
             var low: CGFloat = 0, high = hypot(half.width, half.height)
@@ -319,12 +319,14 @@ nonisolated struct CircleDropletDynamics {
 
     func contour(at time: TimeInterval, reduceMotion: Bool) -> [CGPoint] {
         let value = sample(at: time)
-        let center = reduceMotion ? target : value.position
+        // Keep the visible indicator exactly under the touch midpoint. The
+        // spring supplies only deformation/velocity, never a drifting position.
+        let center = target
         let speed = hypot(value.velocity.x, value.velocity.y)
-        let lag = hypot(center.x - target.x, center.y - target.y)
+        let lag = hypot(value.position.x - target.x, value.position.y - target.y)
         let stretch = reduceMotion ? 0 : min(0.6, speed / 1100 + lag / 65)
-        let heading = atan2(value.velocity.y + (target.y - center.y) * 12,
-                            value.velocity.x + (target.x - center.x) * 12)
+        let heading = atan2(value.velocity.y + (target.y - value.position.y) * 12,
+                            value.velocity.x + (target.x - value.position.x) * 12)
         return (0..<48).map { i in
             let angle = CGFloat(i) * 2 * .pi / 48
             let r = 24 * (1 + stretch * cos(2 * (angle - heading)) + 0.12 * stretch * sin(3 * (angle - heading)))

@@ -14,6 +14,7 @@ final class Note {
     var pageLayoutVersion: Int = 0
     var pageMetadata: Data = Data()
     @Attribute(.externalStorage) var drawingData: Data
+    // Historical field name retained for store compatibility. Contains only generated stroke IDs.
     @Attribute(.externalStorage) var autofillHistory: Data? = nil
 
     var activePages: [NotebookPage] { (try? pages().filter { !$0.isTrashed }) ?? [] }
@@ -41,5 +42,16 @@ final class Note {
         createdAt = .now
         updatedAt = .now
         drawingData = Data()
+    }
+}
+
+/// Only these IDs are needed to exclude generated ink from handwriting sampling.
+/// Decoding old records deliberately ignores their text, quotations and metadata.
+nonisolated struct AutofillRecord: Codable {
+    let strokeIDs: [UUID]
+
+    static func minimized(_ data: Data) throws -> Data {
+        guard !data.isEmpty else { return data }
+        return try JSONEncoder().encode(JSONDecoder().decode([Self].self, from: data))
     }
 }

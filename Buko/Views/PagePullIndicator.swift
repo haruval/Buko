@@ -14,8 +14,6 @@ final class PagePullState {
     var scrollProgress: CGFloat = 0
     var indicatorCenter = CGPoint.zero
     var indicatorVisible = false
-    var birthFrame = CGRect.zero
-    var creationProgress: CGFloat = 0
 }
 
 /// Anchored in document space below the final sheet. Native glass joins the dot
@@ -26,38 +24,33 @@ struct PagePullIndicator: View {
 
     var body: some View {
         GeometryReader { _ in
-            if state.indicatorVisible || (state.isTurning && state.didCreate) {
+            if state.indicatorVisible && !state.isTurning {
                 GlassEffectContainer(spacing: 22) {
                     ZStack(alignment: .topLeading) {
-                        if !state.isTurning {
-                            Text(state.progress >= 1 ? "Release to create page" : "Scroll to create page")
-                                .font(.subheadline.weight(.medium))
-                                .padding(.horizontal, 20)
-                                .frame(height: 44)
-                                .bukoGlass(cornerRadius: 22)
-                                .glassEffectID("pull-label", in: glass)
-                                .position(state.indicatorCenter)
-                                .transition(.identity)
-                        }
+                        Text(state.progress >= 1 ? "Release to create page" : "Scroll to create page")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 20)
+                            .frame(height: 44)
+                            .bukoGlass(cornerRadius: 22)
+                            .glassEffectID("pull-label", in: glass)
+                            .position(state.indicatorCenter)
+                            .transition(.identity)
 
-                        let creating = state.isTurning && state.didCreate
                         let diameter: CGFloat = 20 + min(1, state.progress) * 6
-                        let frame = creating ? state.birthFrame : CGRect(
+                        let frame = CGRect(
                             x: state.indicatorCenter.x - diameter / 2,
                             y: state.indicatorCenter.y + 5 + min(1, state.progress) * 45,
                             width: diameter, height: diameter)
                         Color.clear
                             .frame(width: max(1, frame.width), height: max(1, frame.height))
-                            .bukoGlass(cornerRadius: creating ? min(28, frame.width / 2) : diameter / 2)
+                            .bukoGlass(cornerRadius: diameter / 2)
                             .glassEffectID("pull-drop", in: glass)
-                            .opacity(creating ? max(0, 1 - max(0, state.creationProgress - 0.55) / 0.45) : 1)
                             .position(x: frame.midX, y: frame.midY)
                     }
                 }
                 .environment(\.colorScheme, .dark)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(state.isTurning ? "New page created"
-                                    : state.progress >= 1 ? "Release to create page" : "Scroll to create page")
+                .accessibilityLabel(state.progress >= 1 ? "Release to create page" : "Scroll to create page")
             }
         }
         .allowsHitTesting(false)

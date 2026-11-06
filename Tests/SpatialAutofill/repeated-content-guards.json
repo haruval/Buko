@@ -1,0 +1,731 @@
+{
+  "partition": "Conservative refusal regressions for newly accepted duplicate content. Includes intentionally unsupported scope; not a general semantic ambiguity benchmark.",
+  "cases": [
+    {
+      "id": "field-no-cue",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.",
+      "context": "",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-negation",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.",
+      "context": "Do not record purpose and limit for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-exception",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.",
+      "context": "Record purpose and limit for each component except Pavo.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-conditional",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.",
+      "context": "Record purpose and limit for each component if needed.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-unrequested",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.",
+      "context": "Record purpose for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-extra-request",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.",
+      "context": "Record purpose and limit for each component. Then delete the note.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-two-contexts",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.",
+      "context": "Record purpose and limit for each component.\nDo not complete Pavo.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-unknown-value",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: unknown",
+      "context": "Record purpose and limit for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: unknown",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-foreign-topic",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: Pavo supports six requests.",
+      "context": "Record purpose and limit for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: Pavo supports six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-duplicate-label",
+      "selected": "Rilo\nPavo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.\nLimit: ten requests.",
+      "context": "Record purpose and limit for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Pavo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S6",
+          "text": "Limit: ten requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            214,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    },
+    {
+      "id": "field-duplicate-heading",
+      "selected": "Rilo\nRilo\nPurpose: track requests.\nPurpose: track requests.\nLimit: six requests.",
+      "context": "Record purpose and limit for each component.",
+      "lines": [
+        {
+          "blockID": "S1",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            60.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S2",
+          "text": "Rilo",
+          "page": "p1",
+          "rect": [
+            500.0,
+            100,
+            400.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S3",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S4",
+          "text": "Purpose: track requests.",
+          "page": "p1",
+          "rect": [
+            515.0,
+            138,
+            385.0,
+            22
+          ]
+        },
+        {
+          "blockID": "S5",
+          "text": "Limit: six requests.",
+          "page": "p1",
+          "rect": [
+            75.0,
+            176,
+            385.0,
+            22
+          ]
+        }
+      ],
+      "subjects": [],
+      "needs": [],
+      "clarify": true
+    }
+  ]
+}

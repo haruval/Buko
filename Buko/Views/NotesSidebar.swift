@@ -17,6 +17,7 @@ struct NotesSidebar: View {
     let notes: [Note]
     let folders: [NoteFolder]
     let selectedID: UUID?
+    var canCollapse = true
     let select: (Note) -> Void
     let create: (UUID?) -> Void
     let hide: () -> Void
@@ -25,6 +26,7 @@ struct NotesSidebar: View {
     let group: (Note, Note) -> Bool
     let move: (Note, NoteFolder?) -> Bool
     let renameFolder: (NoteFolder, String) -> Void
+    var openBeside: ((Note) -> Void)? = nil
     let ungroup: (NoteFolder) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var openFolderID: UUID?
@@ -48,8 +50,10 @@ struct NotesSidebar: View {
                 Text("buko")
                     .font(.system(size: 30, weight: .semibold, design: .rounded)).tracking(-1.5)
                 Spacer(minLength: 0)
-                ShelfButton(title: "Hide notes", symbol: "sidebar.left", action: hide)
-                    .accessibilityIdentifier("hideNotes")
+                if canCollapse {
+                    ShelfButton(title: "Hide notes", symbol: "sidebar.left", action: hide)
+                        .accessibilityIdentifier("hideNotes")
+                }
             }
             libraryContents
         }
@@ -115,7 +119,7 @@ struct NotesSidebar: View {
     }
 
     private func noteCard(_ note: Note) -> some View {
-        LibraryCard(selected: note.id == selectedID, action: { select(note) }) {
+        LibraryCard(action: { select(note) }) {
             Text(note.title).font(.subheadline.weight(.semibold)).lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
             LibraryThumbnail(note: note)
@@ -126,6 +130,7 @@ struct NotesSidebar: View {
         .draggable(NoteDragReference(id: note.id))
         .modifier(NoteDropTarget { refs in receive(refs) { group($0, note) } })
         .contextMenu {
+            if let openBeside { Button("Open beside current note", systemImage: "rectangle.split.2x1") { openBeside(note) } }
             Button("Rename", systemImage: "pencil") { rename(note) }
             Menu("Move to", systemImage: "folder") {
                 if note.folderID != nil { Button("Notes") { _ = move(note, nil) } }
@@ -139,7 +144,7 @@ struct NotesSidebar: View {
 
     private func folderCard(_ folder: NoteFolder) -> some View {
         let children = notes.filter { $0.folderID == folder.id }
-        return LibraryCard(selected: false, action: {
+        return LibraryCard(action: {
             withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)) {
                 folderTitle = folder.title; openFolderID = folder.id
             }
@@ -182,7 +187,6 @@ private enum LibraryEntry: Identifiable {
 }
 
 private struct LibraryCard<Content: View>: View {
-    let selected: Bool
     let action: () -> Void
     @ViewBuilder let content: () -> Content
     var body: some View {
@@ -191,9 +195,19 @@ private struct LibraryCard<Content: View>: View {
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(.rect(cornerRadius: 28))
         }
-        .buttonStyle(.plain)
-        .bukoGlass(cornerRadius: 28, interactive: true)
-        .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2) }
+        .buttonStyle(LibraryPressStyle())
+        .contentShape(.contextMenuPreview, .rect(cornerRadius: 28))
+        .contentShape(.dragPreview, .rect(cornerRadius: 28))
+    }
+}
+
+private struct LibraryPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .bukoGlass(cornerRadius: 28)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 1.055 : 1)
+            .animation(reduceMotion ? nil : (configuration.isPressed ? .easeIn(duration: 0.45) : .spring(response: 0.24, dampingFraction: 0.8)), value: configuration.isPressed)
     }
 }
 

@@ -24,6 +24,7 @@ struct LectureSourceCard: View {
     let busy: Bool
     let open: () -> Void
     let delete: () -> Void
+    var split: (() -> Void)? = nil
     @State private var thumbnail: UIImage?
     @State private var thumbnailFailed = false
 
@@ -50,9 +51,10 @@ struct LectureSourceCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(document.title), \(document.pageCount) pages")
-            .accessibilityHint("Opens the PDF. Touch and hold to delete this source.")
+            .accessibilityHint("Opens the PDF. Drag beside a note to split the workspace.")
             .accessibilityIdentifier("lectureDocument")
             .contextMenu {
+                if let split { Button("Open beside note", systemImage: "rectangle.split.2x1", action: split) }
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete).disabled(busy)
             }
             if let pages = document.textDisagreementPages, !pages.isEmpty {
@@ -65,7 +67,8 @@ struct LectureSourceCard: View {
                 Text("Scanned PDF · OCR text").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(14).frame(maxWidth: .infinity, alignment: .topLeading)
+        .bukoGlass(cornerRadius: 28)
         .task(id: document.id) {
             do {
                 let data = try await library.coverThumbnail(noteID: noteID, documentID: document.id)

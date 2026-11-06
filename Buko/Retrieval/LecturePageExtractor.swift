@@ -87,7 +87,7 @@ nonisolated enum LecturePageExtractor {
         }
     }
 
-    private struct Line {
+    struct Line {
         let text: String
         let bounds: CGRect
     }
@@ -102,7 +102,7 @@ nonisolated enum LecturePageExtractor {
         return !expected.isEmpty && retry.flatMap { comparisonTokens($0.text) } == expected
     }
 
-    private static func recognize(_ page: PDFPage, region: CGRect? = nil) throws -> [Line] {
+    static func recognize(_ page: PDFPage, region: CGRect? = nil) throws -> [Line] {
         guard let pdfPage = page.pageRef else { throw ExtractionError.renderingFailed }
         // Render in unrotated PDF page space, matching PDFSelection bounds, even
         // when the PDF's display rotation is 90/180/270 degrees.

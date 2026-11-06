@@ -7,12 +7,14 @@ struct SettingsPanel: View {
     @Binding var showsDevelopment: Bool
     @Binding var showsGrid: Bool
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
-    @AppStorage("showsGestureTestTools") private var showsGestureTestTools = true
-    let previewHandwriting: () -> Void
-    let recreateTestNote: (SampleLecture) -> Void
+    @AppStorage("showsGestureTestTools") private var showsGestureTestTools = false
+    let writeAlphabet: () -> Void
+    let scanHandwriting: () -> Void
+    let handwritingStatus: HandwritingPreparationStatus
     let restore: (Note) -> Void
     let restorePage: (TrashedPage) -> Void
     let emptyTrash: () -> Void
+    var historySession: CanvasSession? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -95,7 +97,7 @@ struct SettingsPanel: View {
                             .font(.subheadline)
                             .padding(.horizontal, 8).frame(minHeight: 44)
                             .accessibilityIdentifier("showGestureTestTools")
-                        Text("Show Circle in the pen toolbar for one-finger or simulator trackpad selection. Two-finger circles remain available with Pen.")
+                        Text("Show circle tool in the toolbar")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Detailed preview", isOn: $detailedPreview)
                             .font(.subheadline)
@@ -103,29 +105,41 @@ struct SettingsPanel: View {
                             .accessibilityIdentifier("detailedPreview")
                         Text("Show live pipeline stages, prompt inputs and retrieved evidence in autofill previews.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Button(action: previewHandwriting) {
-                            Label("Handwriting samples", systemImage: "textformat.abc")
-                                .font(.subheadline.weight(.medium))
-                                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                                .padding(.horizontal, 8)
-                        }.buttonStyle(.glass).accessibilityIdentifier("previewHandwriting")
-                        Divider()
-                        ForEach(SampleLecture.allCases) { lecture in
-                            Button { recreateTestNote(lecture) } label: {
-                                Label("Recreate \(lecture.title)", systemImage: "arrow.counterclockwise")
-                                    .font(.subheadline.weight(.medium))
-                                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                                    .padding(.horizontal, 8)
-                            }
-                            .buttonStyle(.glass)
-                            .accessibilityIdentifier(lecture.resetIdentifier)
-                        }
-                        Text("Each example has editable handwriting. Resetting moves only that example’s previous note to Trash.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Button(action: writeAlphabet) {
+                            Label("Write your alphabet", systemImage: "pencil.line")
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }.buttonStyle(.glass).accessibilityIdentifier("writeAlphabet")
+                        Button(action: scanHandwriting) {
+                            Label(handwritingStatus.isRebuilding ? "Scanning handwriting…" : "Scan handwriting now", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }.buttonStyle(.glass).disabled(handwritingStatus.isRebuilding)
+                            .accessibilityIdentifier("scanHandwritingNow")
+                        Text(handwritingStatus.message).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .scrollBounceBehavior(.basedOnSize)
             } else {
+                if let historySession {
+                    Button(action: historySession.undo) {
+                        Label("Undo", systemImage: "arrow.uturn.backward")
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain).disabled(!historySession.canUndo)
+                    .accessibilityIdentifier("undo")
+                    Button(action: historySession.redo) {
+                        Label("Redo", systemImage: "arrow.uturn.forward")
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain).disabled(!historySession.canRedo)
+                    .accessibilityIdentifier("redo")
+                    Divider()
+                }
                 Toggle(isOn: $showsGrid) {
                     Label("Grid", systemImage: "square.grid.3x3")
                         .font(.subheadline)

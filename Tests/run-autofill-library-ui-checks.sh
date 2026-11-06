@@ -15,8 +15,6 @@ for name in ['Buko', 'Buko.xcodeproj', 'Configuration']:
 (root / 'Tests/UI').mkdir(parents=True)
 shutil.copyfile('Tests/UI/AutofillLibraryTests.swift', root / 'Tests/UI/AutofillLibraryTests.swift')
 shutil.copyfile('Tests/UI/CircleIntentTests.swift', root / 'Tests/UI/CircleIntentTests.swift')
-p = root / 'Buko.xcodeproj/project.pbxproj'
-p.write_text(p.read_text().replace('"devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)"', 'dev.buko.AutofillLibraryValidation'))
 # The copied app circles authored ink through production recognition/planning.
 # Only selection delivery and read-only diagnostics are test-only.
 p = root / 'Buko/ContentView.swift'; s = p.read_text()
@@ -76,10 +74,8 @@ assert 'private var circleTestOriginal: AutofillDocument?' in s
 assert 'captureCircleFixture' in s
 p.write_text(s)
 PY
+python3 Tests/simulator_isolation.py configure "$BUKO_AUTOFILL_LIBRARY_DIR/Buko.xcodeproj/project.pbxproj" dev.buko.AutofillLibraryValidation
 printf 'Isolated autofill/library UI harness: %s\n' "$BUKO_AUTOFILL_LIBRARY_DIR"
-xcrun simctl uninstall "$BUKO_AUTOFILL_LIBRARY_SIM" dev.buko.AutofillLibraryValidation >/dev/null 2>&1 || true
-xcodebuild -project "$BUKO_AUTOFILL_LIBRARY_DIR/Buko.xcodeproj" -scheme BukoValidation -configuration Debug \
-    -destination "id=$BUKO_AUTOFILL_LIBRARY_SIM" -derivedDataPath "$BUKO_AUTOFILL_LIBRARY_DIR/DerivedData" \
-    -resultBundlePath "$BUKO_AUTOFILL_LIBRARY_DIR/Interactions.xcresult" CODE_SIGNING_ALLOWED=NO \
-    test "$@" > "$BUKO_AUTOFILL_LIBRARY_DIR/ui-test.log" 2>&1
+source Tests/SimulatorIsolation.sh
+buko_run_isolated_ui_checks "$BUKO_AUTOFILL_LIBRARY_DIR" dev.buko.AutofillLibraryValidation "$BUKO_AUTOFILL_LIBRARY_SIM" "$@"
 printf 'PASS: autofill/library UI checks\n'

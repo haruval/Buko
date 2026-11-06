@@ -48,6 +48,12 @@ final class AutofillLibraryTests: XCTestCase {
     @MainActor func testBCircleToolVisibility() {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["openSettings"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["circleIntentTool"].exists)
+        openGestureSettings(app)
+        XCTAssertEqual(app.switches["showGestureTestTools"].value as? String, "0")
+        app.switches["showGestureTestTools"].tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6)).tap()
         XCTAssertTrue(app.buttons["circleIntentTool"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["bandSelectionTool"].exists)
         app.buttons["circleIntentTool"].tap()
@@ -63,6 +69,10 @@ final class AutofillLibraryTests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6)).tap()
         XCTAssertTrue(app.buttons["circleIntentTool"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["bandSelectionTool"].exists)
+        openGestureSettings(app)
+        app.switches["showGestureTestTools"].tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6)).tap()
+        XCTAssertFalse(app.buttons["circleIntentTool"].exists)
     }
 
     @MainActor func testCHeadingWithNearbyDeadlineUsesAutofill() {

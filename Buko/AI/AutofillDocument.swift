@@ -14,7 +14,11 @@ nonisolated struct AutofillDocument {
 
     @MainActor init(_ note: Note) {
         noteID = note.id; ink = note.drawingData; pages = note.pageMetadata
-        pageCount = note.pageCount; layoutVersion = note.pageLayoutVersion; history = note.autofillHistory ?? Data()
+        pageCount = note.pageCount; layoutVersion = note.pageLayoutVersion
+        let saved = note.autofillHistory ?? Data()
+        // Never put legacy prose back into Undo snapshots. Malformed provenance
+        // remains fail-closed and is reported by the startup migration.
+        history = (try? AutofillRecord.minimized(saved)) ?? saved
     }
 
     init(noteID: UUID, ink: Data, pages: Data, pageCount: Int, layoutVersion: Int, history: Data) {
@@ -36,6 +40,22 @@ nonisolated struct AutofillDocument {
         // PencilKit may reserialize an equivalent drawing during undo/appearance updates.
         guard let a = try? Self.drawing(ink), let b = try? Self.drawing(other.ink) else { return false }
         return Self.sameInk(a, b)
+    }
+
+    /// A running request may rebase over newly appended handwriting, but never
+    /// over erased/moved captured strokes, replaced pages, or another accepted fill.
+    func permitsAppending(_ current: Self, outside selection: [CGPoint]) -> Bool {
+        guard noteID == current.noteID, layoutVersion == current.layoutVersion,
+              history == current.history, current.pageCount >= pageCount,
+              let oldPages = try? JSONDecoder().decode([NotebookPage].self, from: pages),
+              let newPages = try? JSONDecoder().decode([NotebookPage].self, from: current.pages),
+              newPages.count >= oldPages.count,
+              Array(newPages.prefix(oldPages.count)) == oldPages,
+              let original = try? Self.drawing(ink), let updated = try? Self.drawing(current.ink),
+              updated.strokes.count >= original.strokes.count,
+              Self.sameInk(original, PKDrawing(strokes: Array(updated.strokes.prefix(original.strokes.count)))) else { return false }
+        let protected = CircleGeometry.path(selection).boundingBoxOfPath.insetBy(dx: -8, dy: -8)
+        return updated.strokes.dropFirst(original.strokes.count).allSatisfy { !$0.renderBounds.intersects(protected) }
     }
 
     /// PKDrawing equality includes internal drawing identity. Compare the actual
@@ -76,46 +96,10 @@ nonisolated struct AutofillDocument {
               proposal.noteID == noteID, result.missing.isEmpty else { throw AutofillEditError.stale }
         manifest += (pageCount..<result.pageCount).map { _ in NotebookPage() }
         var records = history.isEmpty ? [] : try JSONDecoder().decode([AutofillRecord].self, from: history)
-        records.append(AutofillRecord(proposal: proposal, documentRevision: revision,
-                                     drawing: result.inserted, bounds: result.bounds, rendering: result.rendering))
+        records.append(AutofillRecord(strokeIDs: result.inserted.strokes.map(\.id)))
         return Self(noteID: noteID, ink: result.drawing.dataRepresentation(),
                     pages: try JSONEncoder().encode(manifest), pageCount: result.pageCount,
                     layoutVersion: layoutVersion, history: try JSONEncoder().encode(records))
-    }
-}
-
-nonisolated struct AutofillRecord: Codable {
-    struct Source: Codable {
-        let documentID: String
-        let title: String
-        let page: Int
-        let quote: String
-    }
-    let requestID: UUID
-    let acceptedAt: Date
-    let capturedAt: Date
-    let documentRevision: String
-    let sourceRevision: String
-    let text: String
-    let selectedText: String
-    let origin: String
-    let sources: [Source]
-    let lineCitations: [[Int]]
-    let placement: CGRect
-    let strokeIDs: [UUID]
-    let rendering: String
-
-    @available(iOS 27, macOS 27, *)
-    init(proposal: AutofillProposal, documentRevision: String, drawing: PKDrawing, bounds: CGRect, rendering: String) {
-        requestID = proposal.requestID; acceptedAt = .now; capturedAt = proposal.capturedAt
-        self.rendering = rendering
-        self.documentRevision = documentRevision; sourceRevision = proposal.sourceRevision
-        text = proposal.text; selectedText = proposal.selectedText
-        origin = proposal.content.origin == .localArithmetic ? "localArithmetic" : "lectureDraft"
-        sources = proposal.citations.map { .init(documentID: $0.passage.documentID,
-            title: $0.passage.title, page: $0.passage.page, quote: $0.quote) }
-        lineCitations = proposal.content.lines.map(\.citationIndices)
-        placement = bounds; strokeIDs = drawing.strokes.map(\.id)
     }
 }
 

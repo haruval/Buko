@@ -7,8 +7,14 @@ import PencilKit
         func record() { count += 1 }
     }
     static func run(root: URL, sample: HandwritingSample) async throws {
+        let printed = LectureHandwriting.drawing(pages: [["ink"]])
+        let split = HandwritingSampler.letterDrawings(text: "ink", strokes: printed.strokes)
+        precondition(split.map(\.0) == ["i", "n", "k"], "Print words must split into exact letter groups, including the i dot")
+        precondition(split.reduce(0) { $0 + $1.1.strokes.count } == printed.strokes.count)
+        precondition(HandwritingSampler.letterDrawings(text: "in", strokes: printed.strokes).isEmpty, "Mismatched recognition must never label a word as a letter")
+        precondition(HandwritingSampler.letterDrawings(text: "i\nnk", strokes: printed.strokes).isEmpty)
         let directory = root.appendingPathComponent("handwriting-cache")
-        let profile = PreparedHandwriting(samples: ["a": sample, "tokens": sample],
+        let profile = PreparedHandwriting(samples: ["a": sample, "t": sample],
             headings: [.init(text: "Parsing:", bounds: CGRect(x: 1070, y: 180, width: 120, height: 30))])
         let builds = Builds()
         let cache = HandwritingCache(directory: directory) { _ in await builds.record(); return profile }
@@ -31,7 +37,9 @@ import PencilKit
             selectionPolygon: selection, selectedText: "Parsing:", sourceRevision: "test",
             content: AutofillContent(lines: [.init(text: "a tokens", citationIndices: [])], origin: .lectureDraft),
             citations: [], insertionTarget: "Parsing:")
-        let preparation = HandwritingPreparation(cache: cache, idleDelay: .milliseconds(1))
+        let alphabetURL = root.appendingPathComponent("personal-alphabet.json")
+        let alphabet = PersonalAlphabetStore(url: alphabetURL)
+        let preparation = HandwritingPreparation(cache: cache, idleDelay: .milliseconds(1), alphabet: alphabet)
         preparation.update(notes: [note], preferredID: note.id)
         for _ in 0..<200 {
             if preparation.prepared(for: proposal).samples["a"] != nil { break }
@@ -45,8 +53,24 @@ import PencilKit
         let inspected = preparation.inspection(preferredID: note.id)
         precondition(inspected["a"]?.sample.drawingData == sample.drawingData && inspected["a"]?.source == "Renamed")
         precondition(inspected["z"] == nil, "The inspector must distinguish missing letters from prepared ink")
+        try preparation.saveAlphabet(PKDrawing(data: sample.drawingData), letter: "a")
+        try preparation.saveAlphabet(PKDrawing(data: sample.drawingData), letter: "z")
+        precondition(preparation.inspection(preferredID: note.id)["a"]?.source == "Your alphabet", "Manual rewrites must override automatically sampled letters")
+        precondition(preparation.inspection(preferredID: note.id)["z"]?.source == "Your alphabet")
+        let reopenedAlphabet = PersonalAlphabetStore(url: alphabetURL)
+        precondition(reopenedAlphabet.samples.keys.sorted() == ["a", "z"], "Alphabet must survive relaunch")
+        let corruptURL = root.appendingPathComponent("corrupt-alphabet.json")
+        let corrupt = Data("unreadable user alphabet".utf8)
+        try corrupt.write(to: corruptURL)
+        let damagedAlphabet = PersonalAlphabetStore(url: corruptURL)
+        do {
+            try damagedAlphabet.save(PKDrawing(data: sample.drawingData), for: "a")
+            preconditionFailure("An unreadable alphabet must not be overwritten")
+        } catch { }
+        let retainedCorrupt = try Data(contentsOf: corruptURL)
+        precondition(retainedCorrupt == corrupt)
         preparation.rebuild()
-        precondition(preparation.prepared(for: proposal).samples.isEmpty && preparation.status.isRebuilding)
+        precondition(preparation.prepared(for: proposal).samples.count == 1 && preparation.status.isRebuilding)
         for _ in 0..<200 {
             if !preparation.status.isRebuilding { break }
             try await Task.sleep(for: .milliseconds(10))
@@ -59,13 +83,13 @@ import PencilKit
         preparation.invalidate(noteID: note.id)
         note.drawingData = Data(); note.updatedAt = .now
         preparation.update(notes: [note], preferredID: note.id)
-        precondition(preparation.prepared(for: proposal).samples.isEmpty, "Edits invalidate old samples immediately")
+        precondition(preparation.prepared(for: proposal).samples.count == 1, "Edits invalidate note samples, preserving the explicit alphabet")
         try await Task.sleep(for: .milliseconds(40))
         let pausedCount = await builds.count
         precondition(pausedCount == 2, "Drawing/background/autofill must pause preparation")
         preparation.setPaused(false)
         for _ in 0..<200 {
-            if preparation.prepared(for: proposal).samples["a"] != nil { break }
+            if preparation.prepared(for: proposal).samples["t"] != nil { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         let updatedCount = await builds.count
@@ -76,7 +100,7 @@ import PencilKit
         precondition(historyCount == 4, "Generated-ink exclusions belong in the cache identity")
         note.deletedAt = .now
         preparation.update(notes: [note], preferredID: note.id)
-        precondition(preparation.prepared(for: proposal).samples.isEmpty)
+        precondition(preparation.prepared(for: proposal).samples.count == 1)
         await cache.prune(keeping: [])
         precondition((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) == [])
         let delayed = HandwritingCache(directory: directory) { _ in
@@ -94,6 +118,31 @@ import PencilKit
         let repairedCount = await builds.count
         precondition(repairedCount == 5, "A corrupt derivative should rebuild without affecting the source")
         precondition(document.ink == sample.drawingData)
+        let storedIDs = try await cache.storedNoteIDs()
+        precondition(storedIDs == [document.noteID])
+        let unrelated = directory.appendingPathComponent("leave-me.txt")
+        try Data("unrelated".utf8).write(to: unrelated)
+        try await cache.removeNotes([UUID()])
+        precondition(FileManager.default.fileExists(atPath: file.path))
+        try await cache.removeNotes([document.noteID])
+        try await cache.removeNotes([document.noteID])
+        precondition(!FileManager.default.fileExists(atPath: file.path))
+        let unrelatedBytes = try Data(contentsOf: unrelated)
+        precondition(unrelatedBytes == Data("unrelated".utf8))
+        let scanBuilds = Builds()
+        let scanCache = HandwritingCache(directory: root.appendingPathComponent("manual-scan")) { _ in
+            await scanBuilds.record(); return profile
+        }
+        let scan = HandwritingPreparation(cache: scanCache, idleDelay: .seconds(3_600), alphabet: PersonalAlphabetStore(url: nil))
+        let manyNotes = (1...6).map { Note(title: "Scan \($0)") }
+        scan.update(notes: manyNotes, preferredID: manyNotes[0].id)
+        scan.rebuild()
+        for _ in 0..<200 {
+            if !scan.status.isRebuilding { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let scanned = await scanBuilds.count
+        precondition(scanned == 6 && !scan.status.isRebuilding, "Manual scan must bypass idle delay and visit all active notes")
         print("Prepared handwriting checks passed: persisted reuse, revision/provenance invalidation, idle pause/resume, immediate lookups, deletion, cancellation, corrupt-cache repair and unchanged source ink")
     }
 }

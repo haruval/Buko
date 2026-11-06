@@ -1,6 +1,33 @@
 import XCTest
 
 final class AutofillInteractionTests: XCTestCase {
+    @MainActor func testPreviewTitleDragKeepsControlsAndInkSafe() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--sourced-preview", "--undo-controls", "-detailedAutofillPreview", "NO"]
+        app.launch()
+        let title = app.staticTexts["autofillPreviewTitle"]
+        let accept = app.buttons["acceptAutofill"]
+        XCTAssertTrue(accept.waitForExistence(timeout: 20))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: accept)
+        waitForExpectations(timeout: 15)
+        Thread.sleep(forTimeInterval: 0.6)
+        let before = title.frame
+        let start = title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: -220, dy: 120)))
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertLessThan(title.frame.minX, before.minX - 100)
+        XCTAssertGreaterThan(title.frame.minY, before.minY + 60)
+        XCTAssertTrue(accept.isEnabled, "Dragging the title must not edit ink or dismiss the proposal")
+        app.buttons["autofillSourceLink"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["closeLecturePDF"].waitForExistence(timeout: 5))
+        app.buttons["closeLecturePDF"].tap()
+        XCTAssertEqual(title.frame.minX, before.minX - 220, accuracy: 3)
+        accept.tap()
+        XCTAssertFalse(accept.waitForExistence(timeout: 1))
+        app.buttons["Validation undo"].tap()
+        XCTAssertEqual(app.staticTexts["validationUndoStatus"].label, "Original restored", "Moving and tapping the popup cannot leave stray ink")
+    }
     @MainActor func testColdHandwritingUsesImmediateFallback() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -101,10 +128,18 @@ final class AutofillInteractionTests: XCTestCase {
         XCTAssertTrue(app.buttons["acceptAutofill"].waitForExistence(timeout: 15))
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.7))
             .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.7)))
-        XCTAssertFalse(app.buttons["acceptAutofill"].exists, "Real drawing must dismiss the staged preview")
-        let resurrected = expectation(for: NSPredicate(format: "exists == true"), evaluatedWith: app.buttons["acceptAutofill"])
-        resurrected.isInverted = true
-        waitForExpectations(timeout: 9)
+        // Writing below the captured selection now preserves and rebases the fill.
+        XCTAssertTrue(app.buttons["acceptAutofill"].exists, "Outside ink must preserve the staged preview")
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["acceptAutofill"])
+        waitForExpectations(timeout: 15)
+        app.buttons["acceptAutofill"].tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["acceptAutofill"])
+        waitForExpectations(timeout: 5)
+        app.buttons["Validation undo"].tap()
+        XCTAssertEqual(app.staticTexts["validationUndoStatus"].label, "Edited", "Undoing the fill must retain the new outside ink")
+        app.buttons["Validation undo"].tap()
+        expectation(for: NSPredicate(format: "label == 'Original restored'"), evaluatedWith: app.staticTexts["validationUndoStatus"])
+        waitForExpectations(timeout: 5)
     }
 
     @MainActor func testAutomaticHandwritingWithoutSetup() {

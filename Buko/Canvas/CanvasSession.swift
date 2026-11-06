@@ -5,7 +5,7 @@ import PencilKit
 @Observable
 final class CanvasSession {
     enum Tool: String, CaseIterable {
-        case pen, eraser, circle, cube
+        case pen, eraser, circle
     }
 
     let pagePull = PagePullState()
@@ -19,6 +19,8 @@ final class CanvasSession {
     weak var host: CanvasHostView?
 
     func navigate(to index: Int) { host?.navigate(to: index) }
+
+    func togglePencilEraser() { tool = tool == .eraser ? .pen : .eraser }
 
     func undo() {
         canvas?.undoManager?.undo()

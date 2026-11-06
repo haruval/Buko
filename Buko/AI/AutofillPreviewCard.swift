@@ -14,6 +14,7 @@ struct AutofillPreviewCard: View {
     let state: CircleIntentState
     let detailed: Bool
     let maximumHeight: CGFloat
+    var dragTitle: ((CGSize?) -> Void)? = nil
     let sizeChanged: (CGSize) -> Void
     @State private var headerHeight: CGFloat = 44
     @State private var contentHeight: CGFloat = 0
@@ -22,6 +23,8 @@ struct AutofillPreviewCard: View {
     @State private var sourcePreview: LecturePDFDestination?
     @State private var sourceError: String?
     @State private var sourceTask: Task<Void, Never>?
+    @State private var clarificationReply = ""
+    @FocusState private var clarificationFocused: Bool
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {
@@ -47,6 +50,7 @@ struct AutofillPreviewCard: View {
                             Text(issue).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillInsertionIssue")
                         }
                         if state.proposal != nil { acceptance }
+                        if state.canClarify { clarificationInput }
                     }
                     .fixedSize(horizontal: false, vertical: true)
                     .onGeometryChange(for: CGFloat.self) { ceil($0.size.height) } action: { footerHeight = $0 }
@@ -55,13 +59,17 @@ struct AutofillPreviewCard: View {
             }
             .padding(16)
             .fixedSize(horizontal: false, vertical: true)
-            // Measure the destination content, independent of the glass spring.
-            .onGeometryChange(for: CGSize.self) { CGSize(width: $0.size.width, height: ceil($0.size.height)) } action: { sizeChanged($0) }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("intentPopup")
+        // The outer animated frame proposes its previous height. Measure the
+        // intrinsic sections instead so newly loaded source crops and controls
+        // enlarge both the glass clip and UIKit's touch boundary.
+        .onAppear { sizeChanged(CGSize(width: 0, height: desiredHeight)) }
+        .onChange(of: desiredHeight) { _, height in sizeChanged(CGSize(width: 0, height: height)) }
         .fullScreenCover(item: $sourcePreview) { LecturePDFView(destination: $0) }
         .onDisappear { sourceTask?.cancel() }
+        .onChange(of: state.canClarify) { _, ready in
+            if ready { clarificationReply = "" }
+        }
     }
 
     private var hasContent: Bool {
@@ -69,9 +77,12 @@ struct AutofillPreviewCard: View {
         if let proposal = state.proposal { return !proposal.usedCitations.isEmpty || proposal.content.origin == .localArithmetic }
         return !state.processing
     }
-    private var hasFooter: Bool { state.proposal != nil || sourceError != nil || state.insertion.issue != nil }
+    private var hasFooter: Bool { state.proposal != nil || state.canClarify || sourceError != nil || state.insertion.issue != nil }
     private var fixedHeight: CGFloat {
         32 + headerHeight + (hasContent ? 12 : 0) + (hasFooter ? footerHeight + 12 : 0)
+    }
+    private var desiredHeight: CGFloat {
+        ceil(fixedHeight + (hasContent ? min(contentHeight, max(44, maximumHeight - fixedHeight)) : 0))
     }
 
     private var header: some View {
@@ -96,6 +107,12 @@ struct AutofillPreviewCard: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(.rect)
+            .gesture(DragGesture(minimumDistance: 5, coordinateSpace: .named("autofillOverlay"))
+                .onChanged { dragTitle?($0.translation) }
+                .onEnded { _ in dragTitle?(nil) })
+            .accessibilityHint("Drag to move the preview")
             Spacer(minLength: 0)
             Button(action: state.decline) {
                 Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(.rect)
@@ -124,9 +141,42 @@ struct AutofillPreviewCard: View {
                 Text("Calculated on this iPad from the matrices in your notes.").font(.subheadline).foregroundStyle(.secondary)
             }
         } else {
-            Text(finishedMessage).font(.subheadline).textSelection(.enabled)
-                .accessibilityIdentifier("autofillUnavailable")
+            VStack(alignment: .leading, spacing: 12) {
+                Text(finishedMessage).font(.subheadline).textSelection(.enabled)
+                    .accessibilityIdentifier("autofillUnavailable")
+            }
         }
+    }
+
+    private var clarificationInput: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("", text: $clarificationReply, axis: .vertical)
+                    .lineLimit(1...4).textFieldStyle(.plain)
+                    .padding(.leading, 16).padding(.vertical, 12)
+                    .focused($clarificationFocused).submitLabel(.send)
+                    .accessibilityLabel("Clarification")
+                    .accessibilityIdentifier("autofillClarificationInput")
+                    .onSubmit(submitClarification)
+                Button(action: submitClarification) {
+                    Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold))
+                }
+                .buttonStyle(.glassProminent).buttonBorderShape(.circle).tint(.blue)
+                .controlSize(.small)
+                .frame(width: 44, height: 44).contentShape(.rect)
+                .accessibilityLabel("Send clarification")
+                .disabled(clarificationReply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || clarificationReply.count > 500)
+                .accessibilityIdentifier("submitAutofillClarification")
+            }
+            .glassEffect(.clear.interactive(), in: .capsule)
+            if let issue = state.clarificationIssue { Text(issue).font(.caption).foregroundStyle(.red) }
+            if clarificationReply.count > 500 { Text("Use 500 characters or fewer.").font(.caption).foregroundStyle(.secondary) }
+        }
+    }
+
+    private func submitClarification() {
+        clarificationFocused = false
+        state.submitClarification(clarificationReply)
     }
 
     private var stageAnimation: Animation? {
@@ -222,9 +272,14 @@ struct AutofillPreviewCard: View {
                     catch { sourceError = error.localizedDescription }
                 }
             } label: {
-                Label("\(prefix)\(passage.title) · p. \(passage.page)", systemImage: "doc.text")
-                    .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("\(prefix)\(passage.title) – p. \(passage.page)", systemImage: "doc.text")
+                        .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    if let noteID = state.noteID {
+                        LectureSourceThumbnail(noteID: noteID, passage: passage, quote: quote)
+                    }
+                }
             }.buttonStyle(.plain).accessibilityIdentifier("autofillSourceLink")
             Text(quote).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("autofillSourcePassage")

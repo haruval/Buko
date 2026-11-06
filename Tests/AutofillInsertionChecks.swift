@@ -5,6 +5,7 @@ import SwiftData
 @main struct AutofillInsertionChecks {
     enum Injected: Error { case failure }
     @MainActor static func main() async throws {
+        try await AutofillPreparationRaceChecks.run()
         AutofillReflowChecks.run()
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -26,6 +27,30 @@ import SwiftData
         do { _ = try HandwritingSample(drawing: PKDrawing()); preconditionFailure("Empty samples must fail") }
         catch HandwritingSample.SampleError.invalidInk { }
 
+        // Reproduce the physical report: tiny cached connected words beside
+        // ordinary fallback ink. Size/baseline must be independent of source scale.
+        for word in ["can", "but", "edit", "gy", "Maya"] {
+            var strokes: [PKStroke] = []
+            var x: CGFloat = 0
+            for character in word {
+                let glyph = try PKDrawing(data: HandwrittenFont.sample(String(character))!.drawingData)
+                strokes += glyph.transformed(using: CGAffineTransform(translationX: x, y: 0)).strokes
+                x += glyph.bounds.width + 8
+            }
+            let reference = PKDrawing(strokes: strokes)
+            for factor: CGFloat in [0.08, 0.3, 2] {
+                let source = reference.transformed(using: CGAffineTransform(scaleX: factor, y: factor)
+                    .concatenating(CGAffineTransform(translationX: 800, y: 450)))
+                let normalized = try HandwritingSample.normalized(drawing: source, text: word)
+                let actual = try PKDrawing(data: normalized.drawingData)
+                precondition(abs(actual.bounds.height - reference.bounds.height) < 2, "Sample height must match the shared lettering metrics")
+                precondition(abs(actual.bounds.maxY - reference.bounds.maxY) < 2, "Samples must share a baseline and preserve descenders")
+                let again = try PKDrawing(data: HandwritingSample.normalized(drawing: actual, text: word).drawingData)
+                precondition(abs(again.bounds.height - actual.bounds.height) < 0.5, "Normalization must not compound on cache reuse")
+            }
+        }
+        print("Physical handwriting regression: tiny words, cap/x-height, baseline, descenders and repeated normalization passed")
+
         let original = PKDrawing(strokes: [stroke(1100, 110), stroke(1100, 160), stroke(1100, 235)])
         let originalData = original.dataRepresentation()
         let staged = try AutofillLayout.stage(text: "abba abba\nba", drawing: original,
@@ -41,6 +66,10 @@ import SwiftData
         }
         precondition(staged.existing.strokes[1].renderBounds.minY > staged.bounds.maxY)
         precondition(original.dataRepresentation() == originalData, "Staging cannot mutate original ink")
+        let lettersOnly = try AutofillLayout.stage(text: "aba", drawing: original, selection: selection(110),
+            pageCount: 1, samples: ["a": samples["a"]!, "aba": samples["b"]!])
+        precondition(lettersOnly.sampledGlyphCount == 2 && lettersOnly.fallbackGlyphCount == 1,
+            "An old word cache must never hide personal letter samples or missing-letter fallback")
         let unavailable = try AutofillLayout.stage(text: "abc", drawing: original, selection: selection(110),
             pageCount: 1, samples: samples)
         precondition(unavailable.missing.isEmpty && !unavailable.inserted.strokes.isEmpty && unavailable.fallbackGlyphCount == 1)
@@ -77,6 +106,31 @@ import SwiftData
         note.pageLayoutVersion = 2; try note.setPages([NotebookPage()]); note.drawingData = originalData
         context.insert(note); try context.save()
         let before = AutofillDocument(note)
+        let appendedInk = PKDrawing(strokes: original.strokes + [stroke(1100, 650)])
+        note.drawingData = appendedInk.dataRepresentation()
+        let appended = AutofillDocument(note)
+        precondition(before.permitsAppending(appended, outside: selection(110)), "Writing elsewhere must preserve an in-progress capture")
+        let rebuilt = try AutofillLayout.stage(text: "abba", drawing: appendedInk,
+            selection: selection(110), pageCount: 1, samples: samples)
+        precondition(rebuilt.existing.strokes.count == appendedInk.strokes.count, "Rebase retains every new stroke")
+        for stroke in rebuilt.inserted.strokes {
+            for point in stroke.path {
+                let width = point.size.width * hypot(stroke.transform.a, stroke.transform.b)
+                precondition(abs(width - 1.62) < 0.01, "Personal autofill must use 81% of the surrounding pen width")
+            }
+        }
+        note.drawingData = PKDrawing(strokes: original.strokes + [stroke(1110, 115)]).dataRepresentation()
+        precondition(!before.permitsAppending(AutofillDocument(note), outside: selection(110)), "Writing inside captured content invalidates the request")
+        note.drawingData = PKDrawing(strokes: Array(original.strokes.dropFirst())).dataRepresentation()
+        precondition(!before.permitsAppending(AutofillDocument(note), outside: selection(110)), "Erasing captured ink must refuse a rebase")
+        var movedOriginal = original.strokes
+        movedOriginal[0].transform = CGAffineTransform(translationX: 10, y: 0)
+        note.drawingData = PKDrawing(strokes: movedOriginal).dataRepresentation()
+        precondition(!before.permitsAppending(AutofillDocument(note), outside: selection(110)), "Moving original ink must refuse a rebase")
+        before.apply(to: note)
+        try context.save()
+        print("Concurrent ink: append/reflow retention, changed-selection/erase/move rejection and lighter autofill pen weight passed")
+
         let proposal = AutofillProposal(requestID: UUID(), noteID: note.id, capturedAt: .now,
             selectionPolygon: selection(110), selectedText: "Heading:", sourceRevision: "test-revision",
             content: AutofillContent(lines: [.init(text: "abba abba", citationIndices: []), .init(text: "ba", citationIndices: [])], origin: .localArithmetic), citations: [])
@@ -85,7 +139,10 @@ import SwiftData
         try NotebookEdits.commit(in: context, notes: [note]) { after.apply(to: note) }
         precondition(after.matches(AutofillDocument(note)) && !before.matches(AutofillDocument(note)))
         let records = try JSONDecoder().decode([AutofillRecord].self, from: note.autofillHistory!)
-        precondition(records.count == 1 && records[0].text == proposal.text && records[0].documentRevision == before.revision)
+        precondition(records.count == 1)
+        let storedRecords = try JSONSerialization.jsonObject(with: note.autofillHistory!) as! [[String: Any]]
+        precondition(storedRecords.allSatisfy { Set($0.keys) == ["strokeIDs"] },
+                     "Accepted fills must not persist selected text, answers or source excerpts")
         precondition(records[0].strokeIDs.count == staged.inserted.strokes.count)
         try NotebookEdits.commit(in: context, notes: [note]) { before.apply(to: note) }
         precondition(before.matches(AutofillDocument(note)), "Undo restores original pages, ink and provenance")

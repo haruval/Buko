@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BukoIsolatedExperiment</key>
+	<true/>
+	<key>BukoLayoutAutofillEnabled</key>
+	<true/>
+	<key>CFBundleDisplayName</key>
+	<string>Buko Experiment</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Buko note reference</string>
+			<key>UTTypeIdentifier</key>
+			<string>dev.buko.note-reference</string>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>dev.buko.source-reference</string>
+			<key>UTTypeDescription</key>
+			<string>Buko source reference</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

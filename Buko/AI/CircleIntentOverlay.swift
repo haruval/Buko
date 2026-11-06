@@ -8,20 +8,54 @@ enum CircleAIStyle {
     static let previewSpring = Animation.spring(response: 0.42, dampingFraction: 0.7)
 }
 
+/// The same native material for the processing jelly and its compact toolbar mark.
+struct CircleGlassSurface<S: Shape>: View {
+    let shape: S
+    var processing = false
+    var wave = 0.0
+    var interactive = false
+
+    var body: some View {
+        shape.fill(.clear)
+            // Clear is the most transparent public native-glass variant.
+            .glassEffect(.clear.tint(CircleAIStyle.glassTint).interactive(interactive), in: shape)
+            .overlay {
+                shape.fill(.white.opacity(processing ? 0.06 + 0.04 * wave : 0.025))
+                shape.stroke(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.08), CircleAIStyle.green.opacity(0.65)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
+                    .opacity(processing ? 0.7 + 0.25 * wave : 0.75)
+            }
+    }
+}
+
+struct CircleToolIcon: View {
+    var body: some View {
+        CircleGlassSurface(shape: RoundedRectangle(cornerRadius: 6, style: .continuous),
+                           processing: true, interactive: true)
+            .frame(width: 22, height: 22)
+            .accessibilityHidden(true)
+    }
+}
+
 struct CircleIntentOverlay: View {
     let state: CircleIntentState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
     @State private var measuredHeight: CGFloat = 76
+    @State private var dragOrigin: CGPoint?
+    @State private var keyboardFrame = CGRect.null
 
     var body: some View {
         GeometryReader { geometry in
-            let maximumHeight = max(120, min(620, geometry.size.height - 160))
+            let keyboardTop = keyboardFrame.isNull ? geometry.size.height
+                : keyboardFrame.minY - geometry.frame(in: .global).minY
+            let viewport = CGSize(width: geometry.size.width, height: min(geometry.size.height, max(240, keyboardTop)))
+            let maximumHeight = max(120, min(620, viewport.height - 160))
             let popupSize = CGSize(
                 width: min(detailedPreview ? 390 : 330, CirclePopupPlacement.preferredWidth(
                     viewport: geometry.size, region: state.selectionBounds.applying(state.projection))),
                 height: min(measuredHeight, maximumHeight))
-            let layout = PopupLayout(size: popupSize, viewport: geometry.size,
+            let layout = PopupLayout(size: popupSize, viewport: viewport,
                 insertedBounds: state.insertion.layout?.bounds, stage: AutofillPreviewStage(state), detailed: detailedPreview)
             ZStack(alignment: .topLeading) {
                 if state.phase != .idle {
@@ -30,30 +64,51 @@ struct CircleIntentOverlay: View {
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: state.insertion.layout != nil)
                         .allowsHitTesting(false)
                     if state.phase == .finished || state.processing {
-                        AutofillPreviewCard(state: state, detailed: detailedPreview, maximumHeight: maximumHeight) { size in
+                        AutofillPreviewCard(state: state, detailed: detailedPreview, maximumHeight: maximumHeight, dragTitle: { translation in
+                            if let translation {
+                                if dragOrigin == nil { dragOrigin = state.popupHitBounds?.origin ?? state.popupBounds.origin }
+                                guard let origin = dragOrigin else { return }
+                                var transaction = Transaction(); transaction.disablesAnimations = true
+                                withTransaction(transaction) {
+                                    state.movePopup(to: CGPoint(x: origin.x + translation.width, y: origin.y + translation.height), viewport: viewport)
+                                }
+                            } else { dragOrigin = nil }
+                        }) { size in
+                            guard state.phase != .idle, measuredHeight != size.height else { return }
                             measuredHeight = size.height
+                            // Place from the measured destination immediately. A content
+                            // measurement can arrive after the stage's layout change.
+                            repositionPopup(CGSize(width: popupSize.width, height: min(size.height, maximumHeight)),
+                                            viewport: viewport, animated: true)
                         }
-                            .frame(width: popupSize.width, alignment: .topLeading)
+                            .frame(width: popupSize.width, height: popupSize.height, alignment: .topLeading)
                             .transaction { $0.animation = nil }
                             .modifier(PopupPresentation(bounds: CGRect(origin: state.popupBounds.origin, size: popupSize), state: state))
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("intentPopup")
                             .animation(stageAnimation, value: popupSize)
-                            .onAppear { positionPopup(popupSize, viewport: geometry.size) }
+                            .onAppear { positionPopup(popupSize, viewport: viewport) }
                             .onChange(of: layout) { previous, current in
                                 // Choose the destination once, never from intermediate spring sizes.
                                 // Camera/viewport changes remain direct; only pipeline changes spring.
                                 let animate = previous.viewport == current.viewport && previous.detailed == current.detailed
                                     && (previous.size != current.size || previous.stage != current.stage || previous.insertedBounds != current.insertedBounds)
-                                repositionPopup(popupSize, viewport: geometry.size, animated: animate)
+                                repositionPopup(current.size, viewport: current.viewport, animated: animate)
                             }
                             .transition(reduceMotion ? .identity : .scale(scale: 0.75).combined(with: .opacity))
                     }
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            .coordinateSpace(name: "autofillOverlay")
         }
         .ignoresSafeArea()
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect ?? .null
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardFrame = .null }
         .onChange(of: state.phase) { _, phase in
-            if phase == .idle { measuredHeight = 76 }
+            if phase == .idle { measuredHeight = 76; dragOrigin = nil }
         }
     }
 
@@ -68,23 +123,10 @@ struct CircleIntentOverlay: View {
                 release: state.release, projection: state.projection, boundary: state.closedBoundary, rectangle: state.fittedRectangle,
                 closeAge: state.closedAt.map { now - $0 }, morphAge: state.morphBegan.map { now - $0 },
                 now: now, reduceMotion: reduceMotion).path(in: CGRect(origin: .zero, size: viewport))
-            glassSurface(shape, wave: wave)
+            CircleGlassSurface(shape: shape, processing: state.processing, wave: wave)
                 .frame(width: viewport.width, height: viewport.height)
                 .transaction { $0.animation = nil; $0.disablesAnimations = true }
         }
-    }
-
-    private func glassSurface<S: Shape>(_ shape: S, wave: Double) -> some View {
-        shape.fill(.clear)
-            // Clear is the most transparent public native-glass variant. The SDK
-            // does not expose a per-view override for the system opacity slider.
-            .glassEffect(.clear.tint(CircleAIStyle.glassTint), in: shape)
-            .overlay {
-                shape.fill(.white.opacity(state.processing ? 0.06 + 0.04 * wave : 0.025))
-                shape.stroke(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.08), CircleAIStyle.green.opacity(0.65)],
-                                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
-                    .opacity(state.processing ? 0.7 + 0.25 * wave : 0.75)
-            }
     }
 
     private func positionPopup(_ size: CGSize, viewport: CGSize) {
@@ -129,9 +171,8 @@ private struct PopupPresentation: ViewModifier, Animatable {
         // This non-observed cache has no layout/state feedback. Updating it from
         // the interpolated value keeps moving controls from leaking taps to ink.
         state.popupHitBounds = bounds
-        return content.frame(width: bounds.width, height: bounds.height, alignment: .topLeading)
-            .clipShape(.rect(cornerRadius: 26))
-            .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.18)), in: .rect(cornerRadius: 26))
+        return content.clipShape(.rect(cornerRadius: CirclePopupPlacement.cornerRadius))
+            .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.18)), in: .rect(cornerRadius: CirclePopupPlacement.cornerRadius))
             .offset(x: bounds.minX, y: bounds.minY)
     }
 }
@@ -157,6 +198,12 @@ private struct GestureJellyShape: Shape {
     private func materialPath() -> Path {
         if let boundary, let closeAge {
             if let rectangle, let morphAge {
+                if reduceMotion || morphAge >= CircleJellyGeometry.morphDuration {
+                    let width = rectangle.radii[0] * 2
+                    let height = rectangle.radii[CircleJellyGeometry.sampleCount / 4] * 2
+                    let rect = CGRect(x: rectangle.center.x - width / 2, y: rectangle.center.y - height / 2, width: width, height: height)
+                    return Path(roundedRect: rect, cornerRadius: CirclePopupPlacement.cornerRadius / max(0.01, projection.a))
+                }
                 return Path(CircleJellyGeometry.smoothPath(CircleJellyGeometry.moldedContour(
                     from: boundary, to: rectangle, age: morphAge, reduceMotion: reduceMotion)))
             }
@@ -165,7 +212,7 @@ private struct GestureJellyShape: Shape {
         }
         guard let droplet else { return Path() }
         let blob = CircleJellyGeometry.smoothPath(droplet.contour(at: now, reduceMotion: reduceMotion))
-        let head = reduceMotion ? droplet.target : droplet.sample(at: now).position
+        let head = droplet.target
         let tip = tailAnchor.map { CircleJellyGeometry.paint([$0, head]) } ?? CGMutablePath()
         return Path(paint.union(tip).union(blob))
     }

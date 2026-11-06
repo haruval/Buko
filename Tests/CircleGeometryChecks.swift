@@ -47,7 +47,7 @@ import Foundation
             var droplet = CircleDropletDynamics(at: partial[partial.count - 2], time: 0)
             droplet.follow(partial.last!, at: 0.02)
             let release = CircleJellyGeometry.Release(traced: partial, completed: completed, droplet: droplet, time: 0.03)
-            let liveHead = droplet.sample(at: 0.03).position
+            let liveHead = droplet.target
             let live = CircleJellyGeometry.paint(Array(partial.dropLast()))
                 .union(CircleJellyGeometry.paint([partial[partial.count - 2], liveHead]))
                 .union(CircleJellyGeometry.smoothPath(droplet.contour(at: 0.03, reduceMotion: false)))
@@ -105,6 +105,10 @@ import Foundation
         precondition(hypot(rested.velocity.x, rested.velocity.y) < 0.01)
         let blob = CircleJellyGeometry.smoothPath(drop.contour(at: 0.06, reduceMotion: false))
         precondition(blob.boundingBoxOfPath.width > 0 && blob.boundingBoxOfPath.height > 0)
+        let points = drop.contour(at: 0.06, reduceMotion: false)
+        let center = CGPoint(x: points.map(\.x).reduce(0, +) / CGFloat(points.count),
+                             y: points.map(\.y).reduce(0, +) / CGFloat(points.count))
+        precondition(CircleGeometry.distance(center, drop.target) < 0.01, "Animated indicator must stay centered on the fingers")
         let reducedDrop = CircleJellyGeometry.smoothPath(drop.contour(at: 0.06, reduceMotion: true))
         precondition(abs(reducedDrop.boundingBoxOfPath.midX - drop.target.x) < 0.01)
         precondition(abs(reducedDrop.boundingBoxOfPath.midY - drop.target.y) < 0.01)

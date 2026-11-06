@@ -13,6 +13,7 @@ nonisolated struct LectureCompletion: Sendable {
     var evidenceCount: Int
     // Request-local evidence handoff, not proof of semantic accuracy or storage.
     var requestedContent: RequestedContent? = nil
+    var comparisonSupport: [RequestedContent] = []
 }
 
 /// The model may select source IDs, but cannot supply displayed answer prose or quotes.

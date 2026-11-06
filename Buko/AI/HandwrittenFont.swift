@@ -14,7 +14,7 @@ nonisolated enum HandwrittenFont {
                     guard n.count == 2 else { return nil }
                     return CGPoint(x: 12 + n[0] * 43.2 + (1 - n[1]) * 3.6, y: 54 + n[1] * 72)
                 }
-                strokes += paths([points], width: 9)
+                strokes += paths([points], width: 7.2)
             }
             return try? HandwritingSample(drawing: PKDrawing(strokes: strokes))
         }
@@ -93,7 +93,7 @@ nonisolated enum HandwrittenFont {
                 if !current.isEmpty { contours.append(current) }
             }
         }
-        return try? HandwritingSample(drawing: PKDrawing(strokes: paths(contours, width: 2.5)))
+        return try? HandwritingSample(drawing: PKDrawing(strokes: paths(contours, width: 2)))
     }
 
     // Normalized hand-printed lowercase alphabet. Separate paths are pen lifts.

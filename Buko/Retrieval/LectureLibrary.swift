@@ -11,6 +11,10 @@ actor LectureLibrary {
     private var embedding: NLEmbedding?
     private var attemptedEmbedding = false
     private var cache: [UUID: [LectureDocument]] = [:]
+    private var cacheRecency: [UUID] = []
+    // Keep the two workspace panes hot without retaining every visited note's
+    // text and embedding arrays for the entire app session. Eviction is RAM-only.
+    private static let maxCachedNotes = 2
     static let maxBytes = 40 * 1024 * 1024
     static let maxPages = 150
     static let maxDocuments = 12
@@ -35,9 +39,21 @@ actor LectureLibrary {
     private func directory(_ noteID: UUID) -> URL { root.appendingPathComponent(noteID.uuidString, isDirectory: true) }
     private func validID(_ id: String) -> Bool { id.count == 64 && id.allSatisfy { $0.isHexDigit && !$0.isUppercase } }
 
+    private func cacheDocuments(_ documents: [LectureDocument], noteID: UUID) {
+        cacheRecency.removeAll { $0 == noteID }
+        cache[noteID] = documents.isEmpty ? nil : documents
+        if !documents.isEmpty { cacheRecency.append(noteID) }
+        while cacheRecency.count > Self.maxCachedNotes {
+            cache[cacheRecency.removeFirst()] = nil
+        }
+    }
+
     func documents(noteID: UUID) throws -> [LectureDocument] {
         try Task.checkCancellation()
-        if let cached = cache[noteID] { return cached }
+        if let cached = cache[noteID] {
+            cacheDocuments(cached, noteID: noteID)
+            return cached
+        }
         let folder = directory(noteID)
         guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
         let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
@@ -69,7 +85,7 @@ actor LectureLibrary {
             documents.append(document)
         }
         documents.sort { $0.importedAt < $1.importedAt }
-        cache[noteID] = documents
+        cacheDocuments(documents, noteID: noteID)
         return documents
     }
 
@@ -152,7 +168,7 @@ actor LectureLibrary {
         try JSONEncoder().encode(document).write(to: staging.appendingPathComponent("index.json"), options: .atomic)
         try Task.checkCancellation()
         try FileManager.default.moveItem(at: staging, to: folder.appendingPathComponent(id, isDirectory: true))
-        documents.append(document); cache[noteID] = documents
+        documents.append(document); cacheDocuments(documents, noteID: noteID)
         return document
     }
 
@@ -188,7 +204,34 @@ actor LectureLibrary {
         var documents = try documents(noteID: noteID)
         guard documents.contains(where: { $0.id == documentID }) else { return }
         try FileManager.default.removeItem(at: directory(noteID).appendingPathComponent(documentID))
-        documents.removeAll { $0.id == documentID }; cache[noteID] = documents
+        documents.removeAll { $0.id == documentID }; cacheDocuments(documents, noteID: noteID)
+    }
+
+    /// Discover existing app-owned directories before asking the store which
+    /// owners still exist. Never enumerate or delete picker-provided originals.
+    func storedNoteIDs() throws -> Set<UUID> {
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        return Set(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]).compactMap { url in
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values.isDirectory == true, values.isSymbolicLink != true,
+                  let id = UUID(uuidString: url.lastPathComponent), id.uuidString == url.lastPathComponent else { return nil }
+            return id
+        })
+    }
+
+    /// Call only for IDs confirmed absent from the saved note/page store.
+    /// Idempotent and independent of index decoding, so corrupt orphan indexes
+    /// can be removed too. A failed delete leaves the directory for a later retry.
+    func removeNotes(_ ids: Set<UUID>) throws {
+        for id in ids {
+            let url = directory(id)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                guard values.isDirectory == true, values.isSymbolicLink != true else { throw LibraryError.invalidIndex }
+                try FileManager.default.removeItem(at: url)
+            }
+            cacheDocuments([], noteID: id)
+        }
     }
 
     enum LibraryError: LocalizedError {
