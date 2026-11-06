@@ -123,7 +123,7 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
     var showsPageProgress = false
     @ViewBuilder var pageProgress: () -> PageProgress
     @ViewBuilder var settingsContent: () -> SettingsContent
-    @AppStorage("showsGestureTestTools") private var showsCircle = true
+    @AppStorage("showsGestureTestTools") private var showsCircle = false
     var body: some ToolbarContent {
         if showsNotes {
             ToolbarItem(placement: .navigation) {
@@ -166,8 +166,11 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
             Button("Eraser", systemImage: "eraser") { session.tool = .eraser }
                 .tint(session.tool == .eraser ? .accentColor : .primary)
             if showsCircle {
-                Button("Circle intent", systemImage: "circle") { session.tool = .circle }
+                // The native vertical toolbar requires an image label; hosting
+                // a SwiftUI glass view here moves the item to the bottom bar.
+                Button("Circle intent", image: .circleJelly) { session.tool = .circle }
                     .tint(CircleAIStyle.green)
+                    .accessibilityLabel("Circle intent")
                     .accessibilityIdentifier("circleIntentTool")
                     .accessibilityAddTraits(session.tool == .circle ? [.isSelected] : [])
             }

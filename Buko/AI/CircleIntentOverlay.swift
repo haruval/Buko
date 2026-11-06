@@ -8,6 +8,35 @@ enum CircleAIStyle {
     static let previewSpring = Animation.spring(response: 0.42, dampingFraction: 0.7)
 }
 
+/// The same native material for the processing jelly and its compact toolbar mark.
+struct CircleGlassSurface<S: Shape>: View {
+    let shape: S
+    var processing = false
+    var wave = 0.0
+    var interactive = false
+
+    var body: some View {
+        shape.fill(.clear)
+            // Clear is the most transparent public native-glass variant.
+            .glassEffect(.clear.tint(CircleAIStyle.glassTint).interactive(interactive), in: shape)
+            .overlay {
+                shape.fill(.white.opacity(processing ? 0.06 + 0.04 * wave : 0.025))
+                shape.stroke(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.08), CircleAIStyle.green.opacity(0.65)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
+                    .opacity(processing ? 0.7 + 0.25 * wave : 0.75)
+            }
+    }
+}
+
+struct CircleToolIcon: View {
+    var body: some View {
+        CircleGlassSurface(shape: RoundedRectangle(cornerRadius: 6, style: .continuous),
+                           processing: true, interactive: true)
+            .frame(width: 22, height: 22)
+            .accessibilityHidden(true)
+    }
+}
+
 struct CircleIntentOverlay: View {
     let state: CircleIntentState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -94,23 +123,10 @@ struct CircleIntentOverlay: View {
                 release: state.release, projection: state.projection, boundary: state.closedBoundary, rectangle: state.fittedRectangle,
                 closeAge: state.closedAt.map { now - $0 }, morphAge: state.morphBegan.map { now - $0 },
                 now: now, reduceMotion: reduceMotion).path(in: CGRect(origin: .zero, size: viewport))
-            glassSurface(shape, wave: wave)
+            CircleGlassSurface(shape: shape, processing: state.processing, wave: wave)
                 .frame(width: viewport.width, height: viewport.height)
                 .transaction { $0.animation = nil; $0.disablesAnimations = true }
         }
-    }
-
-    private func glassSurface<S: Shape>(_ shape: S, wave: Double) -> some View {
-        shape.fill(.clear)
-            // Clear is the most transparent public native-glass variant. The SDK
-            // does not expose a per-view override for the system opacity slider.
-            .glassEffect(.clear.tint(CircleAIStyle.glassTint), in: shape)
-            .overlay {
-                shape.fill(.white.opacity(state.processing ? 0.06 + 0.04 * wave : 0.025))
-                shape.stroke(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.08), CircleAIStyle.green.opacity(0.65)],
-                                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
-                    .opacity(state.processing ? 0.7 + 0.25 * wave : 0.75)
-            }
     }
 
     private func positionPopup(_ size: CGSize, viewport: CGSize) {

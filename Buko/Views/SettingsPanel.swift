@@ -7,12 +7,11 @@ struct SettingsPanel: View {
     @Binding var showsDevelopment: Bool
     @Binding var showsGrid: Bool
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
-    @AppStorage("showsGestureTestTools") private var showsGestureTestTools = true
+    @AppStorage("showsGestureTestTools") private var showsGestureTestTools = false
     let previewHandwriting: () -> Void
     let writeAlphabet: () -> Void
     let scanHandwriting: () -> Void
     let handwritingStatus: HandwritingPreparationStatus
-    let recreateTestNote: (SampleLecture) -> Void
     let restore: (Note) -> Void
     let restorePage: (TrashedPage) -> Void
     let emptyTrash: () -> Void
@@ -123,19 +122,6 @@ struct SettingsPanel: View {
                         }.buttonStyle(.glass).disabled(handwritingStatus.isRebuilding)
                             .accessibilityIdentifier("scanHandwritingNow")
                         Text(handwritingStatus.message).font(.caption).foregroundStyle(.secondary)
-                        Divider()
-                        ForEach(SampleLecture.allCases) { lecture in
-                            Button { recreateTestNote(lecture) } label: {
-                                Label("Recreate \(lecture.title)", systemImage: "arrow.counterclockwise")
-                                    .font(.subheadline.weight(.medium))
-                                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                                    .padding(.horizontal, 8)
-                            }
-                            .buttonStyle(.glass)
-                            .accessibilityIdentifier(lecture.resetIdentifier)
-                        }
-                        Text("Each example has editable handwriting. Resetting moves only that example’s previous note to Trash.")
-                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .scrollBounceBehavior(.basedOnSize)

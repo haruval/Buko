@@ -16,8 +16,6 @@ struct ContentView: View {
     @Query(sort: \TrashedPage.deletedAt, order: .reverse) private var trashedPages: [TrashedPage]
     @Query(sort: \NoteFolder.createdAt, order: .reverse) private var folders: [NoteFolder]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
-    @AppStorage("pplTestNoteID") private var pplTestNoteID = ""
-    @AppStorage("testPPLLectureTitleMigrated") private var testPPLLectureTitleMigrated = false
     @State private var showsDevelopment = false
     @State private var showsHandwritingPreview = false
     @State private var showsPersonalAlphabet = false
@@ -132,16 +130,9 @@ struct ContentView: View {
         .task {
             await cleanRetainedData()
             normalizeDuplicateTitles()
-            migrateTestLectureTitle()
-            if !AppBuildConfiguration.isIsolatedExperiment && pplTestNoteID.isEmpty { recreateTestNote(.programmingLanguages) }
             if selection == nil {
                 if notes.isEmpty && trashedNotes.isEmpty { createNote() }
                 else if let note = notes.first { select(note) }
-            }
-            for lecture in [SampleLecture.operatingSystems, .linearAlgebra, .biology101] where !AppBuildConfiguration.isIsolatedExperiment {
-                if UserDefaults.standard.string(forKey: lecture.storageKey) == nil {
-                    recreateTestNote(lecture, selectCreated: false)
-                }
             }
         }
         .onAppear { refreshHandwriting() }
@@ -220,7 +211,10 @@ struct ContentView: View {
                         }
                         .arrangementViewStyle(.overlay.axes(secondContent == nil ? Axis.Set.horizontal.union(.vertical) : .horizontal))
                         .background(.black)
-                        .ignoresSafeArea(.container, edges: nativeTools ? .all : .top)
+                        // The canvas owns the home-indicator area too. Leaving
+                        // it outside the canvas exposes a paper-colored strip
+                        // when the notebook scrolls or zooms over black.
+                        .ignoresSafeArea(.container, edges: nativeTools ? .all : .vertical)
                     }
                     .navigationTitle("")
                     .navigationBarTitleDisplayMode(.inline)
@@ -412,7 +406,8 @@ struct ContentView: View {
             }
             .overlay(alignment: .bottom) {
                 if !nativeTools, let note, note.pageCount > 0 {
-                    ToolShelf(session: paneSession) { showSources(note) }.padding(.bottom, 16)
+                    ToolShelf(session: paneSession) { showSources(note) }
+                        .padding(.bottom, 16 + controlInsets.bottom)
                 }
             }
             .clipped()
@@ -562,10 +557,7 @@ struct ContentView: View {
                 saveNow()
                 refreshHandwriting()
                 handwriting.rebuild()
-            }, handwritingStatus: handwriting.status, recreateTestNote: { lecture in
-                recreateTestNote(lecture)
-                if settingsVisible { toggleSettings() }
-            }, restore: restore, restorePage: restorePage,
+            }, handwritingStatus: handwriting.status, restore: restore, restorePage: restorePage,
             emptyTrash: {
                 emptyNoteIDs = Set(trashedNotes.map(\.id))
                 emptyPageIDs = Set(trashedPages.map(\.id))
@@ -671,43 +663,6 @@ struct ContentView: View {
         guard performEdit(notes: [note], { try NotebookEdits.prepare(note) }) else { return }
         resetCanvas()
         selection = note
-    }
-
-    private func migrateTestLectureTitle() {
-        guard !testPPLLectureTitleMigrated else { return }
-        do {
-            let all = try modelContext.fetch(FetchDescriptor<Note>())
-            if let note = all.first(where: { $0.id.uuidString == pplTestNoteID }) {
-                let title = Note.uniqueTitle(SampleLecture.programmingLanguages.title, occupied: Set(all.filter { $0.id != note.id }.map(\.title)))
-                guard performEdit(notes: [note], { note.title = title }) else { return }
-            }
-            testPPLLectureTitleMigrated = true
-        } catch { persistenceError = error.localizedDescription }
-    }
-
-    private func recreateTestNote(_ lecture: SampleLecture, selectCreated: Bool = true) {
-        guard flushDrawing() else { return }
-        do {
-            let all = try modelContext.fetch(FetchDescriptor<Note>())
-            let previousID = UserDefaults.standard.string(forKey: lecture.storageKey)
-            // Identity, never a title match, scopes reset to this fixture only.
-            let previous = all.first { $0.id.uuidString == previousID }
-            let note = Note(title: Note.uniqueTitle(lecture.title, occupied: Set(all.map(\.title))))
-            note.drawingData = lecture.drawing().dataRepresentation()
-            note.pageLayoutVersion = 2
-            guard performEdit(notes: previous.map { [$0] } ?? [], {
-                if let previous, previous.deletedAt == nil { previous.deletedAt = .now }
-                try note.setPages(lecture.pages.map { _ in NotebookPage() })
-                modelContext.insert(note)
-                try NotebookEdits.prepare(note)
-            }) else { return }
-            UserDefaults.standard.set(note.id.uuidString, forKey: lecture.storageKey)
-            if selectCreated {
-                resetCanvas()
-                selection = note
-                sidebarVisible = false
-            }
-        } catch { persistenceError = error.localizedDescription }
     }
 
     private func createNote(in folderID: UUID? = nil) {
