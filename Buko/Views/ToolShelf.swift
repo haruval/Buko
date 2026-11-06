@@ -30,7 +30,7 @@ struct ToolShelf: View {
                 .disabled(!session.canRedo)
         }
         .padding(8)
-        .bukoGlass(cornerRadius: 32)
+        .glassEffect(.regular, in: .rect(cornerRadius: 32))
         .onChange(of: showsGestureTestTools, initial: true) { _, visible in
             if !visible, session.tool == .circle { session.tool = .pen }
         }

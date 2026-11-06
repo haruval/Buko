@@ -39,7 +39,7 @@ final class PhysicalFeedbackTests: XCTestCase {
         let scan = app.buttons["scanHandwritingNow"]
         if !scan.isHittable { app.swipeUp() }
         XCTAssertTrue(scan.waitForExistence(timeout: 5)); scan.tap()
-        XCTAssertTrue(app.buttons["previewHandwriting"].exists)
+        XCTAssertFalse(app.buttons["previewHandwriting"].exists)
     }
 
     @MainActor private func openAlphabet(_ app: XCUIApplication) {

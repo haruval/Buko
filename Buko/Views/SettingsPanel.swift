@@ -8,7 +8,6 @@ struct SettingsPanel: View {
     @Binding var showsGrid: Bool
     @AppStorage("detailedAutofillPreview") private var detailedPreview = false
     @AppStorage("showsGestureTestTools") private var showsGestureTestTools = false
-    let previewHandwriting: () -> Void
     let writeAlphabet: () -> Void
     let scanHandwriting: () -> Void
     let handwritingStatus: HandwritingPreparationStatus
@@ -106,18 +105,12 @@ struct SettingsPanel: View {
                             .accessibilityIdentifier("detailedPreview")
                         Text("Show live pipeline stages, prompt inputs and retrieved evidence in autofill previews.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Button(action: previewHandwriting) {
-                            Label("Handwriting samples", systemImage: "textformat.abc")
-                                .font(.subheadline.weight(.medium))
-                                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                                .padding(.horizontal, 8)
-                        }.buttonStyle(.glass).accessibilityIdentifier("previewHandwriting")
                         Button(action: writeAlphabet) {
                             Label("Write your alphabet", systemImage: "pencil.line")
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }.buttonStyle(.glass).accessibilityIdentifier("writeAlphabet")
                         Button(action: scanHandwriting) {
-                            Label(handwritingStatus.isRebuilding ? "Scanning notes…" : "Scan notes now", systemImage: "arrow.clockwise")
+                            Label(handwritingStatus.isRebuilding ? "Scanning handwriting…" : "Scan handwriting now", systemImage: "arrow.clockwise")
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }.buttonStyle(.glass).disabled(handwritingStatus.isRebuilding)
                             .accessibilityIdentifier("scanHandwritingNow")

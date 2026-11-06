@@ -17,7 +17,6 @@ struct ContentView: View {
     @Query(sort: \NoteFolder.createdAt, order: .reverse) private var folders: [NoteFolder]
     @AppStorage("canvasGridEnabled") private var showsGrid = false
     @State private var showsDevelopment = false
-    @State private var showsHandwritingPreview = false
     @State private var showsPersonalAlphabet = false
     @State private var lectureSourceNote: Note?
     @State private var canvasRevision = UUID()
@@ -31,6 +30,7 @@ struct ContentView: View {
     @State private var emptyPageIDs = Set<UUID>()
     @State private var selection: Note?
     @State private var primaryPDF: LecturePDFDestination?
+    @State private var fullscreenPDF: LecturePDFDestination?
     @State private var secondContent: WorkspaceContent?
     @State private var secondSession = CanvasSession()
     @State private var secondRevision = UUID()
@@ -43,7 +43,7 @@ struct ContentView: View {
 
     @State private var sidebarVisible = true
     @State private var settingsVisible = false
-    private enum SettingsDestination { case handwriting, alphabet, emptyTrash }
+    private enum SettingsDestination { case alphabet, emptyTrash }
     @State private var pendingSettingsDestination: SettingsDestination?
     @State private var showsTrash = false
     @State private var session = CanvasSession()
@@ -141,12 +141,10 @@ struct ContentView: View {
         .onChange(of: session.host?.circleIntent.phase) { _, _ in refreshHandwriting() }
         .onChange(of: secondSession.host?.circleIntent.phase) { _, _ in refreshHandwriting() }
         .onDisappear { handwriting.setPaused(true); sourceOpenTask?.cancel() }
-        .sheet(isPresented: $showsHandwritingPreview) {
-            HandwritingPreviewView(preparation: handwriting, noteID: activeNote?.id)
-        }
         .fullScreenCover(isPresented: $showsPersonalAlphabet) {
             PersonalAlphabetView(preparation: handwriting, noteID: activeNote?.id)
         }
+        .fullScreenCover(item: $fullscreenPDF) { LecturePDFView(destination: $0) }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 session.host?.circleIntent.cancel(); secondSession.host?.circleIntent.cancel(); saveNow()
@@ -168,11 +166,12 @@ struct ContentView: View {
             let divisions = outer.reservedRegions(kind: .division, options: .includeInactive)
             let fold = divisions.first(where: \.isActive)?.frame
             let nativeChrome = horizontalSizeClass == .compact || fold != nil || secondContent != nil
-            let nativeTools = nativeChrome || !divisions.isEmpty
+            let nativeTools = horizontalSizeClass == .compact || !divisions.isEmpty
             let layout = WorkspaceGeometry(size: outer.size, division: fold,
                 compact: horizontalSizeClass == .compact || verticalSizeClass == .compact)
             let bookLibrary = fold != nil && !layout.vertical && layout.canSplit
             let separatedLibrary = fold != nil && layout.canSplit && (bookLibrary || secondContent == nil)
+            let needsPaneSwitcher = secondContent != nil && (bookLibrary || !layout.canSplit)
             let sideBySideNotes = !separatedLibrary && layout.canSplit && !layout.vertical && primaryPDF == nil && secondContent?.note != nil
             let progressNote = secondFocused && secondContent != nil ? secondContent?.note : (primaryPDF == nil ? selectedNote : nil)
             NavigationStack {
@@ -219,14 +218,15 @@ struct ContentView: View {
                     .navigationTitle("")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
-                        if nativeTools {
+                        if nativeTools || nativeChrome {
                             NotebookToolbar(session: activeSession, notes: toggleSidebar, settings: toggleSettings, settingsPresented: $settingsVisible,
                                 settingsDismissed: finishSettingsPopoverDismissal,
                                 showsNotes: nativeChrome && !separatedLibrary, showsSettings: nativeChrome || verticalToolbar,
+                                showsDrawingTools: nativeTools,
                                 settingsInDrawingBar: verticalToolbar, settingsPopoverEnabled: settingsPopover,
                                 combinesHistory: combinesHistory,
                                 sources: { showSources(activeNote) },
-                                switchPane: secondContent == nil ? nil : { secondFocused.toggle() },
+                                switchPane: needsPaneSwitcher ? { secondFocused.toggle() } : nil,
                                 showsPageProgress: verticalToolbar && !sideBySideNotes && progressNote != nil) {
                                     if let note = progressNote {
                                         PageNavigator(note: note, session: activeSession, availableHeight: outer.size.height, circular: true,
@@ -306,6 +306,11 @@ struct ContentView: View {
                         .frame(width: dropLayout.second.width, height: dropLayout.second.height)
                         .position(x: editorFrame.minX + dropLayout.second.midX, y: editorFrame.minY + dropLayout.second.midY)
                 }
+                if !nativeTools, secondContent != nil {
+                    ToolShelf(session: activeSession) { showSources(activeNote) }
+                        .padding(.bottom, 16 + max(0, editorFrame.maxY - controlsFrame.maxY))
+                        .frame(width: editorFrame.width, height: editorFrame.height, alignment: .bottom)
+                }
                 if settingsVisible && !settingsPopover {
                     Color.clear.contentShape(.rect)
                         .onTapGesture { toggleSettings() }.accessibilityIdentifier("dismissSettingsBackdrop")
@@ -378,10 +383,10 @@ struct ContentView: View {
                         Button { secondFocused = second } label: {
                             Text(note?.title ?? (second ? secondContent?.title : primaryPDF?.title) ?? "")
                                 .font(.subheadline.weight(.semibold)).lineLimit(1)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.primary)
                         }.buttonStyle(.glass)
                             .accessibilityIdentifier(second ? "secondPaneTitle" : "firstPaneTitle")
-                        Button("Full screen", systemImage: "arrow.up.left.and.arrow.down.right") { closeSplit(keepingSecond: second) }
+                        Button("Full screen", systemImage: "arrow.up.left.and.arrow.down.right") { expandPane(second: second) }
                             .labelStyle(.iconOnly).buttonStyle(.glass)
                             .accessibilityIdentifier(second ? "fullscreenSecondPane" : "fullscreenFirstPane")
                         if !second { Spacer(minLength: 0) }
@@ -406,7 +411,7 @@ struct ContentView: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if !nativeTools, let note, note.pageCount > 0 {
+                if !nativeTools, secondContent == nil, let note, note.pageCount > 0 {
                     ToolShelf(session: paneSession) { showSources(note) }
                         .padding(.bottom, 16 + controlInsets.bottom)
                 }
@@ -547,10 +552,7 @@ struct ContentView: View {
         SettingsPanel(
             trashedNotes: trashedNotes, trashedPages: trashedPages, showsTrash: $showsTrash,
             showsDevelopment: $showsDevelopment, showsGrid: $showsGrid,
-            previewHandwriting: {
-                session.host?.circleIntent.cancel()
-                presentSettingsDestination(.handwriting, afterPopover: presentedInPopover)
-            }, writeAlphabet: {
+            writeAlphabet: {
                 session.host?.circleIntent.cancel()
                 presentSettingsDestination(.alphabet, afterPopover: presentedInPopover)
             }, scanHandwriting: {
@@ -575,7 +577,6 @@ struct ContentView: View {
             settingsVisible = false
         } else {
             switch destination {
-            case .handwriting: showsHandwritingPreview = true
             case .alphabet: showsPersonalAlphabet = true
             case .emptyTrash: emptyTrashPresented = true
             }
@@ -729,6 +730,16 @@ struct ContentView: View {
             resetSecondCanvas(); secondContent = content; secondFocused = true
         }
         sidebarVisible = false; showSources(nil); sourceDragging = false; dropSide = nil
+    }
+
+    private func expandPane(second: Bool) {
+        let content = second ? secondContent : primaryPDF.map(WorkspaceContent.pdf)
+        if case .pdf(let destination) = content {
+            guard flushDrawing() else { return }
+            fullscreenPDF = destination
+        } else {
+            closeSplit(keepingSecond: second)
+        }
     }
 
     private func closeSplit(keepingSecond: Bool) {

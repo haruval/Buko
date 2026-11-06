@@ -121,6 +121,56 @@ import SwiftData
         let originalAfter = try Data(contentsOf: source), sentinelAfter = try Data(contentsOf: sentinel)
         precondition(originalAfter == original && sentinelAfter == original)
         precondition(FileManager.default.fileExists(atPath: unrelated.path))
+        let retainedDocuments = try await library.documents(noteID: active.id)
+        try await cacheEvictionChecks(root: root.appendingPathComponent("cache-check"),
+                                      document: retainedDocuments[0], source: original)
         print("Retention checks passed: legacy minimization/reopen/idempotence, stroke IDs, corrupt/transaction-failure preservation, committed deletion, startup orphans, corrupt indexes, cache invalidation, active/trash/source/sibling/symlink isolation")
+    }
+
+    /// Use durable indexes to distinguish a cache hit from a reload. Visiting a
+    /// third notebook must release the least recently used index, without
+    /// deleting its PDF or changing what a later source lookup returns.
+    static func cacheEvictionChecks(root: URL, document: LectureDocument, source: Data) async throws {
+        let library = LectureLibrary(root: root)
+        let ids = [UUID(), UUID(), UUID()]
+        let folders = ids.map { root.appendingPathComponent($0.uuidString).appendingPathComponent(document.id) }
+        let originalIndex = try JSONEncoder().encode(document)
+        for folder in folders {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try source.write(to: folder.appendingPathComponent("source.pdf"))
+            try originalIndex.write(to: folder.appendingPathComponent("index.json"))
+        }
+        _ = try await library.documents(noteID: ids[0])
+        _ = try await library.documents(noteID: ids[1])
+        var updated = document
+        updated.title = "Reloaded from disk"
+        let updatedIndex = try JSONEncoder().encode(updated)
+        for folder in folders.prefix(2) {
+            try updatedIndex.write(to: folder.appendingPathComponent("index.json"), options: .atomic)
+        }
+        let recentlyUsed = try await library.documents(noteID: ids[0])
+        precondition(recentlyUsed[0].title == document.title, "A hot index should remain cached")
+        _ = try await library.documents(noteID: ids[2])
+        let evicted = try await library.documents(noteID: ids[1])
+        precondition(evicted[0].title == updated.title, "The least recently used notebook must reload from disk")
+        let subsequentlyEvicted = try await library.documents(noteID: ids[0])
+        precondition(subsequentlyEvicted[0].title == updated.title, "The cache must remain bounded after reload")
+        let url = try await library.pdfURL(noteID: ids[1], documentID: document.id)
+        let reopenedPDF = try Data(contentsOf: url)
+        precondition(reopenedPDF == source)
+        for (index, folder) in folders.enumerated() {
+            let actualIndex = try Data(contentsOf: folder.appendingPathComponent("index.json"))
+            let actualPDF = try Data(contentsOf: folder.appendingPathComponent("source.pdf"))
+            precondition(actualIndex == (index < 2 ? updatedIndex : originalIndex) && actualPDF == source,
+                         "Cache eviction must never mutate saved sources or indexes")
+        }
+        try await library.remove(documentID: document.id, noteID: ids[1])
+        let removed = try await library.documents(noteID: ids[1])
+        precondition(removed.isEmpty, "Removing a source must invalidate its cached entry")
+        let reopened = try await LectureLibrary(root: root).documents(noteID: ids[0])
+        precondition(reopened[0].title == updated.title
+                     && reopened[0].passages.map(\.id) == subsequentlyEvicted[0].passages.map(\.id)
+                     && reopened[0].passages.map(\.text) == subsequentlyEvicted[0].passages.map(\.text))
+        print("Lecture cache checks passed: hot reuse, least-recent eviction, repeated reload, PDF/index preservation and removal")
     }
 }

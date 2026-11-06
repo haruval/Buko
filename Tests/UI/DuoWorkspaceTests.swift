@@ -252,8 +252,13 @@ final class DuoWorkspaceTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["lecturePDFContent"].firstMatch.exists)
         shot(app, "Note beside source PDF")
         app.buttons["fullscreenSecondPane"].tap()
-        XCTAssertFalse(app.descendants(matching: .any)["workspaceDivider"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["closeLecturePDF"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.descendants(matching: .any)["workspaceDivider"].firstMatch.isHittable)
         XCTAssertTrue(app.descendants(matching: .any)["lecturePDFContent"].firstMatch.exists)
+        app.buttons["closeLecturePDF"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["workspaceDivider"].firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["fullscreenFirstPane"].isHittable)
+        XCTAssertTrue(app.buttons["fullscreenSecondPane"].isHittable)
     }
     @MainActor func testWritingDuringAutofillAcceptUndo() {
         let app = launch()

@@ -115,6 +115,7 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
     var settingsDismissed: () -> Void = {}
     var showsNotes = true
     var showsSettings = true
+    var showsDrawingTools = true
     var settingsInDrawingBar = false
     var settingsPopoverEnabled = false
     var combinesHistory = false
@@ -132,7 +133,7 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
         }
         if showsSettings && !settingsInDrawingBar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Settings", systemImage: "gearshape", action: settings).accessibilityIdentifier("openSettings")
+                Button("Settings", systemImage: "ellipsis", action: settings).accessibilityIdentifier("openSettings")
             }
         }
         if showsPageProgress {
@@ -159,27 +160,29 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
             .visibilityPriority(.high)
             ToolbarSpacer(.fixed, placement: .bottomBar)
         }
-        ToolbarItemGroup(placement: .bottomBar) {
-            Button("Pen", systemImage: "pencil.tip") { session.tool = .pen }
-                .tint(session.tool == .pen ? .accentColor : .primary)
-                .contextMenu { Toggle("Draw with finger", isOn: $session.allowsFingerDrawing) }
-            Button("Eraser", systemImage: "eraser") { session.tool = .eraser }
-                .tint(session.tool == .eraser ? .accentColor : .primary)
-            if showsCircle {
-                // The native vertical toolbar requires an image label; hosting
-                // a SwiftUI glass view here moves the item to the bottom bar.
-                Button("Circle intent", image: .circleJelly) { session.tool = .circle }
-                    .tint(CircleAIStyle.green)
-                    .accessibilityLabel("Circle intent")
-                    .accessibilityIdentifier("circleIntentTool")
-                    .accessibilityAddTraits(session.tool == .circle ? [.isSelected] : [])
+        if showsDrawingTools {
+            ToolbarItemGroup(placement: .bottomBar) {
+                Button("Pen", systemImage: "pencil.tip") { session.tool = .pen }
+                    .tint(session.tool == .pen ? .accentColor : .primary)
+                    .contextMenu { Toggle("Draw with finger", isOn: $session.allowsFingerDrawing) }
+                Button("Eraser", systemImage: "eraser") { session.tool = .eraser }
+                    .tint(session.tool == .eraser ? .accentColor : .primary)
+                if showsCircle {
+                    // The native vertical toolbar requires an image label; hosting
+                    // a SwiftUI glass view here moves the item to the bottom bar.
+                    Button("Circle intent", image: .circleJelly) { session.tool = .circle }
+                        .tint(CircleAIStyle.green)
+                        .accessibilityLabel("Circle intent")
+                        .accessibilityIdentifier("circleIntentTool")
+                        .accessibilityAddTraits(session.tool == .circle ? [.isSelected] : [])
+                }
             }
-        }
-        ToolbarItemGroup(placement: .bottomBar) {
-            Button("Sources", systemImage: "books.vertical", action: sources).accessibilityIdentifier("lectureSources")
-            if !combinesHistory {
-                Button("Undo", systemImage: "arrow.uturn.backward", action: session.undo).disabled(!session.canUndo)
-                Button("Redo", systemImage: "arrow.uturn.forward", action: session.redo).disabled(!session.canRedo)
+            ToolbarItemGroup(placement: .bottomBar) {
+                Button("Sources", systemImage: "books.vertical", action: sources).accessibilityIdentifier("lectureSources")
+                if !combinesHistory {
+                    Button("Undo", systemImage: "arrow.uturn.backward", action: session.undo).disabled(!session.canUndo)
+                    Button("Redo", systemImage: "arrow.uturn.forward", action: session.redo).disabled(!session.canRedo)
+                }
             }
         }
         if let switchPane {

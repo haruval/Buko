@@ -116,7 +116,7 @@ import SwiftData
         for stroke in rebuilt.inserted.strokes {
             for point in stroke.path {
                 let width = point.size.width * hypot(stroke.transform.a, stroke.transform.b)
-                precondition(abs(width - 2) < 0.01, "Personal letters must match the surrounding pen width")
+                precondition(abs(width - 1.62) < 0.01, "Personal autofill must use 81% of the surrounding pen width")
             }
         }
         note.drawingData = PKDrawing(strokes: original.strokes + [stroke(1110, 115)]).dataRepresentation()
@@ -129,7 +129,7 @@ import SwiftData
         precondition(!before.permitsAppending(AutofillDocument(note), outside: selection(110)), "Moving original ink must refuse a rebase")
         before.apply(to: note)
         try context.save()
-        print("Concurrent ink: append/reflow retention, changed-selection/erase/move rejection and matched pen weight passed")
+        print("Concurrent ink: append/reflow retention, changed-selection/erase/move rejection and lighter autofill pen weight passed")
 
         let proposal = AutofillProposal(requestID: UUID(), noteID: note.id, capturedAt: .now,
             selectionPolygon: selection(110), selectedText: "Heading:", sourceRevision: "test-revision",

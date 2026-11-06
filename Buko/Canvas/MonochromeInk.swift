@@ -11,7 +11,7 @@ typealias InkColor = NSColor
 /// stroke values, preserving their path, pressure, transform, mask, and random seed.
 nonisolated enum MonochromeInk {
     /// Base weight for new handwriting; PencilKit still controls pressure variation.
-    static let penWidth: CGFloat = 4
+    static let penWidth: CGFloat = 4.5
 
     static func matches(_ lhs: InkColor, _ rhs: InkColor) -> Bool {
         #if canImport(UIKit)
