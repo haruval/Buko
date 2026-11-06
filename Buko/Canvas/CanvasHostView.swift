@@ -68,9 +68,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
                       height: documentSize.height)
     }
     private var isOverview: Bool { PageGeometry.isOverview(scale: canvas.zoomScale, fitScale: pageFitScale) }
-    private var pinsPageTop: Bool {
-        traitCollection.userInterfaceIdiom == .pad && !isOverview && !isPinching && !isSnapping
-    }
     private var inkPresentation = InkPresentation()
     var canonicalDrawing: PKDrawing { inkPresentation.canonical(canvas.drawing) }
 
@@ -179,8 +176,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         // pull feedback during scrolling, so unchanged tools must be left alone.
         if tool != .eraser {
             if let current = canvas.tool as? PKInkingTool, current.inkType == .pen,
-               current.width == 2.5, MonochromeInk.matches(current.color, inkColor) { return }
-            canvas.tool = PKInkingTool(.pen, color: inkColor, width: 2.5)
+               current.width == MonochromeInk.penWidth, MonochromeInk.matches(current.color, inkColor) { return }
+            canvas.tool = PKInkingTool(.pen, color: inkColor, width: MonochromeInk.penWidth)
         } else if !(canvas.tool is PKEraserTool) {
             canvas.tool = PKEraserTool(.vector)
         }
@@ -389,26 +386,20 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         isUpdatingViewport = true
         defer { isUpdatingViewport = false }
         updateScrollInsets()
-        // Keep the first sheet against the top of the iPad window while writing.
-        // Bottom elasticity still drives page creation; overview stays centered.
-        if pinsPageTop, canvas.contentOffset.y < -canvas.contentInset.top {
-            canvas.contentOffset.y = -canvas.contentInset.top
-        }
         let scale = canvas.zoomScale
         let offset = canvas.contentOffset
         circleIntent.updateProjection(scale: scale, offset: offset)
 
         autofillPreview.project(from: canvas, style: presentationStyle, showsGrid: backdrop.showsGrid, document: documentSize)
         backdrop.update(scale: scale, offset: offset, document: documentSize)
-        let rawPull: CGFloat
+        let pull: CGFloat
         if isPullActive && !isPinching {
             let minimum = -canvas.contentInset.top
             let maximum = max(minimum, canvas.contentSize.height - bounds.height + canvas.contentInset.bottom)
-            rawPull = NotebookPaging.gesturePull(startOffset: dragStartOffset,
+            pull = NotebookPaging.gesturePull(startOffset: dragStartOffset,
                 translation: canvas.panGestureRecognizer.translation(in: self).y,
                 minimum: minimum, maximum: maximum, viewportHeight: bounds.height)
-        } else { rawPull = pullDistance }
-        let pull = pinsPageTop ? max(0, rawPull) : rawPull
+        } else { pull = pullDistance }
         let pullStrength = min(1.5, abs(pull) / NotebookPaging.pullThreshold)
         // Page creation retains its pull feedback; zoom and overview stay crisp.
         let blurStrength = previewPageCount != nil || isOverview || isTurningPage || isPinching || isSnapping ? 0 : pullStrength
@@ -533,7 +524,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
 
     func targetOffsetForRelease(_ proposed: inout CGPoint) {
         guard !isOverview, !isPinching, !isSnapping else { return }
-        if pinsPageTop { proposed.y = max(-canvas.contentInset.top, proposed.y) }
         if !canCreateFromPull { proposed.y = min(proposed.y, maximumScrollOffset) }
         if NotebookPaging.action(pull: lastPull, index: pageIndex, count: pageCount) != .none {
             // Do not let native momentum aim back at the old page during our turn.

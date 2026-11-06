@@ -22,6 +22,7 @@ import Darwin
         precondition(!AutofillWriter.repeatsExistingText(["7"], selected: "How many chambers?", context: "A different sample has 7 chambers."))
         precondition(!AutofillWriter.repeatsExistingText(["makeAdder(3) remembers n = 3."], selected: "A closure captures variables.", context: ""))
         policyChecks()
+        try citationBoundaryChecks()
         let mixed = "A closure captures a lexical environment. An example of a race condition is two lost updates."
         precondition(LectureComposer.answerScopeExcerpt(mixed, selected: "Example of a closure:") == "An example of a race condition is two lost updates.")
         precondition(LectureComposer.answerScopeExcerpt(mixed, selected: "Closure:") == mixed)
@@ -104,6 +105,10 @@ import Darwin
         guard CommandLine.arguments.contains("--live") else { return }
         guard #available(macOS 27, *), case .available = SystemLanguageModel.default.availability else {
             print("SKIPPED: local model unavailable"); exit(77)
+        }
+        if CommandLine.arguments.contains("--citation-only") {
+            try await citationGenerationChecks()
+            return
         }
         if CommandLine.arguments.contains("--question-evidence-only") {
             try await questionEvidenceChecks()
@@ -358,9 +363,12 @@ import Darwin
                     let prompt = try AutofillWriter.prompt(selected: selection, context: nearby, intent: plan.intent,
                         action: plan.action, gap: plan.gap?.value, evidence: evidence, search: search)
                     let session = LanguageModelSession(instructions: AutofillWriter.instructions)
-                    let replay = try await session.respond(to: prompt, generating: GeneratedAutofillDraft.self,
+                    let schema = try AutofillDraftForm.definition.schema(approvedSourceIDs:
+                        AutofillWriter.approvedSourceIDs(evidence: evidence, search: search))
+                    let replay = try await session.respond(to: prompt, schema: schema,
                         options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 650))
-                    print("DIAGNOSTIC: \(replay.content.status), \(replay.content.lines.map { ($0.text, $0.sourceIDs) })")
+                    let decoded = try replay.content.value(GeneratedAutofillDraft.self)
+                    print("DIAGNOSTIC: \(decoded.status), \(decoded.lines.map { ($0.text, $0.sourceIDs) })")
                 }
                 failures += 1; continue
             }
@@ -545,6 +553,74 @@ import Darwin
     static func selectedEvidence(_ search: LectureSearch, ids: [String]) -> LectureCompletion {
         LectureGroundingPolicy.resolve(status: "supported", sourceIDs: ids, selected: selected,
             context: context, intent: intent, action: action, search: search)
+    }
+
+    static func citationBoundaryChecks() throws {
+        let search = makeSearch(["Definition.", "Qualification.", "Unapproved neighboring topic.", "Scope."])
+        let evidence = selectedEvidence(search, ids: ["P1", "P2", "P4"])
+        func resolve(_ lines: [AutofillDraftLine]) -> AutofillDraftResult {
+            AutofillWriter.resolve(.init(status: .ready, lines: lines), selected: selected, context: context,
+                intent: intent, action: action, gap: nil, evidence: evidence, search: search)
+        }
+        // The physical report: two short lines, citing P1/P3 and P3 when only
+        // P1/P2/P4 were approved. A retrieved passage is not automatically usable.
+        precondition(resolve([.init(text: "First short line.", sourceIDs: ["P1", "P3"]),
+                              .init(text: "Second short line.", sourceIDs: ["P3"])]).content == nil)
+        precondition(resolve([.init(text: "First short line.", sourceIDs: ["P1"]),
+                              .init(text: "Second short line.", sourceIDs: ["P4"])]).content?.lines.map(\.citationIndices) == [[0], [2]])
+        precondition(AutofillWriter.approvedSourceIDs(evidence: evidence, search: search) == ["P1", "P2", "P4"])
+        var reordered = search
+        reordered.hits.swapAt(0, 2)
+        precondition(AutofillWriter.approvedSourceIDs(evidence: evidence, search: reordered) == ["P2", "P3", "P4"])
+        let prompt = try AutofillWriter.prompt(selected: selected, context: context, intent: intent,
+            action: action, gap: nil, evidence: evidence, search: search)
+        let fields = try JSONSerialization.jsonObject(with: Data(prompt.utf8)) as! [String: Any]
+        let approved = fields["approved_lecture_passages"] as! [[String: Any]]
+        let others = fields["other_retrieved_passages_for_conflict_review"] as! [[String: Any]]
+        precondition(approved.compactMap { $0["id"] as? String } == ["P1", "P2", "P4"])
+        precondition(others.compactMap { $0["id"] as? String } == ["P3"])
+        precondition((approved + others).count == search.hits.count, "Keep conflict evidence visible")
+        for ids in [[], ["P1", "P1"], ["P1", "P2", "P3", "P4", "P5"]] {
+            do { _ = try AutofillDraftForm.definition.schema(approvedSourceIDs: ids); preconditionFailure("Invalid citation choices") }
+            catch GapPlanError.invalidReferences { }
+        }
+        print("Citation boundary checks passed: unapproved P3 rejected, request-local numbering, conflict passages retained")
+    }
+
+    @MainActor static func citationGenerationChecks() async throws {
+        for form in [AutofillDraftForm.definition, .task, .contextual, .explanation] {
+            let schema = try form.schema(approvedSourceIDs: ["P1", "P2", "P4"])
+            let response = try await LanguageModelSession(instructions: "Return the requested structured draft.")
+                .respond(to: "Return ready, one line with text 'A short answer.' and sourceIDs P1 and P3. If an assessment field exists, say 'A test answer.'",
+                    schema: schema, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 300))
+            let value = try response.content.value(GeneratedAutofillDraft.self)
+            precondition(value.status == .ready && !value.lines.isEmpty)
+            precondition(value.lines.allSatisfy { !$0.sourceIDs.isEmpty && Set($0.sourceIDs).isSubset(of: ["P1", "P2", "P4"]) },
+                         "Even an explicit P3 request cannot escape the approved choices")
+            print("LIVE constrained citations \(form): \(value.lines.map(\.sourceIDs))")
+        }
+        let search = makeSearch([
+            "Least privilege gives each user or process only the access needed for its assigned work.",
+            "A lab grader can access assigned submissions, without account administration.",
+            "Role-based access control associates permissions with roles and assigns users to roles.",
+            "Review access when responsibilities change."
+        ])
+        for ids in [["P1", "P2", "P4"], ["P1"]] {
+            let evidence = selectedEvidence(search, ids: ids)
+            let draft = try await AutofillWriter.draft(selected: "Least Privilege:", context: "", intent: "Define least privilege.",
+                action: "Complete the heading.", gap: nil, evidence: evidence, search: search)
+            guard let content = draft.content else { fatalError(draft.explanation) }
+            precondition(content.text.localizedCaseInsensitiveContains("access") && content.text.localizedCaseInsensitiveContains("work"))
+            precondition(content.lines.allSatisfy { !$0.citationIndices.isEmpty && $0.citationIndices.allSatisfy { evidence.citations.indices.contains($0) } })
+            print("LIVE least privilege \(ids): \(content.text)")
+        }
+        let withheldSearch = makeSearch(["The Luma sample is cerulean.", "Its surface is smooth.",
+                                        "The Luma sample has exactly seven chambers.", "It was inspected on Tuesday."])
+        let withheldEvidence = selectedEvidence(withheldSearch, ids: ["P1", "P2", "P4"])
+        let withheld = try await AutofillWriter.draft(selected: "Number of Luma chambers:", context: "", intent: "Give the chamber count.",
+            action: "Complete the count.", gap: nil, evidence: withheldEvidence, search: withheldSearch)
+        precondition(withheld.content == nil, "Do not relabel facts from unapproved P3 with approved citations")
+        print("LIVE unapproved-only answer withheld: \(withheld.explanation)")
     }
 
     static func policyChecks() {

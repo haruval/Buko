@@ -239,7 +239,7 @@ nonisolated struct HandwritingInspectionSample: Sendable {
                     self.trimResidentProfiles(preferredID: self.stamps.first?.id)
                     self.status.revision += 1
                 }
-                self.status.message = self.notes.isEmpty ? "No active notes to sample" : "Ready · \(self.entries.count) notes prepared"
+                self.status.message = "\(pending.count) \(pending.count == 1 ? "note" : "notes") scanned for handwriting samples"
                 self.status.isRebuilding = false
             } catch {
                 guard token == self.generation, !Task.isCancelled else { return }

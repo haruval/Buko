@@ -20,59 +20,71 @@ nonisolated struct GeneratedAutofillDraft {
     var lines: [AutofillDraftLine]
 }
 
-@Generable
-nonisolated struct TaskAutofillDraftLine {
-    @Guide(description: "Only the missing note wording in the requested form. An example request needs a concrete source-backed instance and its relevant behavior, not a definition. After a bare concept's colon, use a continuation phrase without repeating that heading. Other tasks keep the subjects needed for a clear answer. No P IDs or bracketed citations: put those in sourceIDs instead. Preserve necessary qualifications. Keep each line under 400 characters.")
-    var text: String
-    @Guide(description: "One or more approved source IDs such as P1, without brackets. Required even though the text has no citation marker. These passages must support every claim in this line.", .maximumCount(4))
-    var sourceIDs: [String]
-}
+/// Retain each answer form's instructions while binding citation choices to
+/// the approved passages for this request, before the model writes its prose.
+nonisolated enum AutofillDraftForm {
+    case definition, task, contextual, explanation
 
-@Generable
-nonisolated struct GeneratedTaskAutofillDraft {
-    @Guide(description: "In at most 40 words, name the answer form requested by the selected text and identify the specific approved content that supplies it, or state what is missing. An example requires an actual instance in the evidence; a general definition cannot supply one. This assessment is internal, never note text.")
-    var assessment: String = ""
-    @Guide(description: "ready only if the evidence supplies the requested answer form and facts. For an example request with only a definition available, choose insufficientEvidence. Missing requested content means insufficientEvidence and empty lines, even if a passage was approved. Never invent a fact or example.")
-    var status: AutofillDraftStatus
-    @Guide(description: "Only the lines needed to complete the exact target. A complete definition can be ONE line; never add a related topic to reach two. Two lines only if both directly answer the target or preserve a necessary qualification. Up to six for an explicit list. Empty when evidence is insufficient.", .maximumCount(6))
-    var lines: [TaskAutofillDraftLine]
-}
+    var assessmentDescription: String? {
+        switch self {
+        case .definition: nil
+        case .task: "In at most 40 words, name the answer form requested by the selected text and identify the specific approved content that supplies it, or state what is missing. An example requires an actual instance in the evidence; a general definition cannot supply one. This assessment is internal, never note text."
+        case .contextual: "Briefly identify the new content in approved evidence that fills the inferred information need. A definition cannot substitute for a requested concrete instance. Do not answer from the student's notes."
+        case .explanation: "Briefly identify the approved evidence that fills the requested need. For a why question, identify the source-supported explanatory relationship, not merely a restatement that the property holds. Preserve every requested part. A definition cannot substitute for a concrete example. Do not answer from the student's notes."
+        }
+    }
 
-@Generable
-nonisolated struct ContextualAutofillLine {
-    @Guide(description: "The new note content that supplies the missing information, using only approved evidence. Write the ANSWER, never copy the selected question or unfinished clause. Do not repeat already-covered content. Preserve necessary qualifications. No headings, instructions, Markdown or P IDs in this text. ONE concise sentence per line, preferably under 240 characters and always under 400. Split longer supported answers across separately cited lines.")
-    var text: String
-    @Guide(description: "Approved P IDs supporting every claim in this line. At least one; no invented IDs.", .maximumCount(4))
-    var sourceIDs: [String]
-}
+    var statusDescription: String {
+        switch self {
+        case .definition: "ready only if the approved evidence supplies the requested fill; otherwise insufficientEvidence and empty lines. Never use outside knowledge to fill a missing fact."
+        case .task: "ready only if the evidence supplies the requested answer form and facts. For an example request with only a definition available, choose insufficientEvidence. Missing requested content means insufficientEvidence and empty lines, even if a passage was approved. Never invent a fact or example."
+        case .contextual: "ready only when the approved evidence supplies the missing contribution; otherwise insufficientEvidence with no lines."
+        case .explanation: "ready only when the approved evidence supplies the missing contribution; otherwise insufficientEvidence with no lines."
+        }
+    }
 
-@Generable
-nonisolated struct GeneratedContextualAutofillDraft {
-    @Guide(description: "Briefly identify the new content in approved evidence that fills the inferred information need. A definition cannot substitute for a requested concrete instance. Do not answer from the student's notes.")
-    var assessment: String
-    @Guide(description: "ready only when the approved evidence supplies the missing contribution; otherwise insufficientEvidence with no lines.")
-    var status: AutofillDraftStatus
-    @Guide(description: "Only the new answer content needed to fill the gap, with supporting source IDs. No repetition of the selected question or unfinished clause. One line if sufficient.", .maximumCount(6))
-    var lines: [ContextualAutofillLine]
-}
+    var linesDescription: String {
+        switch self {
+        case .definition: "Only the lines needed to complete the exact target. A complete definition can be ONE line; never add a related topic to reach two. Two lines only if both directly answer the target or preserve a necessary qualification. Up to six for an explicit list. Empty when evidence is insufficient."
+        case .task: "Only the lines needed to complete the exact target. A complete definition can be ONE line; never add a related topic to reach two. Two lines only if both directly answer the target or preserve a necessary qualification. Up to six for an explicit list. Empty when evidence is insufficient."
+        case .contextual: "Only the new answer content needed to fill the gap, with supporting source IDs. No repetition of the selected question or unfinished clause. One line if sufficient."
+        case .explanation: "Answer every requested part, with supporting source IDs. For why, write the explanatory relationship identified in the assessment rather than merely repeating the question's premise. Include both results when two are requested. No repetition of the selected question or unfinished clause. Use only the lines necessary for a complete answer and its qualifications."
+        }
+    }
 
-// Scope explanation wording without changing the ordinary draft contract.
-@Generable
-nonisolated struct ExplanationAutofillLine {
-    @Guide(description: "Choose the approved P IDs supplying this sentence BEFORE writing it. Use only approved_lecture_passages. Other retrieved passages are visible only to check for conflicts; their IDs cannot be cited.", .maximumCount(4))
-    var sourceIDs: [String]
-    @Guide(description: "One concise answer sentence supported entirely by those approved sources. Address the requested explanatory relationship or a remaining requested part. Preserve qualifications. No heading, Markdown, source IDs or restatement of the question. Always under 400 characters.")
-    var text: String
-}
+    var textDescription: String {
+        switch self {
+        case .definition: "Only the missing note wording. For an unfinished colon heading, begin with its definition or verb phrase (e.g. checks...), NEVER repeat the heading name as the subject. Otherwise answer the target normally. No P IDs or bracketed citations: put those in sourceIDs instead. Do not separately define a related concept or summarize neighboring topics. Preserve necessary qualifications. Keep each line under 400 characters."
+        case .task: "Only the missing note wording in the requested form. An example request needs a concrete source-backed instance and its relevant behavior, not a definition. After a bare concept's colon, use a continuation phrase without repeating that heading. Other tasks keep the subjects needed for a clear answer. No P IDs or bracketed citations: put those in sourceIDs instead. Preserve necessary qualifications. Keep each line under 400 characters."
+        case .contextual: "The new note content that supplies the missing information, using only approved evidence. Write the ANSWER, never copy the selected question or unfinished clause. Do not repeat already-covered content. Preserve necessary qualifications. No headings, instructions, Markdown or P IDs in this text. ONE concise sentence per line, preferably under 240 characters and always under 400. Split longer supported answers across separately cited lines."
+        case .explanation: "One concise answer sentence supported entirely by those approved sources. Address the requested explanatory relationship or a remaining requested part. Preserve qualifications. No heading, Markdown, source IDs or restatement of the question. Always under 400 characters."
+        }
+    }
 
-@Generable
-nonisolated struct GeneratedExplanationAutofillDraft {
-    @Guide(description: "Briefly identify the approved evidence that fills the requested need. For a why question, identify the source-supported explanatory relationship, not merely a restatement that the property holds. Preserve every requested part. A definition cannot substitute for a concrete example. Do not answer from the student's notes.")
-    var assessment: String
-    @Guide(description: "ready only when the approved evidence supplies the missing contribution; otherwise insufficientEvidence with no lines.")
-    var status: AutofillDraftStatus
-    @Guide(description: "Answer every requested part, with supporting source IDs. For why, write the explanatory relationship identified in the assessment rather than merely repeating the question's premise. Include both results when two are requested. No repetition of the selected question or unfinished clause. Use only the lines necessary for a complete answer and its qualifications.", .maximumCount(6))
-    var lines: [ExplanationAutofillLine]
+    func schema(approvedSourceIDs: [String]) throws -> GenerationSchema {
+        guard !approvedSourceIDs.isEmpty, approvedSourceIDs.count <= 4,
+              Set(approvedSourceIDs).count == approvedSourceIDs.count else {
+            throw GapPlanError.invalidReferences("draftSourceIDs")
+        }
+        let sourceIDs = DynamicGenerationSchema.Property(name: "sourceIDs",
+            description: "Choose the approved P IDs supporting every claim in this sentence BEFORE writing it. Other retrieved passages are only for conflict review and cannot be cited. Do not repeat an ID.",
+            schema: .init(arrayOf: .init(type: String.self, guides: [.anyOf(approvedSourceIDs)]),
+                          minimumElements: 1, maximumElements: approvedSourceIDs.count))
+        let line = DynamicGenerationSchema(name: "AutofillDraftLine", properties: [
+            sourceIDs,
+            .init(name: "text", description: textDescription, schema: .init(type: String.self))
+        ])
+        var properties: [DynamicGenerationSchema.Property] = []
+        if let assessmentDescription {
+            properties.append(.init(name: "assessment", description: assessmentDescription, schema: .init(type: String.self)))
+        }
+        properties += [
+            .init(name: "status", description: statusDescription, schema: .init(type: AutofillDraftStatus.self)),
+            .init(name: "lines", description: linesDescription,
+                  schema: .init(arrayOf: line, maximumElements: 6))
+        ]
+        return try GenerationSchema(root: .init(name: "GeneratedAutofillDraft", properties: properties), dependencies: [])
+    }
 }
 
 nonisolated struct AutofillDraftResult: Sendable {
@@ -132,7 +144,10 @@ enum AutofillWriter {
     replaces only the claim it corrects, not unrelated facts.
     All retrieved passages are included so conflicting evidence stays visible.
     approved_source_ids identify the passages selected by the preceding stage.
-    Cite only those IDs. If they cannot support the entire requested fill, or
+    Choose those IDs before writing each line, and use only
+    approved_lecture_passages for answer facts. Other retrieved passages are
+    visible only for conflict review and cannot be cited or supply an answer.
+    If approved passages cannot support the entire requested fill, or
     other passages expose unresolved disagreement, return insufficientEvidence
     with no lines. Do not calculate matrix results; those use a local calculator.
     Return the note wording in each line's text field, and its supporting P IDs
@@ -229,11 +244,12 @@ enum AutofillWriter {
             let comparison = gap?.operation == .compare
             let explanatory = comparison || (contextual && (GapHeadingRequest.isExplanationQuestion(selected)
                 || search.gapPlan?.clarification != nil))
+            let form: AutofillDraftForm = explanatory ? .explanation : contextual ? .contextual : taskForm ? .task : .definition
+            let approvedIDs = approvedSourceIDs(evidence: evidence, search: search)
+            let schema = try form.schema(approvedSourceIDs: approvedIDs)
             let outputBudget = taskForm ? 750 : 650
             let instructionsCount = try await model.tokenCount(for: Instructions(instructions))
-            let schemaCount = try await model.tokenCount(for: explanatory ? GeneratedExplanationAutofillDraft.generationSchema
-                : contextual ? GeneratedContextualAutofillDraft.generationSchema
-                : taskForm ? GeneratedTaskAutofillDraft.generationSchema : GeneratedAutofillDraft.generationSchema)
+            let schemaCount = try await model.tokenCount(for: schema)
             let inputCount = try await model.tokenCount(for: Prompt(request))
             try Task.checkCancellation()
             // Keep all captured evidence. Never truncate potentially corrective hits.
@@ -243,32 +259,10 @@ enum AutofillWriter {
             let session = LanguageModelSession(model: model, instructions: instructions)
             await observer?(.began(id: "draft", title: "Write the autofill", instructions: instructions, input: request))
             try Task.checkCancellation()
-            let generated: GeneratedAutofillDraft
-            let assessment: String
-            if explanatory {
-                let response = try await session.respond(to: request, generating: GeneratedExplanationAutofillDraft.self,
-                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
-                assessment = response.content.assessment
-                generated = GeneratedAutofillDraft(status: response.content.status,
-                    lines: response.content.lines.map { AutofillDraftLine(text: $0.text, sourceIDs: $0.sourceIDs) })
-            } else if contextual {
-                let response = try await session.respond(to: request, generating: GeneratedContextualAutofillDraft.self,
-                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
-                assessment = response.content.assessment
-                generated = GeneratedAutofillDraft(status: response.content.status,
-                    lines: response.content.lines.map { AutofillDraftLine(text: $0.text, sourceIDs: $0.sourceIDs) })
-            } else if taskForm {
-                let response = try await session.respond(to: request, generating: GeneratedTaskAutofillDraft.self,
-                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
-                assessment = response.content.assessment
-                generated = GeneratedAutofillDraft(status: response.content.status,
-                    lines: response.content.lines.map { AutofillDraftLine(text: $0.text, sourceIDs: $0.sourceIDs) })
-            } else {
-                let response = try await session.respond(to: request, generating: GeneratedAutofillDraft.self,
-                    options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
-                generated = response.content
-                assessment = ""
-            }
+            let response = try await session.respond(to: request, schema: schema,
+                options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: outputBudget))
+            let generated = try response.content.value(GeneratedAutofillDraft.self)
+            let assessment = form == .definition ? "" : try response.content.value(String.self, forProperty: "assessment")
             try Task.checkCancellation()
             let resolved = resolve(generated, selected: selected, context: context, intent: intent,
                            action: action, gap: gap, evidence: evidence, search: search)
@@ -276,7 +270,8 @@ enum AutofillWriter {
                 "Line \(index + 1): \(line.text.count) characters; source IDs: \(line.sourceIDs.joined(separator: ", ")); embedded newline: \(line.text.contains("\n") || line.text.contains("\r"))"
             }.joined(separator: "\n") : ""
             await observer?(.completed(id: "draft", summary: (assessment.isEmpty ? "" : assessment + "\n")
-                + resolved.explanation + (rejectedShape.isEmpty ? "" : "\n" + rejectedShape)))
+                + resolved.explanation + (rejectedShape.isEmpty ? "" : "\nApproved source IDs: "
+                    + approvedIDs.joined(separator: ", ") + "\n" + rejectedShape)))
             return resolved
         } catch is CancellationError { throw CancellationError() }
         catch {
@@ -406,6 +401,12 @@ enum AutofillWriter {
         return remainder
     }
 
+    static func approvedSourceIDs(evidence: LectureCompletion, search: LectureSearch) -> [String] {
+        search.hits.enumerated().compactMap { index, hit in
+            evidence.citations.contains(where: { $0.passage.id == hit.id }) ? "P\(index + 1)" : nil
+        }
+    }
+
     static func prompt(selected: String, context: String, intent: String, action: String,
                        gap: MissingInformationPlan?, evidence: LectureCompletion, search: LectureSearch) throws -> String {
         // Scope the writer in both retrieval modes without changing planning or
@@ -422,9 +423,7 @@ enum AutofillWriter {
             "fallible_planning_hints": ["intent": intent, "action": action,
                                        "information_needs": gap?.informationNeeds ?? []] as [String: Any],
             "target_quotes": targetQuotes, "already_covered_selected_text": coveredQuotes,
-            "approved_source_ids": search.hits.enumerated().compactMap { index, hit in
-                evidence.citations.contains(where: { $0.passage.id == hit.id }) ? "P\(index + 1)" : nil
-            },
+            "approved_source_ids": approvedSourceIDs(evidence: evidence, search: search),
             "lecture_passages": search.hits.enumerated().map { [
                 "id": "P\($0.offset + 1)", "title": $0.element.passage.title,
                 "physical_page": $0.element.passage.page, "text": $0.element.passage.text
@@ -434,9 +433,7 @@ enum AutofillWriter {
             fields["completion_goal"] = goal
             fields["requested_subject"] = gap?.subjects?.map(\.quote).joined(separator: " ")
         }
-        if gap?.operation == .compare || (gap?.completionGoal != nil && (GapHeadingRequest.isExplanationQuestion(selected)
-            || search.gapPlan?.clarification != nil)),
-           let passages = fields.removeValue(forKey: "lecture_passages") as? [[String: Any]],
+        if let passages = fields.removeValue(forKey: "lecture_passages") as? [[String: Any]],
            let approved = fields["approved_source_ids"] as? [String] {
             fields["approved_lecture_passages"] = passages.filter { approved.contains($0["id"] as? String ?? "") }
             fields["other_retrieved_passages_for_conflict_review"] = passages.filter { !approved.contains($0["id"] as? String ?? "") }

@@ -378,6 +378,7 @@ struct ContentView: View {
                         Button { secondFocused = second } label: {
                             Text(note?.title ?? (second ? secondContent?.title : primaryPDF?.title) ?? "")
                                 .font(.subheadline.weight(.semibold)).lineLimit(1)
+                                .foregroundStyle(.white)
                         }.buttonStyle(.glass)
                             .accessibilityIdentifier(second ? "secondPaneTitle" : "firstPaneTitle")
                         Button("Full screen", systemImage: "arrow.up.left.and.arrow.down.right") { closeSplit(keepingSecond: second) }

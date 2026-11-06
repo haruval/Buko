@@ -98,7 +98,7 @@ struct SettingsPanel: View {
                             .font(.subheadline)
                             .padding(.horizontal, 8).frame(minHeight: 44)
                             .accessibilityIdentifier("showGestureTestTools")
-                        Text("Show Circle in the pen toolbar for one-finger or simulator trackpad selection. Two-finger circles remain available with Pen.")
+                        Text("Show circle tool in the toolbar")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Detailed preview", isOn: $detailedPreview)
                             .font(.subheadline)

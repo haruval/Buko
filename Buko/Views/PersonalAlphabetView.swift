@@ -154,7 +154,7 @@ private final class AlphabetWritingView: UIView {
         if ProcessInfo.processInfo.arguments.contains("--alphabetFingerTesting") { canvas.drawingPolicy = .anyInput }
         #endif
         canvas.isScrollEnabled = false
-        canvas.tool = PKInkingTool(.pen, color: .black, width: 2.5)
+        canvas.tool = PKInkingTool(.pen, color: .black, width: MonochromeInk.penWidth)
         addSubview(canvas)
     }
     required init?(coder: NSCoder) { fatalError("Use init(letter:)") }

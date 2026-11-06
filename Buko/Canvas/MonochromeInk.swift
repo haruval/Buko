@@ -10,6 +10,9 @@ typealias InkColor = NSColor
 /// Saved ink is always black. Presentation is an explicit recoloring of the same
 /// stroke values, preserving their path, pressure, transform, mask, and random seed.
 nonisolated enum MonochromeInk {
+    /// Base weight for new handwriting; PencilKit still controls pressure variation.
+    static let penWidth: CGFloat = 4
+
     static func matches(_ lhs: InkColor, _ rhs: InkColor) -> Bool {
         #if canImport(UIKit)
         var left = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
