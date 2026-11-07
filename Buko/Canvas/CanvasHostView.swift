@@ -246,34 +246,46 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         updateViewport()
     }
 
-    private func applyAutofill(from before: AutofillDocument, to after: AutofillDocument) throws {
+    private func applyAutofill(from before: AutofillDocument, to after: AutofillDocument,
+                               restoring displayed: PKDrawing? = nil) throws {
         guard let persistAutofill else { throw AutofillEditError.unavailable }
         // Decode before persisting; a failed decode cannot leave model and canvas apart.
-        let drawing = try AutofillDocument.drawing(after.ink)
+        let saved = try displayed ?? AutofillDocument.drawing(after.ink)
+        let previousDisplay = canvas.drawing
         try persistAutofill(before, after)
+        let drawing: PKDrawing
+        if let displayed {
+            // PencilKit's earlier stroke actions refer to the displayed stroke IDs.
+            // Restore those IDs even if the user changed appearance since the edit.
+            drawing = displayed.strokes.allSatisfy { MonochromeInk.matches($0.ink.color, inkColor) }
+                ? displayed : MonochromeInk.recolor(displayed, to: inkColor)
+        } else {
+            drawing = inkPresentation.refresh(saved, to: inkColor)
+        }
         let manager = canvas.undoManager
         let registering = manager?.isUndoRegistrationEnabled == true
         isUpdatingInk = true
         if registering { manager?.disableUndoRegistration() }
-        canvas.drawing = inkPresentation.refresh(drawing, to: inkColor)
+        canvas.drawing = drawing
         if registering { manager?.enableUndoRegistration() }
         isUpdatingInk = false
         pageCount = after.pageCount
         pageIndex = min(pageIndex, max(0, pageCount - 1))
         showAutofillPreview(nil)
         syncPageState()
-        registerAutofillUndo(from: after, to: before)
+        registerAutofillUndo(from: after, to: before, restoring: previousDisplay)
         onUndoStateChange?()
     }
 
-    private func registerAutofillUndo(from current: AutofillDocument, to previous: AutofillDocument) {
+    private func registerAutofillUndo(from current: AutofillDocument, to previous: AutofillDocument,
+                                      restoring displayed: PKDrawing) {
         canvas.undoManager?.registerUndo(withTarget: self) { host in
             host.circleIntent.cancel()
-            do { try host.applyAutofill(from: current, to: previous) }
+            do { try host.applyAutofill(from: current, to: previous, restoring: displayed) }
             catch {
                 // A failed save leaves both editor and store unchanged. Register the
                 // same direction on the opposite stack so the operation is retryable.
-                host.registerAutofillUndo(from: current, to: previous)
+                host.registerAutofillUndo(from: current, to: previous, restoring: displayed)
                 UIAccessibility.post(notification: .announcement, argument: error.localizedDescription)
             }
         }

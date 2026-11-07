@@ -190,6 +190,9 @@ import Darwin
             guard let content = result.content else { fatalError(result.explanation) }
             precondition(!content.text.isEmpty && content.lines.allSatisfy { !$0.citationIndices.isEmpty })
             precondition(content.text.localizedCaseInsensitiveContains("call"), "Inspect dynamic-scope draft")
+            let cited = content.lines.flatMap(\.citationIndices).map { evidence.citations[$0].quote }
+            precondition(cited.contains { $0.contains("by searching active function calls") },
+                         "The definition must cite the lecture passage that explains dynamic scope")
             print("LIVE \(mode.rawValue):\n\(content.text)")
             print("SOURCES: \(evidence.citations.map { $0.passage.title + " p." + String($0.passage.page) })")
         }
@@ -315,6 +318,15 @@ import Darwin
                 action: plan.action, gap: gap.value, evidence: evidence, search: search)
             guard let content = draft.content else { fatalError(draft.explanation) }
             precondition(content.text.localizedCaseInsensitiveContains("grammar"))
+            if selection.hasSuffix("?") {
+                guard let support = evidence.requestedContent,
+                      let source = evidence.citations.first(where: { $0.passage.id == support.passageID }) else {
+                    fatalError("Expected cited source text for the parsing question")
+                }
+                precondition(source.passage.text.contains(support.excerpt))
+                precondition(support.excerpt.contains("checks the token sequence against a grammar"))
+                precondition(content.lines.allSatisfy { !$0.citationIndices.isEmpty })
+            }
             print("DEFAULT PIPELINE: \(plan.intent)\n\(content.text)")
         }
         print("Default missing-information pipeline passed with the old preference disabled, including freeform model planning.")
@@ -617,10 +629,16 @@ import Darwin
         let withheldSearch = makeSearch(["The Luma sample is cerulean.", "Its surface is smooth.",
                                         "The Luma sample has exactly seven chambers.", "It was inspected on Tuesday."])
         let withheldEvidence = selectedEvidence(withheldSearch, ids: ["P1", "P2", "P4"])
-        let withheld = try await AutofillWriter.draft(selected: "Number of Luma chambers:", context: "", intent: "Give the chamber count.",
-            action: "Complete the count.", gap: nil, evidence: withheldEvidence, search: withheldSearch)
-        precondition(withheld.content == nil, "Do not relabel facts from unapproved P3 with approved citations")
-        print("LIVE unapproved-only answer withheld: \(withheld.explanation)")
+        let paired = "Luma surface: smooth to the touch.\nNumber of Luma chambers:"
+        let plan = try CirclePlanner.explicitPlan(in: GapTranscript(selected: paired, context: ""), mode: .structuredGap)
+        guard let gap = plan?.gap?.value else { fatalError("Expected an explicit heading") }
+        let cases: [(String, MissingInformationPlan?)] = [("Number of Luma chambers:", nil), (paired, gap)]
+        for (selection, plan) in cases {
+            let withheld = try await AutofillWriter.draft(selected: selection, context: "", intent: "Give the chamber count.",
+                action: "Complete the count.", gap: plan, evidence: withheldEvidence, search: withheldSearch)
+            precondition(withheld.content == nil, "Do not relabel facts from unapproved P3 with approved citations")
+            print("LIVE unapproved-only answer withheld: \(withheld.explanation)")
+        }
     }
 
     static func policyChecks() {
@@ -688,6 +706,8 @@ import Darwin
                 intent: "Compare lexical analysis and parsing.", action: "Add two bullets.", gap: nil,
                 evidence: evidence, search: search)
             let fields = try! JSONSerialization.jsonObject(with: Data(scoped.utf8)) as! [String: Any]
+            precondition(fields["selected_handwriting"] as? String == "Parsing:")
+            precondition(fields["original_circled_handwriting_for_context"] as? String == selection)
             precondition(fields["target_quotes"] as? [String] == ["Parsing:"])
             precondition(fields["already_covered_selected_text"] as? [String] == ["Lexical analysis: groups characters into tokens."])
             precondition(scoped.contains(search.hits[0].passage.text) && scoped.contains(search.hits[1].passage.text))
@@ -696,6 +716,8 @@ import Darwin
             intent: "Compare", action: "Compare", gap: nil, evidence: evidence, search: search)
         let comparisonFields = try! JSONSerialization.jsonObject(with: Data(comparison.utf8)) as! [String: Any]
         precondition(comparisonFields["target_quotes"] as? [String] == ["Lexical analysis vs parsing:"])
+        precondition(comparisonFields["selected_handwriting"] as? String == "Lexical analysis vs parsing:")
+        precondition(comparisonFields["original_circled_handwriting_for_context"] == nil)
         print("Draft policy checks passed: typed text, provenance, malformed/empty/refused output, source changes and full evidence.")
     }
 }
