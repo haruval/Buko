@@ -266,33 +266,46 @@ struct AutofillPreviewCard: View {
         }.accessibilityElement(children: .contain).accessibilityIdentifier("autofillSources")
     }
 
-    private func source(_ passage: LecturePassage, quote: String, prefix: String = "") -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                sourceTask?.cancel(); sourceError = nil
-                sourceTask = Task {
-                    guard let noteID = state.noteID else { return }
-                    do {
-                        let url = try await LectureLibrary.shared.pdfURL(noteID: noteID, documentID: passage.documentID)
-                        try Task.checkCancellation()
-                        sourcePreview = LecturePDFDestination(url: url, page: passage.page, quote: quote, title: passage.title)
-                    } catch is CancellationError { }
-                    catch { sourceError = error.localizedDescription }
+    @ViewBuilder private func source(_ passage: LecturePassage, quote: String, prefix: String = "") -> some View {
+        let ocrNotice = Text("Scanned page · OCR text").font(.caption2).foregroundStyle(.secondary)
+        let link = Button {
+            sourceTask?.cancel(); sourceError = nil
+            sourceTask = Task {
+                guard let noteID = state.noteID else { return }
+                do {
+                    let url = try await LectureLibrary.shared.pdfURL(noteID: noteID, documentID: passage.documentID)
+                    try Task.checkCancellation()
+                    sourcePreview = LecturePDFDestination(url: url, page: passage.page, quote: quote, title: passage.title)
+                } catch is CancellationError { }
+                catch { sourceError = error.localizedDescription }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("\(prefix)\(passage.title) – p. \(passage.page)", systemImage: "doc.text")
+                    .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                if let noteID = state.noteID {
+                    LectureSourceThumbnail(noteID: noteID, passage: passage, quote: quote)
                 }
-            } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("\(prefix)\(passage.title) – p. \(passage.page)", systemImage: "doc.text")
-                        .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    if let noteID = state.noteID {
-                        LectureSourceThumbnail(noteID: noteID, passage: passage, quote: quote)
-                    }
-                }
-            }.buttonStyle(.plain).accessibilityIdentifier("autofillSourceLink")
-            Text(quote).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("autofillSourcePassage")
-            if passage.usedOCR { Text("Scanned page · OCR text").font(.caption2).foregroundStyle(.secondary) }
-        }.modifier(PreviewReadingCard())
+                if !detailed && passage.usedOCR { ocrNotice }
+            }
+            .padding(detailed ? 0 : 12)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("autofillSourceLink")
+
+        if detailed {
+            VStack(alignment: .leading, spacing: 6) {
+                link
+                Text(quote).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("autofillSourcePassage")
+                if passage.usedOCR { ocrNotice }
+            }.modifier(PreviewReadingCard())
+        } else {
+            link.bukoGlass(cornerRadius: 16, interactive: true)
+                .accessibilityValue(Text(quote))
+        }
     }
 }
 
