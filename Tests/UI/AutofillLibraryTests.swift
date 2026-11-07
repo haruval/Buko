@@ -7,7 +7,6 @@ final class AutofillLibraryTests: XCTestCase {
         let app = XCUIApplication(); app.launch()
         XCTAssertTrue(app.buttons["openSettings"].waitForExistence(timeout: 20))
         if app.buttons["showNotes"].exists { app.buttons["showNotes"].tap() }
-        XCTAssertFalse(app.buttons["openBulletinBoard"].exists)
         app.buttons["newNote"].tap()
         Thread.sleep(forTimeInterval: 1)
         app.buttons["newNote"].tap()
@@ -101,11 +100,9 @@ final class AutofillLibraryTests: XCTestCase {
         for word in expectedWords { XCTAssertTrue(recognized.contains(word), recognized) }
         XCTAssertTrue(stages.contains("binding") || stages.contains("intent"), "Must enter the autofill planner: \(stages)")
         XCTAssertFalse(stages.contains("circleAction"))
-        XCTAssertFalse(stages.contains("bulletin"))
         if requireRetrieval { XCTAssertTrue(stages.contains("retrieval"), stages) }
         if argument == "--circle-parallel" { XCTAssertTrue(recognized.contains("\n"), recognized) }
         XCTAssertFalse(app.buttons["acceptAutofill"].exists, "No attached evidence must not produce an insertion")
-        XCTAssertFalse(app.otherElements["bulletinPreviewContent"].exists)
         XCTAssertTrue(app.staticTexts["circleFixtureInkIntact"].exists)
         screenshot(app, "Circle enters autofill directly — " + argument)
         app.buttons["Dismiss autofill"].tap()

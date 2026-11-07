@@ -24,7 +24,7 @@ struct LectureSourceCard: View {
     let busy: Bool
     let open: () -> Void
     let delete: () -> Void
-    var split: (() -> Void)? = nil
+    var openBeside: (() -> Void)? = nil
     @State private var thumbnail: UIImage?
     @State private var thumbnailFailed = false
 
@@ -51,10 +51,10 @@ struct LectureSourceCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(document.title), \(document.pageCount) pages")
-            .accessibilityHint("Opens the PDF. Drag beside a note to split the workspace.")
+            .accessibilityHint("Opens the PDF.")
             .accessibilityIdentifier("lectureDocument")
             .contextMenu {
-                if let split { Button("Open beside note", systemImage: "rectangle.split.2x1", action: split) }
+                if let openBeside { Button("Open beside note", systemImage: "rectangle.split.2x1", action: openBeside) }
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete).disabled(busy)
             }
             if let pages = document.textDisagreementPages, !pages.isEmpty {

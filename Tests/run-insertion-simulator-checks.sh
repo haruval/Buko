@@ -56,16 +56,22 @@ extension HandwritingPreparation {
 with (root / 'Buko/AI/AutofillCanvasPreview.swift').open('a') as f:
     f.write('''
 extension AutofillCanvasPreview {
+    var validationAcceptedOpacity: Float? {
+        guard acceptedFade != nil else { return nil }
+        return layer.presentation()?.opacity
+    }
     var validationMotion: (visible: Bool, positions: [CGFloat], velocities: [CGFloat], targets: [CGFloat], alpha: CGFloat) {
         let now = CACurrentMediaTime()
         return (!isHidden, bands.map { $0.spring.sample(at: now).position },
-                bands.map { $0.spring.sample(at: now).velocity }, bands.map { $0.spring.target }, insertedCanvas.alpha)
+                bands.map { $0.spring.sample(at: now).velocity }, bands.map { $0.spring.target },
+                CGFloat(proposedInk.layer.presentation()?.opacity ?? proposedInk.layer.opacity))
     }
 }
 ''')
 with (root / 'Buko/Canvas/CanvasHostView.swift').open('a') as f:
     f.write('''
 extension CanvasHostView {
+    var validationAcceptedOpacity: Float? { autofillPreview.validationAcceptedOpacity }
     var validationMotion: (visible: Bool, positions: [CGFloat], velocities: [CGFloat], targets: [CGFloat], alpha: CGFloat) {
         autofillPreview.validationMotion
     }

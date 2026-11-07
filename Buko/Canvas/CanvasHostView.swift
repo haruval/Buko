@@ -147,6 +147,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
     required init?(coder: NSCoder) { fatalError("Use init(pagePull:)") }
 
     func load(_ drawing: PKDrawing, savedPageCount: Int, pageIndex: Int) {
+        autofillPreview.finishAcceptedFade()
         canvas.drawing = MonochromeInk.recolor(drawing, to: inkColor)
         canvas.undoManager?.removeAllActions()
         pageCount = max(1, savedPageCount)
@@ -219,6 +220,12 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         if !circleIntent.hasPreview { showAutofillPreview(nil) }
     }
 
+    func writingBegan() {
+        autofillPreview.finishAcceptedFade()
+        circleIntent.cancelTracing()
+        circleIntent.insertion.writingBegan()
+    }
+
     private func showAutofillPreview(_ result: AutofillLayout.Result?, animatedReturn: Bool = false) {
         if let result {
             // Retain any temporary pages until moving ink has finished crossing
@@ -271,6 +278,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
         isUpdatingInk = false
         pageCount = after.pageCount
         pageIndex = min(pageIndex, max(0, pageCount - 1))
+        if displayed == nil { autofillPreview.fadeAcceptedInk() }
+        else { autofillPreview.finishAcceptedFade() }
         showAutofillPreview(nil)
         syncPageState()
         registerAutofillUndo(from: after, to: before, restoring: previousDisplay)
@@ -825,6 +834,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate, UIPencilInterac
 
 
     func stopAnimations() {
+        autofillPreview.finishAcceptedFade()
         cancelCircleInteraction()
         autofillPreview.settle()
         wheelEnd?.cancel()

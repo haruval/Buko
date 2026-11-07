@@ -35,8 +35,6 @@ struct ContentView: View {
     @State private var secondSession = CanvasSession()
     @State private var secondRevision = UUID()
     @State private var secondFocused = false
-    @State private var sourceDragging = false
-    @State private var dropSide: Int?
     @State private var sourceOpenTask: Task<Void, Never>?
     private var activeNote: Note? { secondFocused ? (secondContent?.note ?? selectedNote) : selectedNote }
     private var activeSession: CanvasSession { secondFocused && secondContent?.note != nil ? secondSession : session }
@@ -265,7 +263,6 @@ struct ContentView: View {
             let firstFrame = showsBothPanes ? editorLayout.first : editorFrame
             let secondFrame = showsBothPanes ? editorLayout.second : editorFrame
             let panelFrame = (showsBothPanes ? (secondFocused ? secondFrame : firstFrame) : editorFrame).intersection(controlsFrame)
-            let dropLayout = editorLayout
             ZStack(alignment: .topLeading) {
                 Color("CanvasBackground").ignoresSafeArea()
                 ArrangementView {
@@ -287,8 +284,6 @@ struct ContentView: View {
                 .frame(width: editorFrame.width, height: editorFrame.height)
                 .clipped().contentShape(.rect)
                 .offset(x: editorFrame.minX, y: editorFrame.minY)
-                .onDrop(of: [.bukoNote, .bukoSource], delegate: WorkspaceDropDelegate(
-                    geometry: dropLayout, side: $dropSide, note: openDroppedNote, source: openDroppedSource))
 
                 if secondContent != nil && editorLayout.canSplit {
                     WorkspaceDivider(vertical: editorLayout.vertical,
@@ -297,14 +292,6 @@ struct ContentView: View {
                                      keepSecond: { closeSplit(keepingSecond: true) })
                         .frame(width: editorLayout.divider.width, height: editorLayout.divider.height)
                         .position(x: editorFrame.minX + editorLayout.divider.midX, y: editorFrame.minY + editorLayout.divider.midY)
-                }
-                if let dropSide {
-                    WorkspaceDropIndicator(title: dropLayout.vertical ? "Open above" : "Open on left", targeted: dropSide == 0)
-                        .frame(width: dropLayout.first.width, height: dropLayout.first.height)
-                        .position(x: editorFrame.minX + dropLayout.first.midX, y: editorFrame.minY + dropLayout.first.midY)
-                    WorkspaceDropIndicator(title: dropLayout.vertical ? "Open below" : "Open on right", targeted: dropSide == 1)
-                        .frame(width: dropLayout.second.width, height: dropLayout.second.height)
-                        .position(x: editorFrame.minX + dropLayout.second.midX, y: editorFrame.minY + dropLayout.second.midY)
                 }
                 if !nativeTools, secondContent != nil {
                     ToolShelf(session: activeSession) { showSources(activeNote) }
@@ -327,16 +314,14 @@ struct ContentView: View {
                     .position(x: controlsFrame.midX, y: controlsFrame.midY)
                 if let note = lectureSourceNote {
                     LectureSourcesView(noteID: note.id,
-                        close: { showSources(nil) }, dragging: { sourceDragging = $0 },
-                        split: { openDroppedSource($0, 1) })
+                        close: { showSources(nil) },
+                        openBeside: { openSourceBeside($0, noteID: note.id) })
                         .frame(width: min(560, max(220, panelFrame.width - 24)),
                                height: max(160, panelFrame.height - 32))
                         .clipShape(.rect(cornerRadius: 32))
                         .shadow(color: .black.opacity(0.12), radius: 24, y: 8)
                         .position(x: panelFrame.midX, y: panelFrame.midY)
                         .transition(reduceMotion ? .opacity : .scale(scale: 0.15, anchor: .trailing).combined(with: .opacity))
-                        .opacity(sourceDragging ? 0.08 : 1)
-                        .allowsHitTesting(!sourceDragging)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("sourcesPanel")
                 }
@@ -611,7 +596,7 @@ struct ContentView: View {
                     organize { try LibraryOrganization.move(note, to: folder, in: modelContext) }
                 }, renameFolder: { folder, title in
                     _ = organize { try LibraryOrganization.rename(folder, to: title, in: modelContext) }
-                }, openBeside: { note in openDroppedNote(NoteDragReference(id: note.id), 1) }, ungroup: { folder in
+                }, openBeside: openNoteBeside, ungroup: { folder in
                     _ = organize { try LibraryOrganization.ungroup(folder, in: modelContext) }
                 }
             )
@@ -688,48 +673,35 @@ struct ContentView: View {
         secondSession = CanvasSession()
     }
 
-    private func openDroppedNote(_ reference: NoteDragReference, _ side: Int) {
-        guard let note = notes.first(where: { $0.id == reference.id }), flushDrawing() else { return }
+    private func openNoteBeside(_ note: Note) {
+        guard note.deletedAt == nil, flushDrawing() else { return }
         guard (primaryPDF != nil || note.id != selectedNote?.id), note.id != secondContent?.note?.id else {
             secondFocused = note.id == secondContent?.note?.id
-            sidebarVisible = false; dropSide = nil; return
+            sidebarVisible = false; return
         }
         guard performEdit(notes: [note], { try NotebookEdits.prepare(note) }) else { return }
-        place(.note(note), side: side)
+        openSecondPane(.note(note))
     }
 
-    private func openDroppedSource(_ reference: SourceDragReference, _ side: Int) {
+    private func openSourceBeside(_ document: LectureDocument, noteID: UUID) {
         sourceOpenTask?.cancel()
         sourceOpenTask = Task { @MainActor in
             do {
-                let documents = try await LectureLibrary.shared.documents(noteID: reference.noteID)
-                guard let document = documents.first(where: { $0.id == reference.documentID }) else { return }
-                let url = try await LectureLibrary.shared.pdfURL(noteID: reference.noteID, documentID: reference.documentID)
+                let url = try await LectureLibrary.shared.pdfURL(noteID: noteID, documentID: document.id)
                 try Task.checkCancellation()
                 guard flushDrawing() else { return }
-                place(.pdf(LecturePDFDestination(url: url, page: 1, title: document.title)), side: side)
+                openSecondPane(.pdf(LecturePDFDestination(url: url, page: 1, title: document.title)))
             } catch is CancellationError { }
             catch { persistenceError = error.localizedDescription }
         }
     }
 
-    private func place(_ content: WorkspaceContent, side: Int) {
-        guard flushDrawing() else { return }
-        if side == 0 {
-            if secondContent == nil {
-                secondContent = primaryPDF.map(WorkspaceContent.pdf) ?? selectedNote.map(WorkspaceContent.note)
-                resetSecondCanvas()
-            }
-            resetCanvas()
-            switch content {
-            case .note(let note): selection = note; primaryPDF = nil
-            case .pdf(let pdf): primaryPDF = pdf
-            }
-            secondFocused = false
-        } else {
-            resetSecondCanvas(); secondContent = content; secondFocused = true
-        }
-        sidebarVisible = false; showSources(nil); sourceDragging = false; dropSide = nil
+    private func openSecondPane(_ content: WorkspaceContent) {
+        resetSecondCanvas()
+        secondContent = content
+        secondFocused = true
+        sidebarVisible = false
+        showSources(nil)
     }
 
     private func expandPane(second: Bool) {
@@ -904,5 +876,5 @@ struct ContentView: View {
 
 #Preview("Blank canvas") {
     ContentView()
-        .modelContainer(for: [Note.self, TrashedPage.self, NoteFolder.self, BulletinItem.self], inMemory: true)
+        .modelContainer(for: [Note.self, TrashedPage.self, NoteFolder.self], inMemory: true)
 }

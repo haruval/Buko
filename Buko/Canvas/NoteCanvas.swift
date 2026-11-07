@@ -88,8 +88,7 @@ struct NoteCanvas: UIViewRepresentable {
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
             onWritingBegan()
             session.isDrawing = true
-            host?.circleIntent.cancelTracing()
-            host?.circleIntent.insertion.writingBegan()
+            host?.writingBegan()
         }
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
             session.isDrawing = false

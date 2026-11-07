@@ -14,11 +14,12 @@ struct AutofillPreviewCard: View {
     let state: CircleIntentState
     let detailed: Bool
     let maximumHeight: CGFloat
-    var dragTitle: ((CGSize?) -> Void)? = nil
+    let dragTitle: (DragGesture.Value, _ ended: Bool) -> Void
     let sizeChanged: (CGSize) -> Void
     @State private var headerHeight: CGFloat = 44
     @State private var contentHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 44
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sourcePreview: LecturePDFDestination?
     @State private var sourceError: String?
@@ -40,6 +41,7 @@ struct AutofillPreviewCard: View {
                             .onGeometryChange(for: CGFloat.self) { ceil($0.size.height) } action: { contentHeight = $0 }
                     }
                     .frame(height: min(contentHeight, max(44, maximumHeight - fixedHeight)))
+                    .clipShape(.rect(cornerRadius: 16))
                     .scrollBounceBehavior(.basedOnSize)
                     .transition(resultTransition)
                 }
@@ -110,13 +112,17 @@ struct AutofillPreviewCard: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(.rect)
             .gesture(DragGesture(minimumDistance: 5, coordinateSpace: .named("autofillOverlay"))
-                .onChanged { dragTitle?($0.translation) }
-                .onEnded { _ in dragTitle?(nil) })
+                .onChanged { dragTitle($0, false) }
+                .onEnded { dragTitle($0, true) })
             .accessibilityHint("Drag to move the preview")
             Spacer(minLength: 0)
             Button(action: state.decline) {
-                Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(.rect)
-            }.buttonStyle(.plain).accessibilityLabel("Dismiss autofill")
+                Label("Dismiss autofill", systemImage: "xmark")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(Color(uiColor: .label))
+            }
+            .buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
+            .frame(width: 44, height: 44)
         }
     }
 
@@ -124,6 +130,7 @@ struct AutofillPreviewCard: View {
         if detailed {
             VStack(alignment: .leading, spacing: 18) {
                 DetailedAutofillPreview(state: state)
+                    .modifier(PreviewReadingCard())
                 if !state.citations.isEmpty { sources(state.citations, title: "Approved lecture evidence") }
                 if !state.retrievedHits.isEmpty {
                     DisclosureGroup("Retrieved lecture passages (\(state.retrievedHits.count))") {
@@ -136,14 +143,16 @@ struct AutofillPreviewCard: View {
                 }
             }
         } else if let proposal = state.proposal {
-            if !proposal.usedCitations.isEmpty { sources(proposal.usedCitations, title: "Sources") }
+            if !proposal.usedCitations.isEmpty { sources(proposal.usedCitations) }
             else if proposal.content.origin == .localArithmetic {
-                Text("Calculated on this iPad from the matrices in your notes.").font(.subheadline).foregroundStyle(.secondary)
+                Text("Calculated on this iPad from the matrices in your notes.").font(.subheadline)
+                    .modifier(PreviewReadingCard())
             }
         } else {
             VStack(alignment: .leading, spacing: 12) {
                 Text(finishedMessage).font(.subheadline).textSelection(.enabled)
                     .accessibilityIdentifier("autofillUnavailable")
+                    .modifier(PreviewReadingCard())
             }
         }
     }
@@ -195,12 +204,7 @@ struct AutofillPreviewCard: View {
     }
 
     private var title: String {
-        if let proposal = state.proposal {
-            if proposal.content.origin == .localArithmetic { return "Calculated from your notes" }
-            var seen = Set<String>()
-            let titles = proposal.usedCitations.compactMap { seen.insert($0.passage.documentID).inserted ? $0.passage.title : nil }
-            return titles.isEmpty ? "Autofill ready" : "Autofilled from " + titles.joined(separator: ", ")
-        }
+        if state.proposal != nil { return "Sources" }
         if state.processing {
             guard let gap = state.missingInformation else { return "Thinking…" }
             let target = gap.subjects?.map(\.quote).joined(separator: " and ")
@@ -230,61 +234,86 @@ struct AutofillPreviewCard: View {
     }
 
     private var acceptance: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if detailed {
-                Text(state.insertion.handwritingDetail)
-                    .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("autofillHandwritingSource")
+        HStack(spacing: 12) {
+            Button(action: state.decline) {
+                Text("Decline")
+                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.primary.mix(with: .red, by: 0.35))
+                    .frame(maxWidth: .infinity)
             }
-            HStack(spacing: 12) {
-                Button(action: state.decline) { Text("Decline").frame(maxWidth: .infinity, minHeight: 44) }
-                    .buttonStyle(.plain).bukoGlass(interactive: true).accessibilityIdentifier("declineAutofill")
-                    .accessibilityHint("Removes the preview without changing your note.")
-                Button(action: state.insertion.accept) {
-                    HStack {
-                        if state.insertion.isAccepting { ProgressView().controlSize(.small) }
-                        Text("Accept")
-                    }.frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.plain).bukoGlass(interactive: true)
-                    .disabled(state.processing || !state.insertion.canAccept).accessibilityIdentifier("acceptAutofill")
-                    .accessibilityHint("Inserts the green handwriting. Undo restores the original note and spacing.")
+            .buttonStyle(.glass(.clear.tint(.red.opacity(0.22))))
+            .accessibilityIdentifier("declineAutofill")
+            .accessibilityHint("Removes the preview without changing your note.")
+            Button(action: state.insertion.accept) {
+                HStack {
+                    if state.insertion.isAccepting { ProgressView().controlSize(.small) }
+                    Text("Accept")
+                }
+                .foregroundStyle(colorScheme == .dark ? Color.white : Color.primary.mix(with: .blue, by: 0.35))
+                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.glass(.clear.tint(.blue.opacity(0.22))))
+            .disabled(state.processing || !state.insertion.canAccept).accessibilityIdentifier("acceptAutofill")
+            .accessibilityHint("Inserts the green handwriting. Undo restores the original note and spacing.")
         }
+        .controlSize(.large)
+        .buttonBorderShape(.capsule)
     }
 
-    private func sources(_ citations: [LectureCitation], title: String) -> some View {
+    private func sources(_ citations: [LectureCitation], title: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.subheadline.weight(.semibold))
+            if let title { Text(title).font(.subheadline.weight(.semibold)) }
             ForEach(citations) { citation in source(citation.passage, quote: citation.quote) }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("autofillSources")
     }
 
-    private func source(_ passage: LecturePassage, quote: String, prefix: String = "") -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                sourceTask?.cancel(); sourceError = nil
-                sourceTask = Task {
-                    guard let noteID = state.noteID else { return }
-                    do {
-                        let url = try await LectureLibrary.shared.pdfURL(noteID: noteID, documentID: passage.documentID)
-                        try Task.checkCancellation()
-                        sourcePreview = LecturePDFDestination(url: url, page: passage.page, quote: quote, title: passage.title)
-                    } catch is CancellationError { }
-                    catch { sourceError = error.localizedDescription }
+    @ViewBuilder private func source(_ passage: LecturePassage, quote: String, prefix: String = "") -> some View {
+        let ocrNotice = Text("Scanned page · OCR text").font(.caption2).foregroundStyle(.secondary)
+        let link = Button {
+            sourceTask?.cancel(); sourceError = nil
+            sourceTask = Task {
+                guard let noteID = state.noteID else { return }
+                do {
+                    let url = try await LectureLibrary.shared.pdfURL(noteID: noteID, documentID: passage.documentID)
+                    try Task.checkCancellation()
+                    sourcePreview = LecturePDFDestination(url: url, page: passage.page, quote: quote, title: passage.title)
+                } catch is CancellationError { }
+                catch { sourceError = error.localizedDescription }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("\(prefix)\(passage.title) – p. \(passage.page)", systemImage: "doc.text")
+                    .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                if let noteID = state.noteID {
+                    LectureSourceThumbnail(noteID: noteID, passage: passage, quote: quote)
                 }
-            } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("\(prefix)\(passage.title) – p. \(passage.page)", systemImage: "doc.text")
-                        .font(.caption.weight(.semibold)).multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    if let noteID = state.noteID {
-                        LectureSourceThumbnail(noteID: noteID, passage: passage, quote: quote)
-                    }
-                }
-            }.buttonStyle(.plain).accessibilityIdentifier("autofillSourceLink")
-            Text(quote).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("autofillSourcePassage")
-            if passage.usedOCR { Text("Scanned page · OCR text").font(.caption2).foregroundStyle(.secondary) }
+                if !detailed && passage.usedOCR { ocrNotice }
+            }
+            .padding(detailed ? 0 : 12)
+            .contentShape(.rect)
         }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("autofillSourceLink")
+
+        if detailed {
+            VStack(alignment: .leading, spacing: 6) {
+                link
+                Text(quote).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("autofillSourcePassage")
+                if passage.usedOCR { ocrNotice }
+            }.modifier(PreviewReadingCard())
+        } else {
+            link.bukoGlass(cornerRadius: 16, interactive: true)
+                .accessibilityValue(Text(quote))
+        }
+    }
+}
+
+private struct PreviewReadingCard: ViewModifier {
+    func body(content: Content) -> some View {
+        content.padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 16))
     }
 }
 

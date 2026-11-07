@@ -5,6 +5,14 @@ import CoreGraphics
 nonisolated enum CirclePopupPlacement {
     static let cornerRadius: CGFloat = 26
 
+    /// A flick coasts for at most one control width. A stationary release stays put.
+    static func releaseOrigin(from origin: CGPoint, velocity: CGSize) -> CGPoint {
+        let speed = hypot(velocity.width, velocity.height)
+        guard speed > 0 else { return origin }
+        let travelTime = min(0.075, 44 / speed)
+        return CGPoint(x: origin.x + velocity.width * travelTime, y: origin.y + velocity.height * travelTime)
+    }
+
     static func clampedOrigin(_ origin: CGPoint, size: CGSize, viewport: CGSize) -> CGPoint {
         CGPoint(x: min(max(8, viewport.width - size.width - 8), max(8, origin.x)),
                 y: min(max(60, viewport.height - size.height - 24), max(60, origin.y)))

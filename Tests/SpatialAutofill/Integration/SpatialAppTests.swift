@@ -70,7 +70,7 @@ final class SpatialAppTests: XCTestCase {
     @MainActor func testQQuestionDimensionsAcceptUndo() {
         let app=launch("question-dimensions"); capture(app,expected:"proposal"); ready(app)
         checkpoint(app,original:true,records:0)
-        XCTAssertEqual(app.staticTexts["autofillPreviewTitle"].label, "Calculated from your notes")
+        XCTAssertEqual(app.staticTexts["autofillPreviewTitle"].label, "Sources")
         XCTAssertFalse(app.buttons["autofillSourceLink"].exists)
         app.buttons["acceptAutofill"].tap(); gone(app)
         checkpoint(app,original:false,records:1)
@@ -89,7 +89,7 @@ final class SpatialAppTests: XCTestCase {
     }
     @MainActor func testSQuestionNewDimensionsAcceptUndo() {
         let app=launch("question-new-dimensions"); capture(app,expected:"proposal"); ready(app)
-        XCTAssertEqual(app.staticTexts["autofillPreviewTitle"].label, "Calculated from your notes")
+        XCTAssertEqual(app.staticTexts["autofillPreviewTitle"].label, "Sources")
         checkpoint(app,original:true,records:0)
         app.buttons["acceptAutofill"].tap(); gone(app)
         checkpoint(app,original:false,records:1)

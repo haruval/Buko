@@ -24,12 +24,6 @@ final class AutofillInsertionState {
     var canAccept: Bool { sampled != nil && layout?.missing.isEmpty == true && !isAccepting && !isWriting }
     var missing: [String] { layout?.missing ?? [] }
 
-    var handwritingDetail: String {
-        guard let layout else { return "" }
-        if layout.sampledGlyphCount == 0 { return "Handwriting font · matched to the circled text’s size" }
-        return layout.fallbackGlyphCount == 0 ? "Your handwriting · letter by letter" : "Your letters, with a handwriting font for missing characters"
-    }
-
     func capture(selection: [CGPoint]) {
         cancel()
         self.selection = selection

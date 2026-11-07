@@ -78,9 +78,9 @@ struct ShelfButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(selected ? Color.accentColor : .primary)
+                .foregroundStyle(selected ? Color("AccentColor") : .primary)
                 .frame(width: 46, height: 46)
-                .background(selected ? Color.accentColor.opacity(0.12) : .clear, in: .circle)
+                .background(selected ? Color("AccentColor").opacity(0.12) : .clear, in: .circle)
                 .contentShape(.circle)
         }
         .buttonStyle(.plain)

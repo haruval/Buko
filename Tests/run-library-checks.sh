@@ -15,13 +15,11 @@ mkdir -p "$BUKO_LIBRARY_DIR/Checks.app/Contents/MacOS"
 cat > "$BUKO_LIBRARY_DIR/Checks.app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.buko.LibraryChecks</string><key>CFBundleExecutable</key><string>checks</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>
 PLIST
-# Compile the frozen pre-removal entity in a separate executable.
+# This frozen synthetic store exercises opening the previous shipping schema.
+gunzip -c Tests/Fixtures/PreRemovalLibrary.store.gz > "$BUKO_LIBRARY_DIR/retired.store"
 BUKO_LIBRARY_SOURCES=(Buko/Models/Note.swift Buko/Models/NoteFolder.swift Buko/Models/TrashedPage.swift
         Buko/Models/NotebookEdits.swift Buko/Canvas/PageGeometry.swift Buko/Canvas/NotebookPaging.swift)
 xcrun swiftc -module-cache-path "$BUKO_LIBRARY_DIR/modules" "${BUKO_LIBRARY_SOURCES[@]}" \
-    Tests/Fixtures/RetiredBulletinStore.swift -o "$BUKO_LIBRARY_DIR/Legacy.app/Contents/MacOS/legacy"
-"$BUKO_LIBRARY_DIR/Legacy.app/Contents/MacOS/legacy" "$BUKO_LIBRARY_DIR/retired.store"
-xcrun swiftc -module-cache-path "$BUKO_LIBRARY_DIR/modules" "${BUKO_LIBRARY_SOURCES[@]}" \
-    Buko/Models/RetiredBulletinRecord.swift Tests/LibraryOrganizationChecks.swift \
+    Tests/LibraryOrganizationChecks.swift \
     -o "$BUKO_LIBRARY_DIR/Checks.app/Contents/MacOS/checks"
 "$BUKO_LIBRARY_DIR/Checks.app/Contents/MacOS/checks" "$BUKO_LIBRARY_DIR/data" "$BUKO_LIBRARY_DIR/legacy.store" "$BUKO_LIBRARY_DIR/retired.store"

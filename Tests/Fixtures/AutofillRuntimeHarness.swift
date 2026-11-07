@@ -191,7 +191,13 @@ private struct InsertionHarnessView: UIViewRepresentable {
         checkUnchanged()
 
         host.validationShow(fill)
-        try await Task.sleep(for: .milliseconds(1300))
+        var reveal: [CGFloat] = []
+        for _ in 0..<40 {
+            try await Task.sleep(for: .milliseconds(32))
+            reveal.append(host.validationMotion.alpha)
+        }
+        precondition(reveal.filter { $0 > 0 && $0 < 1 }.count > 3 && reveal.last == 1,
+                     "Proposed ink must appear through intermediate opacity frames and settle fully visible")
         try saveFrame("reflow-settled")
         precondition(abs(host.validationMotion.positions.max()! - host.validationMotion.targets.max()!) < 0.01)
         host.circleIntent.decline()
@@ -274,11 +280,22 @@ private struct InsertionHarnessView: UIViewRepresentable {
             host.circleIntent.insertion.accept(); try await waitForAcceptance()
             precondition(original.matches(AutofillDocument(note)) && host.circleIntent.insertion.canAccept)
             precondition(host.canvas.undoManager?.canUndo == false)
+            precondition(host.validationAcceptedOpacity == nil, "A failed save cannot start the ink fade")
             failSave = false
             host.circleIntent.insertion.accept(); try await waitForAcceptance()
             let accepted = AutofillDocument(note)
             precondition(!original.matches(accepted) && !(note.autofillHistory ?? Data()).isEmpty)
             precondition(host.canvas.undoManager?.canUndo == true)
+            if !UIAccessibility.isReduceMotionEnabled {
+                var samples: [Float] = []
+                for _ in 0..<30 {
+                    try await Task.sleep(for: .milliseconds(32))
+                    if let opacity = host.validationAcceptedOpacity { samples.append(opacity) }
+                }
+                precondition(samples.filter { $0 > 0 && $0 < 1 }.count > 3 && (samples.first ?? 0) > (samples.last ?? 1),
+                             "Green presentation ink must visibly fade over the committed drawing")
+            }
+            precondition(host.validationAcceptedOpacity == nil)
             host.canvas.undoManager?.undo()
             try await Task.sleep(for: .milliseconds(100))
             precondition(original.matches(AutofillDocument(note)), "Native undo failed to restore note")
@@ -303,7 +320,7 @@ private struct InsertionHarnessView: UIViewRepresentable {
             original.apply(to: note); try container.mainContext.save()
             try await preview()
             if #available(iOS 27, *) { try await checkOtherNotesAndGeneratedExclusion() }
-            try Data("PASS: prepared current/other-note sampling, preview acceptance after preparation, generated-ink exclusion, inline placement, preview/decline, failure rollback/retry, native atomic undo/redo, source and document staleness, cancellation".utf8)
+            try Data("PASS: prepared current/other-note sampling, preview acceptance after preparation, generated-ink exclusion, inline placement, preview/decline, failure rollback/retry, accepted-ink fade, native atomic undo/redo, source and document staleness, cancellation".utf8)
                 .write(to: URL.documentsDirectory.appendingPathComponent("result.txt"), options: .atomic)
         } catch {
             try? Data("FAIL: \(error)".utf8).write(to: URL.documentsDirectory.appendingPathComponent("result.txt"))

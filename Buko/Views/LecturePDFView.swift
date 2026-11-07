@@ -5,18 +5,24 @@ struct LecturePDFView: View {
     let destination: LecturePDFDestination
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        NavigationStack {
+        VStack(alignment: .leading, spacing: 26) {
+            Button {
+                dismiss()
+            } label: {
+                Label("Close PDF preview", systemImage: "xmark")
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(Color(uiColor: .label))
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .accessibilityIdentifier("closeLecturePDF")
             LecturePDFCard(destination: destination)
-                .padding(16)
-                .background(Color("CanvasBackground"))
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close PDF preview", systemImage: "xmark") { dismiss() }
-                            .accessibilityIdentifier("closeLecturePDF")
-                    }
-                }
         }
+        .padding([.horizontal, .bottom], 16)
+        .background(Color("CanvasBackground"))
     }
 }
 
