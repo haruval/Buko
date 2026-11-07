@@ -140,6 +140,13 @@ final class AutofillInteractionTests: XCTestCase {
         app.buttons["Validation undo"].tap()
         expectation(for: NSPredicate(format: "label == 'Original restored'"), evaluatedWith: app.staticTexts["validationUndoStatus"])
         waitForExpectations(timeout: 5)
+        let status = app.staticTexts["validationUndoStatus"]
+        app.buttons["Validation redo"].tap()
+        expectation(for: NSPredicate(format: "value == 'Before fill'"), evaluatedWith: status)
+        waitForExpectations(timeout: 5)
+        app.buttons["Validation redo"].tap()
+        expectation(for: NSPredicate(format: "value == 'With fill'"), evaluatedWith: status)
+        waitForExpectations(timeout: 5)
     }
 
     @MainActor func testAutomaticHandwritingWithoutSetup() {

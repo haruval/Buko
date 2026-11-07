@@ -30,6 +30,7 @@ private struct InsertionHarnessView: UIViewRepresentable {
     let handwriting = HandwritingPreparation(idleDelay: .zero)
     var coordinator: NoteCanvas.Coordinator?
     weak var undoStatus: UILabel?
+    private var firstFill: (before: AutofillDocument, after: AutofillDocument)?
     var failSave = false
     var isFlowExample: Bool { ProcessInfo.processInfo.arguments.contains("--flow-preview") }
     var heading: String { isFlowExample ? "Precedence vs associativity:" : "Parsing:" }
@@ -79,11 +80,20 @@ private struct InsertionHarnessView: UIViewRepresentable {
                 after.apply(to: self.note)
                 if self.failSave { throw AutofillEditError.unavailable }
             }
+            if self.undoStatus != nil, self.firstFill == nil { self.firstFill = (before, after) }
+            self.refreshUndoStatus()
         }
     }
 
     private func refreshUndoStatus() {
-        undoStatus?.text = original.matches(AutofillDocument(note)) ? "Original restored" : "Edited"
+        guard let undoStatus else { return }
+        let current = AutofillDocument(note)
+        undoStatus.text = original.matches(current) ? "Original restored" : "Edited"
+        if let firstFill {
+            if firstFill.before.matches(current) { undoStatus.accessibilityValue = "Before fill" }
+            else if firstFill.after.matches(current) { undoStatus.accessibilityValue = "With fill" }
+            else { undoStatus.accessibilityValue = nil }
+        }
     }
 
     func preview(source: String? = nil) async throws {
@@ -234,6 +244,14 @@ private struct InsertionHarnessView: UIViewRepresentable {
                     self.refreshUndoStatus()
                 }, for: .touchUpInside)
                 host.addSubview(button)
+                let redo = UIButton(type: .system)
+                redo.frame = CGRect(x: host.bounds.width - 180, y: button.frame.minY, width: 156, height: 44)
+                redo.setTitle("Validation redo", for: .normal)
+                redo.addAction(UIAction { [weak self] _ in
+                    self?.session.redo()
+                    self?.refreshUndoStatus()
+                }, for: .touchUpInside)
+                host.addSubview(redo)
             }
             if !ProcessInfo.processInfo.arguments.contains("--cold-handwriting") {
                 handwriting.update(notes: [note], preferredID: note.id)

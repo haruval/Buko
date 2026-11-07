@@ -414,9 +414,19 @@ enum AutofillWriter {
         // rely on the selected text. Never manufacture a new topic from a hint.
         var targetQuotes = gap?.targets.map(\.quote) ?? []
         var coveredQuotes = gap?.alreadyCovered.map(\.quote) ?? []
-        if gap == nil, case .bound(let binding) = GapSyntaxBinding.inspect(GapTranscript(selected: selected, context: context)) {
-            targetQuotes = binding.targets.map(\.quote)
-            coveredQuotes = binding.alreadyCovered.map(\.quote)
+        var focusedSelection: String?
+        if case .bound(let binding) = GapSyntaxBinding.inspect(GapTranscript(selected: selected, context: context)) {
+            let headings = binding.targets.map(\.quote)
+            if gap == nil {
+                targetQuotes = headings
+                coveredQuotes = binding.alreadyCovered.map(\.quote)
+            }
+            // A completed neighboring definition supplies the writing pattern.
+            // Only the empty heading needs an answer, even when both were circled.
+            if binding.operation == .define, (gap?.operation ?? .define) == .define,
+               !binding.alreadyCovered.isEmpty, headings.count == 1, headings == targetQuotes {
+                focusedSelection = headings[0]
+            }
         }
         var fields: [String: Any] = [
             "selected_handwriting": selected, "nearby_handwriting_already_written": context,
@@ -440,8 +450,11 @@ enum AutofillWriter {
         }
         if let reply = search.gapPlan?.clarification {
             fields["student_clarification_of_request"] = reply
+            focusedSelection = targetQuotes.joined(separator: "\n")
+        }
+        if let focusedSelection {
             fields["original_circled_handwriting_for_context"] = selected
-            fields["selected_handwriting"] = targetQuotes.joined(separator: "\n")
+            fields["selected_handwriting"] = focusedSelection
         }
         if !evidence.comparisonSupport.isEmpty {
             fields["comparison_support"] = evidence.comparisonSupport.compactMap { span -> [String: String]? in
