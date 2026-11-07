@@ -1,18 +1,4 @@
 import SwiftUI
-import CoreTransferable
-import UniformTypeIdentifiers
-
-extension UTType {
-    static let bukoSource = UTType(exportedAs: "dev.buko.source-reference")
-}
-
-struct SourceDragReference: Codable, Transferable, Equatable {
-    let noteID: UUID
-    let documentID: String
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .bukoSource)
-    }
-}
 
 enum WorkspaceContent {
     case note(Note)
@@ -91,18 +77,6 @@ struct WorkspaceDivider: View {
             .accessibilityAction(named: "Keep first pane", keepFirst)
             .accessibilityAction(named: "Keep second pane", keepSecond)
             }
-    }
-}
-
-struct WorkspaceDropIndicator: View {
-    let title: String
-    let targeted: Bool
-    var body: some View {
-        RoundedRectangle(cornerRadius: 28)
-            .fill(Color.accentColor.opacity(targeted ? 0.22 : 0.07))
-            .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(Color.accentColor.opacity(targeted ? 0.9 : 0.4), lineWidth: 2) }
-            .overlay { Label(title, systemImage: "rectangle.split.2x1").font(.headline).padding(16).glassEffect(.regular, in: .capsule) }
-            .padding(12).allowsHitTesting(false)
     }
 }
 
@@ -191,40 +165,6 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
                     .accessibilityIdentifier("switchWorkspacePane")
             }
         }
-    }
-}
-
-struct WorkspaceDropDelegate: DropDelegate {
-    let geometry: WorkspaceGeometry
-    @Binding var side: Int?
-    let note: (NoteDragReference, Int) -> Void
-    let source: (SourceDragReference, Int) -> Void
-    func validateDrop(info: DropInfo) -> Bool { info.hasItemsConforming(to: [.bukoNote, .bukoSource]) }
-    private func target(_ point: CGPoint) -> Int {
-        geometry.vertical ? (point.y < geometry.size.height / 2 ? 0 : 1) : (point.x < geometry.size.width / 2 ? 0 : 1)
-    }
-    func dropEntered(info: DropInfo) { side = target(info.location) }
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        side = target(info.location)
-        return DropProposal(operation: .copy)
-    }
-    func dropExited(info: DropInfo) { side = nil }
-    func performDrop(info: DropInfo) -> Bool {
-        let destination = target(info.location)
-        side = nil
-        if let provider = info.itemProviders(for: [.bukoNote]).first {
-            _ = provider.loadTransferable(type: NoteDragReference.self) { result in
-                if case .success(let value) = result { Task { @MainActor in note(value, destination) } }
-            }
-            return true
-        }
-        if let provider = info.itemProviders(for: [.bukoSource]).first {
-            _ = provider.loadTransferable(type: SourceDragReference.self) { result in
-                if case .success(let value) = result { Task { @MainActor in source(value, destination) } }
-            }
-            return true
-        }
-        return false
     }
 }
 

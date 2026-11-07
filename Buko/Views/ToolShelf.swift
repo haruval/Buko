@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ToolShelf: View {
     @Bindable var session: CanvasSession
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("showsGestureTestTools") private var showsGestureTestTools = false
     let openLectureSources: () -> Void
 
@@ -30,7 +31,8 @@ struct ToolShelf: View {
                 .disabled(!session.canRedo)
         }
         .padding(8)
-        .glassEffect(.regular, in: .rect(cornerRadius: 32))
+        .glassEffect(.clear, in: .rect(cornerRadius: 32))
+        .environment(\.colorScheme, session.pagePull.bottomOverBlack ? .dark : colorScheme)
         .onChange(of: showsGestureTestTools, initial: true) { _, visible in
             if !visible, session.tool == .circle { session.tool = .pen }
         }

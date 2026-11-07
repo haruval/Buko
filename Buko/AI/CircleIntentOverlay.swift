@@ -64,15 +64,8 @@ struct CircleIntentOverlay: View {
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: state.insertion.layout != nil)
                         .allowsHitTesting(false)
                     if state.phase == .finished || state.processing {
-                        AutofillPreviewCard(state: state, detailed: detailedPreview, maximumHeight: maximumHeight, dragTitle: { translation in
-                            if let translation {
-                                if dragOrigin == nil { dragOrigin = state.popupHitBounds?.origin ?? state.popupBounds.origin }
-                                guard let origin = dragOrigin else { return }
-                                var transaction = Transaction(); transaction.disablesAnimations = true
-                                withTransaction(transaction) {
-                                    state.movePopup(to: CGPoint(x: origin.x + translation.width, y: origin.y + translation.height), viewport: viewport)
-                                }
-                            } else { dragOrigin = nil }
+                        AutofillPreviewCard(state: state, detailed: detailedPreview, maximumHeight: maximumHeight, dragTitle: { drag, ended in
+                            movePopup(drag, ended: ended, viewport: viewport)
                         }) { size in
                             guard state.phase != .idle, measuredHeight != size.height else { return }
                             measuredHeight = size.height
@@ -133,6 +126,22 @@ struct CircleIntentOverlay: View {
         state.positionPopup(size: size, viewport: viewport)
     }
 
+    private func movePopup(_ drag: DragGesture.Value, ended: Bool, viewport: CGSize) {
+        let origin = dragOrigin ?? state.popupHitBounds?.origin ?? state.popupBounds.origin
+        let finger = CGPoint(x: origin.x + drag.translation.width, y: origin.y + drag.translation.height)
+        if !ended {
+            dragOrigin = origin
+            withAnimation(nil) { state.movePopup(to: finger, viewport: viewport) }
+            return
+        }
+
+        dragOrigin = nil
+        let landing = reduceMotion ? finger : CirclePopupPlacement.releaseOrigin(from: finger, velocity: drag.velocity)
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.24)) {
+            state.movePopup(to: landing, viewport: viewport)
+        }
+    }
+
     private var stageAnimation: Animation? {
         detailedPreview || reduceMotion ? nil : CircleAIStyle.previewSpring
     }
@@ -171,8 +180,9 @@ private struct PopupPresentation: ViewModifier, Animatable {
         // This non-observed cache has no layout/state feedback. Updating it from
         // the interpolated value keeps moving controls from leaking taps to ink.
         state.popupHitBounds = bounds
-        return content.clipShape(.rect(cornerRadius: CirclePopupPlacement.cornerRadius))
-            .glassEffect(.regular.tint(CircleAIStyle.green.opacity(0.18)), in: .rect(cornerRadius: CirclePopupPlacement.cornerRadius))
+        let shape = RoundedRectangle(cornerRadius: CirclePopupPlacement.cornerRadius, style: .continuous)
+        return content.clipShape(shape)
+            .background { CircleGlassSurface(shape: shape, processing: state.processing).allowsHitTesting(false) }
             .offset(x: bounds.minX, y: bounds.minY)
     }
 }

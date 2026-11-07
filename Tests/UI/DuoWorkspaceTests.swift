@@ -31,15 +31,33 @@ final class DuoWorkspaceTests: XCTestCase {
         XCTAssertTrue(app.buttons["noteRow"].firstMatch.waitForExistence(timeout: 8))
         Thread.sleep(forTimeInterval: 0.7)
     }
-    @MainActor func testNoteDragSplitDividerAndRotation() {
-        let app = launch()
+    @MainActor private func openBeside(_ item: XCUIElement, in app: XCUIApplication,
+                                       action: String = "Open beside current note") {
+        let option = app.buttons[action].firstMatch
+        if !option.exists {
+            item.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.14)).press(forDuration: 1.2)
+        }
+        XCTAssertTrue(option.waitForExistence(timeout: 8))
+        option.tap()
+    }
+    @MainActor private func prepareSecondNote(in app: XCUIApplication) -> XCUIElement {
         app.buttons["duoSecond"].tap()
         openNotes(app)
-        let candidates = app.buttons.matching(identifier: "noteRow").matching(NSPredicate(format: "label CONTAINS 'Spatial validation - auth'")).allElementsBoundByIndex
-        let first = candidates.filter { $0.isHittable }.min { $0.frame.minY < $1.frame.minY }!
-        XCTAssertTrue(first.isHittable)
+        return app.buttons.matching(identifier: "noteRow")
+            .matching(NSPredicate(format: "label CONTAINS 'Spatial validation - auth'"))
+            .allElementsBoundByIndex.filter { $0.isHittable }.min { $0.frame.minY < $1.frame.minY }!
+    }
+    @MainActor func testReleasingNoteOverCanvasKeepsSinglePane() {
+        let app = launch()
+        let first = prepareSecondNote(in: app)
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
         first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.8, thenDragTo: end)
+        XCTAssertFalse(app.descendants(matching: .any)["workspaceDivider"].firstMatch.waitForExistence(timeout: 1))
+        XCTAssertEqual(app.scrollViews.matching(NSPredicate(format: "label == 'Note canvas'")).count, 1)
+    }
+    @MainActor func testNoteMenuSplitDividerAndRotation() {
+        let app = launch()
+        openBeside(prepareSecondNote(in: app), in: app)
         XCTAssertTrue(app.descendants(matching: .any)["workspaceDivider"].firstMatch.waitForExistence(timeout: 8), app.debugDescription)
         XCTAssertEqual(app.scrollViews.matching(NSPredicate(format: "label == 'Note canvas'")).count, 2)
         shot(app, "Two note split")
@@ -57,12 +75,7 @@ final class DuoWorkspaceTests: XCTestCase {
     }
     @MainActor func testIndependentSplitInkUndoAndPersistence() {
         let app = launch()
-        app.buttons["duoSecond"].tap()
-        openNotes(app)
-        let source = app.buttons.matching(identifier: "noteRow")
-            .matching(NSPredicate(format: "label CONTAINS 'Spatial validation - auth'"))
-            .allElementsBoundByIndex.filter { $0.isHittable }.min { $0.frame.minY < $1.frame.minY }!
-        source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.8, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45)))
+        openBeside(prepareSecondNote(in: app), in: app)
         XCTAssertTrue(app.descendants(matching: .any)["workspaceDivider"].firstMatch.waitForExistence(timeout: 8))
         func counts() -> [String: Int] {
             app.buttons["duoCheckpoint"].tap()
@@ -118,8 +131,7 @@ final class DuoWorkspaceTests: XCTestCase {
         XCTAssertLessThanOrEqual(library.frame.maxY, background.frame.maxY + 1)
         XCTAssertGreaterThanOrEqual(library.frame.maxY, background.frame.maxY - 13)
         XCTAssertFalse(visibleButton(app, "newNote").frame.intersects(app.buttons["duoFold"].frame))
-        source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)).press(forDuration: 0.8,
-            thenDragTo: panes.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.45)))
+        openBeside(source, in: app)
         XCTAssertTrue(app.buttons["switchWorkspacePane"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["fullscreenSecondPane"].isHittable)
         XCTAssertFalse(app.buttons["fullscreenFirstPane"].isHittable)
@@ -189,14 +201,7 @@ final class DuoWorkspaceTests: XCTestCase {
 
     @MainActor func testCompactPaneSwitch() {
         let app = launch()
-        app.buttons["duoSecond"].tap()
-        openNotes(app)
-        let first = app.buttons.matching(identifier: "noteRow")
-            .matching(NSPredicate(format: "label CONTAINS 'Spatial validation - auth'"))
-            .allElementsBoundByIndex.filter { $0.isHittable }.min { $0.frame.minY < $1.frame.minY }!
-        first.press(forDuration: 0.7)
-        let open = app.buttons["Open beside current note"]
-        XCTAssertTrue(open.waitForExistence(timeout: 8)); open.tap()
+        openBeside(prepareSecondNote(in: app), in: app)
         let toggle = app.buttons["switchWorkspacePane"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))
         func counts() -> [String: Int] {
@@ -235,7 +240,7 @@ final class DuoWorkspaceTests: XCTestCase {
         XCTAssertFalse(app.buttons["switchWorkspacePane"].exists)
     }
 
-    @MainActor func testSourceDragAndSoloCard() {
+    @MainActor func testSourceOpensBesideOnlyFromMenuAndPreviewsFullscreen() {
         let app = launch()
         app.buttons["lectureSources"].tap()
         XCTAssertTrue(app.buttons["importLecturePDF"].waitForExistence(timeout: 8))
@@ -248,6 +253,8 @@ final class DuoWorkspaceTests: XCTestCase {
         shot(app, "Solo PDF card")
         app.buttons["closeLecturePDF"].tap()
         source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.8, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.86, dy: 0.5)))
+        XCTAssertFalse(app.descendants(matching: .any)["workspaceDivider"].firstMatch.waitForExistence(timeout: 1))
+        openBeside(source, in: app, action: "Open beside note")
         XCTAssertTrue(app.descendants(matching: .any)["workspaceDivider"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.descendants(matching: .any)["lecturePDFContent"].firstMatch.exists)
         shot(app, "Note beside source PDF")

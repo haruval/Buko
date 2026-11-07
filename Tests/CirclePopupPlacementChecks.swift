@@ -4,6 +4,12 @@ import CoreGraphics
 @main struct CirclePopupPlacementChecks {
     static func main() {
         let viewport = CGSize(width: 1032, height: 1376), card = CGSize(width: 390, height: 600)
+        let finger = CGPoint(x: 320, y: 210)
+        precondition(CirclePopupPlacement.releaseOrigin(from: finger, velocity: .zero) == finger)
+        let gentle = CirclePopupPlacement.releaseOrigin(from: finger, velocity: CGSize(width: -120, height: 160))
+        precondition(gentle == CGPoint(x: 311, y: 222))
+        let fast = CirclePopupPlacement.releaseOrigin(from: finger, velocity: CGSize(width: -3000, height: 4000))
+        precondition(abs(hypot(fast.x - finger.x, fast.y - finger.y) - 44) < 0.01)
         let leftBlob = CGRect(x: 80, y: 400, width: 300, height: 80)
         let right = CirclePopupPlacement.place(size: card, viewport: viewport, region: leftBlob)
         precondition(right.minX >= leftBlob.maxX + 16 && right.minY == leftBlob.minY)

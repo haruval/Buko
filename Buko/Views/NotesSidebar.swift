@@ -85,13 +85,11 @@ struct NotesSidebar: View {
             Text("Notes").font(.title2.weight(.semibold)).padding(.horizontal, 4)
         }
         ScrollView {
-            GlassEffectContainer(spacing: 8) {
-                HStack(alignment: .top, spacing: 12) {
-                    column(parity: 0)
-                    column(parity: 1).padding(.top, entries.count > 1 ? 34 : 0)
-                }
-                .padding(.horizontal, 2).padding(.vertical, 6)
+            HStack(alignment: .top, spacing: 12) {
+                column(parity: 0)
+                column(parity: 1).padding(.top, entries.count > 1 ? 34 : 0)
             }
+            .padding(.horizontal, 2).padding(.vertical, 6)
             if entries.isEmpty {
                 Text("New notes will appear here.")
                     .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 28)
@@ -193,21 +191,13 @@ private struct LibraryCard<Content: View>: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10, content: content)
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                // A per-card glass backdrop lets the system lift the thumbnail with its title.
+                .background { Color.clear.bukoGlass(cornerRadius: 28) }
                 .contentShape(.rect(cornerRadius: 28))
         }
-        .buttonStyle(LibraryPressStyle())
+        .buttonStyle(.plain)
         .contentShape(.contextMenuPreview, .rect(cornerRadius: 28))
         .contentShape(.dragPreview, .rect(cornerRadius: 28))
-    }
-}
-
-private struct LibraryPressStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .bukoGlass(cornerRadius: 28)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 1.055 : 1)
-            .animation(reduceMotion ? nil : (configuration.isPressed ? .easeIn(duration: 0.45) : .spring(response: 0.24, dampingFraction: 0.8)), value: configuration.isPressed)
     }
 }
 

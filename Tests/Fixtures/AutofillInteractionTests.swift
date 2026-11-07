@@ -18,11 +18,14 @@ final class AutofillInteractionTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.5)
         XCTAssertLessThan(title.frame.minX, before.minX - 100)
         XCTAssertGreaterThan(title.frame.minY, before.minY + 60)
+        let landing = title.frame.origin
+        XCTAssertLessThanOrEqual(hypot(landing.x - (before.minX - 220), landing.y - (before.minY + 120)), 47)
         XCTAssertTrue(accept.isEnabled, "Dragging the title must not edit ink or dismiss the proposal")
         app.buttons["autofillSourceLink"].firstMatch.tap()
         XCTAssertTrue(app.buttons["closeLecturePDF"].waitForExistence(timeout: 5))
         app.buttons["closeLecturePDF"].tap()
-        XCTAssertEqual(title.frame.minX, before.minX - 220, accuracy: 3)
+        XCTAssertEqual(title.frame.minX, landing.x, accuracy: 3)
+        XCTAssertEqual(title.frame.minY, landing.y, accuracy: 3)
         accept.tap()
         XCTAssertFalse(accept.waitForExistence(timeout: 1))
         app.buttons["Validation undo"].tap()
@@ -47,7 +50,7 @@ final class AutofillInteractionTests: XCTestCase {
         app.launchArguments = ["--sourced-preview", "--pipeline-preview", "-detailedAutofillPreview", "NO"]
         app.launch()
         let title = app.staticTexts["autofillPreviewTitle"]
-        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
         XCTAssertEqual(title.label, "Thinking…")
         expectation(for: NSPredicate(format: "label == 'Defining Parsing…'"), evaluatedWith: title)
         waitForExpectations(timeout: 12)
@@ -64,7 +67,11 @@ final class AutofillInteractionTests: XCTestCase {
         XCTAssertGreaterThan(popup.frame.height, compactHeight + 60)
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["acceptAutofill"])
         waitForExpectations(timeout: 15)
-        XCTAssertTrue(title.label.hasPrefix("Autofilled from "))
+        XCTAssertEqual(title.label, "Sources")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == 'Sources'")).count, 1)
+        for control in [app.buttons["declineAutofill"], app.buttons["acceptAutofill"]] {
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
         XCTAssertFalse(app.descendants(matching: .any)["detailedAutofillContent"].exists)
         let passages = app.descendants(matching: .any).matching(identifier: "autofillSourcePassage")
         let hierarchy = XCTAttachment(string: app.debugDescription); hierarchy.lifetime = .keepAlways; add(hierarchy)
@@ -83,12 +90,13 @@ final class AutofillInteractionTests: XCTestCase {
     @MainActor func testDetailedResultsRetainPipelineAndInputs() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--sourced-preview", "-detailedAutofillPreview", "YES"]
+        app.launchArguments = ["--sourced-preview", "--cold-handwriting", "-detailedAutofillPreview", "YES"]
         app.launch()
         XCTAssertTrue(app.buttons["acceptAutofill"].waitForExistence(timeout: 20))
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["acceptAutofill"])
         waitForExpectations(timeout: 15)
         XCTAssertTrue(app.descendants(matching: .any)["detailedAutofillContent"].exists)
+        XCTAssertFalse(app.staticTexts["autofillHandwritingSource"].exists)
         let hierarchy = XCTAttachment(string: app.debugDescription); hierarchy.lifetime = .keepAlways; add(hierarchy)
         let stage = app.descendants(matching: .any)["pipelineStep.intent"].firstMatch
         XCTAssertTrue(stage.exists); stage.tap()

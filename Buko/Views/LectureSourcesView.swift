@@ -13,8 +13,7 @@ struct LecturePDFDestination: Identifiable {
 struct LectureSourcesView: View {
     let noteID: UUID
     var close: (() -> Void)? = nil
-    var dragging: (Bool) -> Void = { _ in }
-    var split: ((SourceDragReference) -> Void)? = nil
+    var openBeside: ((LectureDocument) -> Void)? = nil
     var library: LectureLibrary = .shared
     @Environment(\.dismiss) private var dismiss
     @State private var documents: [LectureDocument] = []
@@ -31,9 +30,15 @@ struct LectureSourcesView: View {
             HStack {
                 Text("Sources").font(.headline)
                 Spacer()
-                Button("Done", systemImage: "checkmark") { if let close { close() } else { dismiss() } }
-                    .labelStyle(.iconOnly).buttonStyle(.glass).controlSize(.large)
-                    .accessibilityIdentifier("closeLectureSources")
+                Button {
+                    if let close { close() } else { dismiss() }
+                } label: {
+                    Label("Done", systemImage: "checkmark")
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(Color(uiColor: .label))
+                }
+                .buttonStyle(.glass).controlSize(.large)
+                .accessibilityIdentifier("closeLectureSources")
             }.padding(.horizontal, 20).padding(.top, 16)
             ScrollView {
                 GlassEffectContainer(spacing: 18) {
@@ -57,15 +62,7 @@ struct LectureSourcesView: View {
                             ForEach(documents) { document in
                                 LectureSourceCard(document: document, noteID: noteID, library: library, busy: busy,
                                     open: { open(document) }, delete: { removing = document },
-                                    split: split.map { action in { action(SourceDragReference(noteID: noteID, documentID: document.id)) } })
-                                    .draggable(SourceDragReference(noteID: noteID, documentID: document.id))
-                                    .onDragSessionUpdated { session in
-                                        switch session.phase {
-                                        case .active: dragging(true)
-                                        case .ended, .dataTransferCompleted: dragging(false)
-                                        default: break
-                                        }
-                                    }
+                                    openBeside: openBeside.map { action in { action(document) } })
                             }
                         }
                     }.padding(20)

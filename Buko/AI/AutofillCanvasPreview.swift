@@ -3,7 +3,7 @@ import UIKit
 
 /// Read-only ink layers. Only their cameras move during reflow; the editor's
 /// drawing, undo stack and save callbacks never participate in the animation.
-final class AutofillCanvasPreview: UIView {
+final class AutofillCanvasPreview: UIView, PKCanvasViewDelegate {
     private final class Band {
         var spring: AutofillReflowSpring
         let indices: [Int]
@@ -20,7 +20,10 @@ final class AutofillCanvasPreview: UIView {
     }
 
     private let backdrop = CanvasBackdrop()
+    private let proposedInk = UIView()
     private let insertedCanvas = makeCanvas()
+    private var waitingForInk = false
+    private var acceptedFade: UIViewPropertyAnimator?
     private let animator = CanvasCameraAnimator()
     private var bands: [Band] = []
     private var labels: [UILabel] = []
@@ -28,17 +31,15 @@ final class AutofillCanvasPreview: UIView {
     private var style = UIUserInterfaceStyle.light
     private weak var editor: PKCanvasView?
     private var returning = false
-    private var fadeFrom: CGFloat = 0
-    private var fadeTo: CGFloat = 0
-    private var fadeStarted: TimeInterval = 0
-    private var fadeDelay: TimeInterval = 0
-    private var fadeDuration: TimeInterval = 0.2
     var didSettle: ((Int?) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
-        addSubview(backdrop); addSubview(insertedCanvas)
+        addSubview(backdrop)
+        addSubview(proposedInk)
+        proposedInk.addSubview(insertedCanvas)
+        insertedCanvas.delegate = self
         isHidden = true; accessibilityElementsHidden = true
     }
     required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
@@ -46,6 +47,7 @@ final class AutofillCanvasPreview: UIView {
     private static func makeCanvas() -> PKCanvasView {
         let canvas = PKCanvasView()
         canvas.isUserInteractionEnabled = false; canvas.backgroundColor = .clear; canvas.isOpaque = false
+        canvas.accessibilityElementsHidden = true
         canvas.overrideUserInterfaceStyle = .light
         canvas.minimumZoomScale = 0.01; canvas.maximumZoomScale = 8
         canvas.contentInsetAdjustmentBehavior = .never
@@ -53,6 +55,7 @@ final class AutofillCanvasPreview: UIView {
     }
 
     func show(_ result: AutofillLayout.Result, style: UIUserInterfaceStyle, from editor: PKCanvasView) {
+        finishAcceptedFade()
         animator.cancel()
         let now = CACurrentMediaTime(), wasHidden = isHidden
         self.editor = editor
@@ -74,26 +77,56 @@ final class AutofillCanvasPreview: UIView {
         }
         bands.forEach { $0.canvas?.removeFromSuperview() }
         bands = groups.map { Band(strokes: $0.value, spring: $0.key, color: inkColor) }
-        updateInsertedInk()
-        startFade(to: 1, at: now, delay: wasHidden ? 0.07 : 0)
+        if wasHidden {
+            proposedInk.alpha = 0
+            waitingForInk = true
+        }
         isHidden = false
+        updateInsertedInk()
+        if !waitingForInk || result.inserted.strokes.isEmpty || UIAccessibility.isReduceMotionEnabled {
+            revealInk()
+        }
         // Prepare native tiles before starting the clock, so first-use renderer
         // setup cannot consume the opening frames or jump past the original ink.
         render(at: now)
         let preparation = CACurrentMediaTime() - now
-        bands.forEach { $0.spring.delay(by: preparation) }; fadeStarted += preparation
+        bands.forEach { $0.spring.delay(by: preparation) }
         animate()
     }
 
     func dismiss(animated: Bool) {
+        // Closing the popup after a save leaves the color transition running.
+        guard acceptedFade == nil else { return }
         guard result != nil, animated, !UIAccessibility.isReduceMotionEnabled else {
             clear(); didSettle?(nil); return
         }
         let now = CACurrentMediaTime()
         returning = true
         for band in bands { band.spring.retarget(0, at: now) }
-        startFade(to: 0, at: now)
+        waitingForInk = false
+        setInkOpacity(0, duration: 0.18)
         animate()
+    }
+
+    /// Crossfade the green ink on its original paper into the same ink on the
+    /// saved page. Keeping the tiles in place preserves the first frame's color.
+    func fadeAcceptedInk() {
+        finishAcceptedFade()
+        guard result != nil, !isHidden, window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
+        waitingForInk = false
+        let fade = UIViewPropertyAnimator(duration: 0.66, curve: .easeInOut) { [weak self] in self?.alpha = 0 }
+        acceptedFade = fade
+        fade.addCompletion { [weak self] _ in self?.finishAcceptedFade() }
+        fade.startAnimation()
+        didSettle?(nil)
+    }
+
+    func finishAcceptedFade() {
+        guard let fade = acceptedFade else { return }
+        acceptedFade = nil
+        if fade.state == .active { fade.stopAnimation(true) }
+        clear()
+        alpha = 1
     }
 
     /// Rotation, teardown and Reduce Motion finish at the exact destination.
@@ -103,15 +136,16 @@ final class AutofillCanvasPreview: UIView {
         if returning { clear(); didSettle?(nil) }
         else {
             bands.forEach { $0.spring.settle() }
-            fadeFrom = 1; fadeTo = 1
+            // An offscreen drawing may have no visible tiles to report.
+            if waitingForInk { revealInk() }
             render(at: CACurrentMediaTime())
-            didSettle?(result?.pageCount)
+            if acceptedFade == nil { didSettle?(result?.pageCount) }
         }
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { settle() }
+        if window == nil { finishAcceptedFade(); settle() }
     }
 
     private func animate() {
@@ -125,11 +159,12 @@ final class AutofillCanvasPreview: UIView {
 
     private func clear() {
         animator.cancel()
+        waitingForInk = false
+        proposedInk.layer.removeAllAnimations()
         bands.forEach { $0.canvas?.removeFromSuperview() }; bands = []
         labels.forEach { $0.removeFromSuperview() }; labels = []
         insertedCanvas.drawing = PKDrawing()
         result = nil; returning = false; isHidden = true
-        fadeFrom = 0; fadeTo = 0
     }
 
     private var inkColor: UIColor { style == .dark ? .white : .black }
@@ -144,7 +179,7 @@ final class AutofillCanvasPreview: UIView {
                 let label = UILabel()
                 label.text = line.text; label.textColor = Self.green(style)
                 label.numberOfLines = 1; label.adjustsFontSizeToFitWidth = true; label.minimumScaleFactor = 0.5
-                addSubview(label); labels.append(label)
+                proposedInk.addSubview(label); labels.append(label)
             }
         }
     }
@@ -155,6 +190,7 @@ final class AutofillCanvasPreview: UIView {
     }
 
     func project(from editor: PKCanvasView, style: UIUserInterfaceStyle, showsGrid: Bool, document: CGSize) {
+        if self.style != style || UIAccessibility.isReduceMotionEnabled { finishAcceptedFade() }
         guard result != nil else { return }
         self.editor = editor
         if self.style != style {
@@ -186,16 +222,15 @@ final class AutofillCanvasPreview: UIView {
             }
             if band.canvas == nil {
                 let canvas = Self.makeCanvas(); canvas.drawing = band.drawing
-                insertSubview(canvas, belowSubview: insertedCanvas); band.canvas = canvas
+                insertSubview(canvas, belowSubview: proposedInk); band.canvas = canvas
             }
             project(band.canvas!, editor: editor, displacement: displacement)
         }
+        if proposedInk.frame != bounds { proposedInk.frame = bounds }
         project(insertedCanvas, editor: editor, displacement: 0)
-        let alpha = opacity(at: time)
-        insertedCanvas.alpha = alpha
         for (line, label) in zip(result.lines, labels) {
             label.frame = PageGeometry.screenRect(line.frame, scale: scale, offset: offset)
-            label.font = .systemFont(ofSize: result.letterHeight * scale); label.alpha = alpha
+            label.font = .systemFont(ofSize: result.letterHeight * scale)
         }
     }
 
@@ -208,13 +243,24 @@ final class AutofillCanvasPreview: UIView {
         if canvas.contentOffset != offset { canvas.contentOffset = offset }
     }
 
-    private func startFade(to value: CGFloat, at time: TimeInterval, delay: TimeInterval = 0) {
-        fadeFrom = opacity(at: time); fadeTo = value; fadeStarted = time; fadeDelay = delay
-        fadeDuration = value == 0 ? 0.14 : 0.2
+    func canvasViewDidFinishRendering(_ canvasView: PKCanvasView) {
+        if waitingForInk && canvasView === insertedCanvas { revealInk() }
     }
 
-    private func opacity(at time: TimeInterval) -> CGFloat {
-        let t = CGFloat(min(1, max(0, (time - fadeStarted - fadeDelay) / fadeDuration)))
-        return fadeFrom + (fadeTo - fadeFrom) * t * t * (3 - 2 * t)
+    private func revealInk() {
+        waitingForInk = false
+        setInkOpacity(1, duration: 0.48)
+    }
+
+    private func setInkOpacity(_ value: CGFloat, duration: TimeInterval) {
+        if UIAccessibility.isReduceMotionEnabled {
+            proposedInk.layer.removeAllAnimations()
+            proposedInk.alpha = value
+        } else if proposedInk.alpha != value {
+            UIView.animate(withDuration: duration, delay: 0,
+                           options: [.beginFromCurrentState, .curveEaseInOut, .allowUserInteraction]) {
+                self.proposedInk.alpha = value
+            }
+        }
     }
 }

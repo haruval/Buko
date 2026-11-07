@@ -36,16 +36,16 @@ struct PagePullIndicator: View {
                             .position(state.indicatorCenter)
                             .transition(.identity)
 
-                        let diameter: CGFloat = 20 + min(1, state.progress) * 6
-                        let frame = CGRect(
-                            x: state.indicatorCenter.x - diameter / 2,
-                            y: state.indicatorCenter.y + 5 + min(1, state.progress) * 45,
-                            width: diameter, height: diameter)
-                        Color.clear
-                            .frame(width: max(1, frame.width), height: max(1, frame.height))
-                            .bukoGlass(cornerRadius: diameter / 2)
-                            .glassEffectID("pull-drop", in: glass)
-                            .position(x: frame.midX, y: frame.midY)
+                        if state.progress > 0 {
+                            let pull = min(1, state.progress)
+                            let diameter = 26 * sqrt(pull)
+                            Color.clear
+                                .frame(width: diameter, height: diameter)
+                                .glassEffect(.clear, in: .circle)
+                                .glassEffectID("pull-drop", in: glass)
+                                .position(x: state.indicatorCenter.x,
+                                          y: state.indicatorCenter.y + 20 + 43 * pull)
+                        }
                     }
                 }
                 .environment(\.colorScheme, .dark)

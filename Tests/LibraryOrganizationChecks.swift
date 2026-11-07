@@ -8,7 +8,7 @@ struct LibraryOrganizationChecks {
     @MainActor static func main() throws {
         if CommandLine.arguments.count > 2 {
             let url = URL(fileURLWithPath: CommandLine.arguments[2])
-            let schema = Schema([Note.self, TrashedPage.self, NoteFolder.self, BulletinItem.self])
+            let schema = Schema([Note.self, TrashedPage.self, NoteFolder.self])
             let container = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: url))
             let context = container.mainContext
             let legacy = try context.fetch(FetchDescriptor<Note>()).first!
@@ -17,12 +17,12 @@ struct LibraryOrganizationChecks {
             precondition(drawing.strokes.count == 3)
             try NotebookEdits.commit(in: context, notes: [legacy]) { try NotebookEdits.prepare(legacy) }
             precondition(legacy.activePages.count == 3)
-            print("PASS: real on-disk legacy migration with folder schema and retired record compatibility; existing ink and pages retained")
+            print("PASS: real on-disk legacy migration with current schema; existing ink and pages retained")
         }
         try retiredStore()
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let schema = Schema([Note.self, TrashedPage.self, NoteFolder.self, BulletinItem.self])
+        let schema = Schema([Note.self, TrashedPage.self, NoteFolder.self])
         let configuration = ModelConfiguration(schema: schema, url: root.appendingPathComponent("library.store"))
         let aID: UUID, bID: UUID
         do {
@@ -68,27 +68,18 @@ struct LibraryOrganizationChecks {
 
     @MainActor static func retiredStore() throws {
         let url = URL(fileURLWithPath: CommandLine.arguments[3])
-        let schema = Schema([Note.self, TrashedPage.self, NoteFolder.self, BulletinItem.self])
+        let schema = Schema([Note.self, TrashedPage.self, NoteFolder.self])
         for _ in 0..<2 {
             let container = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: url))
             let context = container.mainContext
             let note = try context.fetch(FetchDescriptor<Note>()).first!
             let folder = try context.fetch(FetchDescriptor<NoteFolder>()).first!
-            let item = try context.fetch(FetchDescriptor<BulletinItem>()).first!
             precondition(note.title == "Existing lecture" && note.folderID == folder.id && folder.title == "Existing semester")
             precondition(note.drawingData == Data([9, 8, 7, 6]) && note.autofillHistory == Data([3, 2, 1]))
-            precondition(note.activePages.count == 2 && item.pageID == note.activePages[1].id)
-            precondition(item.noteID == note.id && item.noteTitle == note.title && item.pageIndex == 1)
-            precondition(item.title == "Previously saved exam" && item.kind == "event" && item.sourceText == "Exam in 12 days")
-            precondition(item.capturedAt == Date(timeIntervalSince1970: 1792798200) && item.timeZoneID == "America/Denver")
-            precondition(item.completedAt == Date(timeIntervalSince1970: 1792884600) && !item.dateHasTime)
-            precondition(item.dueDate == Date(timeIntervalSince1970: 1793833200))
-            precondition(item.sourceX == 50 && item.sourceY == 80 && item.sourceWidth == 500 && item.sourceHeight == 100)
-            let ids = try JSONDecoder().decode([String].self, from: item.sourceStrokeIDs)
-            precondition(ids == ["original-stroke"])
+            precondition(note.activePages.count == 2)
             note.updatedAt = .now
             try context.save()
         }
-        print("PASS: pre-removal store opens/saves/reopens with notes, folders, pages, ink, attribution and retired records intact")
+        print("PASS: pre-removal store opens/saves/reopens with notes, folders, pages, ink and attribution intact")
     }
 }

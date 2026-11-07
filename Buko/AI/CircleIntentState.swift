@@ -172,7 +172,6 @@ final class CircleIntentState {
         popupWasMoved = true
         popupAnchor = clamped.applying(projection.inverted())
         popupBounds.origin = clamped
-        popupHitBounds = popupBounds
     }
 
     func cancel() {
