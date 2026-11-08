@@ -222,6 +222,7 @@ struct ContentView: View {
                                 showsNotes: nativeChrome && !separatedLibrary, showsSettings: nativeChrome || verticalToolbar,
                                 showsDrawingTools: nativeTools,
                                 settingsInDrawingBar: verticalToolbar, settingsPopoverEnabled: settingsPopover,
+                                usesClearCoverControls: verticalToolbar && horizontalSizeClass == .compact && outer.size.height > outer.size.width,
                                 combinesHistory: combinesHistory,
                                 sources: { showSources(activeNote) },
                                 switchPane: needsPaneSwitcher ? { secondFocused.toggle() } : nil,
