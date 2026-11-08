@@ -16,7 +16,15 @@ import Foundation
         let bookFold = CGRect(x: 380, y: 0, width: 40, height: 720)
         let book = WorkspaceGeometry(size: CGSize(width: 800, height: 720), division: bookFold, compact: false)
         precondition(book.canSplit && !book.vertical)
-        precondition(book.first.maxX == bookFold.minX && book.second.minX == bookFold.maxX)
+        precondition(book.first.maxX == bookFold.minX + 10 && book.second.minX == bookFold.maxX - 10)
+        precondition(book.divider.width == 20 && book.divider.midX == bookFold.midX)
+        for width: CGFloat in [6, 12, 16, 24, 60] {
+            let fold = CGRect(x: 400 - width / 2, y: 0, width: width, height: 720)
+            let geometry = WorkspaceGeometry(size: book.size, division: fold, compact: false)
+            let gap = geometry.second.minX - geometry.first.maxX
+            precondition(gap >= min(12, width) && width - gap <= 20)
+            precondition(geometry.first.width == geometry.second.width)
+        }
         let tableFold = CGRect(x: 0, y: 380, width: 720, height: 40)
         let table = WorkspaceGeometry(size: CGSize(width: 720, height: 800), division: tableFold, compact: false)
         precondition(table.canSplit && table.vertical)
