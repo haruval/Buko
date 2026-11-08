@@ -52,6 +52,27 @@ import SwiftData
         print("Physical handwriting regression: tiny words, cap/x-height, baseline, descenders and repeated normalization passed")
 
         let original = PKDrawing(strokes: [stroke(1100, 110), stroke(1100, 160), stroke(1100, 235)])
+        // The demo notes supply many lowercase samples but few capitals. Compare
+        // the actual placed strokes with either side of that boundary missing.
+        for height: CGFloat in [10, 22, 56] {
+            for sampled in ["E", "h"] {
+                let mixed = try AutofillLayout.stage(text: "Eh\nEh", drawing: original, selection: selection(110),
+                    pageCount: 1, samples: [sampled: HandwrittenFont.sample(sampled)!], letterHeight: height)
+                precondition(mixed.lines.count == 2 && mixed.sampledGlyphCount == 2 && mixed.fallbackGlyphCount == 2)
+                let targetWidth = min(1.62, height / 8)
+                for stroke in mixed.inserted.strokes {
+                    for point in stroke.path {
+                        let width = point.size.width * hypot(stroke.transform.a, stroke.transform.b)
+                        precondition(abs(width - targetWidth) < 0.02,
+                                     "Built-in and sampled letters on every line must share the calibrated pen weight")
+                    }
+                }
+                let initial = PKDrawing(strokes: Array(mixed.inserted.strokes.prefix(2))).bounds
+                let ascender = PKDrawing(strokes: Array(mixed.inserted.strokes.dropFirst(2).prefix(2))).bounds
+                precondition(abs(initial.minY - ascender.minY) <= 1 && abs(initial.maxY - ascender.maxY) <= 1,
+                             "The fallback capital and sampled ascender must share a cap height and baseline")
+            }
+        }
         let originalData = original.dataRepresentation()
         let staged = try AutofillLayout.stage(text: "abba abba\nba", drawing: original,
             selection: selection(110), pageCount: 1, samples: samples)

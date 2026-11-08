@@ -18,7 +18,7 @@ nonisolated enum AutofillLayout {
         let letterHeight: CGFloat
         let sampledGlyphCount: Int
         let fallbackGlyphCount: Int
-        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v4" : "note-samples-with-fallback-v6" }
+        var rendering: String { sampledGlyphCount == 0 ? "handwritten-fallback-v5" : "note-samples-with-fallback-v7" }
         var drawing: PKDrawing { PKDrawing(strokes: existing.strokes + inserted.strokes) }
         var bounds: CGRect { lines.reduce(.null) { $0.union($1.frame) } }
     }
@@ -71,13 +71,14 @@ nonisolated enum AutofillLayout {
         let style = AutofillTypography.style(selectedRows.last!, neighbors: selectedRows)
         let size = min(96, max(10, letterHeight ?? anchor?.height ?? style.height))
         let scale = size / HandwritingSample.capHeight
-        // Match actual PencilKit point sizes in document coordinates, independently
-        // of letter height. Scaling a normalized alphabet used to thicken its pen.
+        // Measure the selected pen in document coordinates, including resized ink.
         let nearbyWidths: [CGFloat] = selected.flatMap { stroke -> [CGFloat] in
             let transformScale = hypot(stroke.transform.a, stroke.transform.b)
             return stroke.path.map { $0.size.width * transformScale }
         }.filter { $0.isFinite && $0 > 0 }.sorted()
         let penWidth: CGFloat = nearbyWidths.isEmpty ? 2.5 : nearbyWidths[nearbyWidths.count / 2]
+        // Small letters need room inside loops even when the selected pen is broad.
+        let letterPenWidth = min(penWidth * strokeWidthScale, size / 8)
         var split = anchor?.row.maxY ?? selectedBounds.maxY
         for stroke in drawing.strokes.sorted(by: { $0.renderBounds.minY < $1.renderBounds.minY }) {
             let b = stroke.renderBounds
@@ -105,9 +106,10 @@ nonisolated enum AutofillLayout {
                 stroke.path.map { $0.size.width * hypot(stroke.transform.a, stroke.transform.b) * scale }
             }.filter { $0.isFinite && $0 > 0 }.sorted()
             guard !widths.isEmpty else { continue }
-            // Keep the surrounding pen's character while making every generated
-            // glyph slightly lighter, including fallback letters and symbols.
-            let ratio = (personal.contains(key) ? penWidth / widths[widths.count / 2] : 1) * strokeWidthScale
+            // Handwritten paths describe the center of a pen stroke. Core Text
+            // fallback paths trace both edges of a glyph and use a fine outline.
+            let usesCenterline = personal.contains(key) || HandwrittenFont.letters[key] != nil
+            let ratio = usesCenterline ? letterPenWidth / widths[widths.count / 2] : strokeWidthScale
             decoded[key] = PKDrawing(strokes: glyph.strokes.map { stroke in
                 let points = stroke.path.map { point in
                     PKStrokePoint(location: point.location, timeOffset: point.timeOffset,
