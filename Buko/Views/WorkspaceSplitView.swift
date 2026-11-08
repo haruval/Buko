@@ -92,6 +92,7 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
     var showsDrawingTools = true
     var settingsInDrawingBar = false
     var settingsPopoverEnabled = false
+    var usesClearCoverControls = false
     var combinesHistory = false
     let sources: () -> Void
     var switchPane: (() -> Void)? = nil
@@ -102,8 +103,13 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
     var body: some ToolbarContent {
         if showsNotes {
             ToolbarItem(placement: .navigation) {
-                Button("Notes", systemImage: "sidebar.left", action: notes).accessibilityIdentifier("showNotes")
+                coverControl {
+                    Button("Notes", systemImage: "sidebar.left", action: notes)
+                        .accessibilityIdentifier("showNotes")
+                }
             }
+            .axisBehavior(usesClearCoverControls ? .verticalPreferred : .automatic)
+            .sharedBackgroundVisibility(usesClearCoverControls ? .hidden : .automatic)
         }
         if showsSettings && !settingsInDrawingBar {
             ToolbarItem(placement: .primaryAction) {
@@ -119,44 +125,39 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
         }
         if showsSettings && settingsInDrawingBar {
             ToolbarItem(placement: .bottomBar) {
-                Button("Settings", systemImage: "ellipsis", action: settings)
-                    .accessibilityIdentifier("openSettings")
-                    .popover(isPresented: Binding(
-                        get: { settingsPopoverEnabled && settingsPresented },
-                        set: { settingsPresented = $0 }
-                    ), attachmentAnchor: .rect(.bounds), arrowEdge: .trailing) {
-                        settingsContent()
-                            .presentationCompactAdaptation(.popover)
-                            .onDisappear(perform: settingsDismissed)
-                    }
+                coverControl {
+                    Button("Settings", systemImage: "ellipsis", action: settings)
+                        .accessibilityIdentifier("openSettings")
+                }
+                .popover(isPresented: Binding(
+                    get: { settingsPopoverEnabled && settingsPresented },
+                    set: { settingsPresented = $0 }
+                ), attachmentAnchor: .rect(.bounds), arrowEdge: .trailing) {
+                    settingsContent()
+                        .presentationCompactAdaptation(.popover)
+                        .onDisappear(perform: settingsDismissed)
+                }
             }
             .axisBehavior(.verticalPreferred)
+            .sharedBackgroundVisibility(usesClearCoverControls ? .hidden : .automatic)
             .visibilityPriority(.high)
             ToolbarSpacer(.fixed, placement: .bottomBar)
         }
         if showsDrawingTools {
-            ToolbarItemGroup(placement: .bottomBar) {
-                Button("Pen", systemImage: "pencil.tip") { session.tool = .pen }
-                    .tint(session.tool == .pen ? .accentColor : .primary)
-                    .contextMenu { Toggle("Draw with finger", isOn: $session.allowsFingerDrawing) }
-                Button("Eraser", systemImage: "eraser") { session.tool = .eraser }
-                    .tint(session.tool == .eraser ? .accentColor : .primary)
-                if showsCircle {
-                    // The native vertical toolbar requires an image label; hosting
-                    // a SwiftUI glass view here moves the item to the bottom bar.
-                    Button("Circle intent", image: .circleJelly) { session.tool = .circle }
-                        .tint(CircleAIStyle.green)
-                        .accessibilityLabel("Circle intent")
-                        .accessibilityIdentifier("circleIntentTool")
-                        .accessibilityAddTraits(session.tool == .circle ? [.isSelected] : [])
+            if usesClearCoverControls {
+                ToolbarItem(placement: .bottomBar) {
+                    VStack(spacing: 0) {
+                        drawingButtons
+                        sourceAndHistoryButtons
+                    }
+                    .buttonStyle(CoverToolButtonStyle())
+                    .glassEffect(.clear, in: .capsule)
                 }
-            }
-            ToolbarItemGroup(placement: .bottomBar) {
-                Button("Sources", systemImage: "books.vertical", action: sources).accessibilityIdentifier("lectureSources")
-                if !combinesHistory {
-                    Button("Undo", systemImage: "arrow.uturn.backward", action: session.undo).disabled(!session.canUndo)
-                    Button("Redo", systemImage: "arrow.uturn.forward", action: session.redo).disabled(!session.canRedo)
-                }
+                .axisBehavior(.verticalPreferred)
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItemGroup(placement: .bottomBar) { drawingButtons }
+                ToolbarItemGroup(placement: .bottomBar) { sourceAndHistoryButtons }
             }
         }
         if let switchPane {
@@ -165,6 +166,53 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
                     .accessibilityIdentifier("switchWorkspacePane")
             }
         }
+    }
+
+    @ViewBuilder private func coverControl<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if usesClearCoverControls {
+            content()
+                .buttonStyle(CoverToolButtonStyle())
+                .glassEffect(.clear.interactive(), in: .circle)
+        } else {
+            content()
+        }
+    }
+
+    @ViewBuilder private var drawingButtons: some View {
+        Button("Pen", systemImage: "pencil.tip") { session.tool = .pen }
+            .tint(session.tool == .pen ? .accentColor : .primary)
+            .contextMenu { Toggle("Draw with finger", isOn: $session.allowsFingerDrawing) }
+        Button("Eraser", systemImage: "eraser") { session.tool = .eraser }
+            .tint(session.tool == .eraser ? .accentColor : .primary)
+        if showsCircle {
+            // The native vertical toolbar requires an image label; hosting
+            // a SwiftUI glass view here moves the item to the bottom bar.
+            Button("Circle intent", image: .circleJelly) { session.tool = .circle }
+                .tint(CircleAIStyle.green)
+                .accessibilityLabel("Circle intent")
+                .accessibilityIdentifier("circleIntentTool")
+                .accessibilityAddTraits(session.tool == .circle ? [.isSelected] : [])
+        }
+    }
+
+    @ViewBuilder private var sourceAndHistoryButtons: some View {
+        Button("Sources", systemImage: "books.vertical", action: sources).accessibilityIdentifier("lectureSources")
+        if !combinesHistory {
+            Button("Undo", systemImage: "arrow.uturn.backward", action: session.undo).disabled(!session.canUndo)
+            Button("Redo", systemImage: "arrow.uturn.forward", action: session.redo).disabled(!session.canRedo)
+        }
+    }
+}
+
+private struct CoverToolButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .labelStyle(.iconOnly)
+            .font(.system(size: 19, weight: .medium))
+            .foregroundStyle(.tint)
+            .frame(width: 44, height: 44)
+            .contentShape(.rect)
+            .opacity(configuration.isPressed ? 0.55 : 1)
     }
 }
 
