@@ -144,6 +144,7 @@ struct SettingsPanel: View {
                     Label("Grid", systemImage: "square.grid.3x3")
                         .font(.subheadline)
                 }
+                .toggleStyle(.switch)
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("gridLines")
@@ -174,6 +175,7 @@ struct SettingsPanel: View {
                 Spacer(minLength: 0)
             }
         }
+        .labelStyle(.titleAndIcon)
         .padding(18)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settingsPanel")

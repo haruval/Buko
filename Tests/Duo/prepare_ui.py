@@ -27,14 +27,17 @@ if '--production-ui' in sys.argv:
     (root/'source-manifest.json').write_text(json.dumps({'files': files, 'bundleID': 'dev.buko.DuoUIValidation'}, indent=2))
     sys.exit(0)
 p = root/'Buko/ContentView.swift'; s=p.read_text()
-s=s.replace('    @State private var spatialOriginal:', '    @State private var duoFold = CommandLine.arguments.contains("--duo-fold-fixture") ? 1 : 0\n    @State private var duoCheck = "idle"\n    @State private var spatialOriginal:', 1)
+s=s.replace('    @State private var spatialOriginal:', '    @State private var duoFold = 0\n    @State private var duoCheck = "idle"\n    @State private var spatialOriginal:', 1)
 s=s.replace('                    Button("Load fixture")', '''                    Button("Second note") {
                         createNote()
                         if let note = selectedNote { _ = renameNote(note, to: "Duo second note") }
                     }.accessibilityIdentifier("duoSecond")
                     Button("Append while running") { duoAppend() }.accessibilityIdentifier("duoAppend")
                     Text(duoCheck).font(.system(size: 8)).lineLimit(1).frame(width: 72, alignment: .leading).accessibilityIdentifier("duoCheck")
-                    if CommandLine.arguments.contains("--duo-fold-fixture") { Button("Fold") { duoFold = (duoFold + 1) % 3 }.accessibilityIdentifier("duoFold") }
+                    if CommandLine.arguments.contains("--duo-fold-fixture") {
+                        Button("Book") { duoFold = duoFold == 1 ? 0 : 1 }.accessibilityIdentifier("duoFold")
+                        Button("Table") { duoFold = duoFold == 2 ? 0 : 2 }.accessibilityIdentifier("duoTable")
+                    }
                     Button("Ink") { duoCheckpoint() }.accessibilityIdentifier("duoCheckpoint")
                     Button("Load fixture")''',1)
 s=s.replace('    private func organize(', '''    private func duoCheckpoint() {
@@ -68,7 +71,7 @@ s=s.replace('    private func organize(', '''    private func duoCheckpoint() {
     private func organize(''',1)
 # Synthetic reserved-region inputs exercise the view composition in both fold axes.
 # The real Duo outer-display tests below do not pass this flag.
-s=s.replace('!divisions.isEmpty', '(!divisions.isEmpty || duoFold > 0)')
+s=s.replace('let hasDivision = !divisions.isEmpty', 'let hasDivision = !divisions.isEmpty || CommandLine.arguments.contains("--duo-fold-fixture")')
 s=s.replace('let fold = divisions.first(where: \\.isActive)?.frame', 'let fold = duoFold == 1 ? CGRect(x: outer.size.width / 2 - 20, y: 0, width: 40, height: outer.size.height) : duoFold == 2 ? CGRect(x: 0, y: outer.size.height / 2 - 20, width: outer.size.width, height: 40) : divisions.first(where: \\.isActive)?.frame')
 s=s.replace('let activeFold = geometry.reservedRegions(kind: .division).first?.frame', 'let activeFold = duoFold == 1 ? CGRect(x: geometry.size.width / 2 - 20, y: 0, width: 40, height: geometry.size.height) : duoFold == 2 ? CGRect(x: 0, y: geometry.size.height / 2 - 20, width: geometry.size.width, height: 40) : geometry.reservedRegions(kind: .division).first?.frame')
 # Finger input is enabled only in this isolated copy, so XCTest can deliver real canvas strokes.
@@ -82,13 +85,20 @@ s=s.replace('Button("Check gesture")', 'Button("Gesture")').replace('Button("Che
 s=s.replace('Button("Second note")','Button("Second")').replace('Button("Append while running")','Button("Append")')
 s=s.replace('Button("Load fixture")','Button("Setup")').replace('Button("Circle fixture")','Button("Capture")')
 s=s.replace('}.padding(10).background(.regularMaterial)', '}.font(.system(size: 9)).padding(6).background(.regularMaterial)')
+start = s.index('            VStack(alignment:.leading) {', s.index('return VStack(spacing: 0)'))
+end = s.index('\n        }\n        .onChange', start)
+controls = s[start:end]
+s = s[:start] + '            duoFixtureControls' + s[end:]
+s = s.replace('    private func duoCheckpoint()', '    private var duoFixtureControls: some View {\n' + controls + '\n    }\n\n    private func duoCheckpoint()', 1)
 p.write_text(s)
 # Production now delegates editor/library displacement to the system overlay
 # arrangement. Inject geometry only in the explicit iPad fold fixture; ordinary
 # iPad and actual Duo runs still exercise Apple's native overlay implementation.
 p = root/'Buko/ContentView.swift'; s = p.read_text()
-s = s.replace('.arrangementViewStyle(.overlay.axes(secondContent == nil ? Axis.Set.horizontal.union(.vertical) : .horizontal))',
-    '.arrangementViewStyle(DuoFixtureOverlayStyle(enabled: CommandLine.arguments.contains("--duo-fold-fixture"), fold: duoFold, hasSecond: secondContent != nil))')
+needle = '.arrangementViewStyle(.overlay.axes(manualSplit ? Axis.Set() : Axis.Set.horizontal.union(.vertical)))'
+assert s.count(needle) == 1
+s = s.replace(needle,
+    '.arrangementViewStyle(DuoFixtureOverlayStyle(enabled: CommandLine.arguments.contains("--duo-fold-fixture"), fold: duoFold, hasSecond: manualSplit))')
 s += '''
 private struct DuoFixtureOverlayStyle: ArrangementViewStyle {
     let enabled: Bool
@@ -102,7 +112,7 @@ private struct DuoFixtureOverlayStyle: ArrangementViewStyle {
             }
         } else {
             ArrangementView(configuration)
-                .arrangementViewStyle(.overlay.axes(hasSecond ? .horizontal : Axis.Set.horizontal.union(.vertical)))
+                .arrangementViewStyle(.overlay.axes(hasSecond ? Axis.Set() : Axis.Set.horizontal.union(.vertical)))
         }
     }
 }
@@ -113,11 +123,19 @@ private struct DuoFixtureOverlayLayout: Layout {
         proposal.replacingUnspecifiedDimensions()
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let division: CGRect? = fold == 1 ? CGRect(x: bounds.width / 2 - 20, y: 0, width: 40, height: bounds.height)
+        let division: CGRect? = fold == 1 && !hasSecond ? CGRect(x: bounds.width / 2 - 20, y: 0, width: 40, height: bounds.height)
             : fold == 2 && !hasSecond ? CGRect(x: 0, y: bounds.height / 2 - 20, width: bounds.width, height: 40) : nil
-        let layout = WorkspaceGeometry(size: bounds.size, division: division, compact: false)
         for (index, view) in subviews.enumerated() {
-            let rect = division == nil ? CGRect(origin: .zero, size: bounds.size) : (index == 0 ? layout.second : layout.first)
+            var rect = CGRect(origin: .zero, size: bounds.size)
+            if let division {
+                if fold == 1 {
+                    rect.origin.x = index == 0 ? division.maxX : 0
+                    rect.size.width = (bounds.width - division.width) / 2
+                } else {
+                    rect.origin.y = index == 0 ? division.maxY : 0
+                    rect.size.height = (bounds.height - division.height) / 2
+                }
+            }
             view.place(at: CGPoint(x: bounds.minX + rect.minX, y: bounds.minY + rect.minY), anchor: .topLeading,
                        proposal: ProposedViewSize(rect.size))
         }

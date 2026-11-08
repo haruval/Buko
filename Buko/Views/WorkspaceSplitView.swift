@@ -17,8 +17,9 @@ struct NotebookArrangementStyle: ArrangementViewStyle {
     let geometry: WorkspaceGeometry
     let split: Bool
     let activePane: Int
+    let primaryTrailing: Bool
     func makeBody(configuration: Configuration) -> some View {
-        NotebookPaneLayout(geometry: geometry, split: split, activePane: activePane) {
+        NotebookPaneLayout(geometry: geometry, split: split, activePane: activePane, primaryTrailing: primaryTrailing) {
             configuration.primary
             configuration.secondary
         }
@@ -29,12 +30,14 @@ private struct NotebookPaneLayout: Layout {
     let geometry: WorkspaceGeometry
     let split: Bool
     let activePane: Int
+    let primaryTrailing: Bool
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         for (index, view) in subviews.enumerated() {
-            let frame = split && geometry.canSplit ? (index == 0 ? geometry.first : geometry.second)
+            let trailing = index == (primaryTrailing ? 0 : 1)
+            let frame = split && geometry.canSplit ? (trailing ? geometry.second : geometry.first)
                 : CGRect(origin: index == activePane ? .zero : CGPoint(x: bounds.width + 100, y: 0), size: bounds.size)
             view.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
                        anchor: .topLeading, proposal: ProposedViewSize(frame.size))
@@ -86,35 +89,33 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
     let notes: () -> Void
     let settings: () -> Void
     @Binding var settingsPresented: Bool
-    var settingsDismissed: () -> Void = {}
+    let settingsDismissed: () -> Void
     var showsNotes = true
     var showsSettings = true
     var showsDrawingTools = true
-    var settingsInDrawingBar = false
-    var settingsPopoverEnabled = false
-    var usesClearCoverControls = false
+    var verticalToolbar = false
     var combinesHistory = false
     let sources: () -> Void
-    var switchPane: (() -> Void)? = nil
     var showsPageProgress = false
     @ViewBuilder var pageProgress: () -> PageProgress
     @ViewBuilder var settingsContent: () -> SettingsContent
     @AppStorage("showsGestureTestTools") private var showsCircle = false
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some ToolbarContent {
         if showsNotes {
             ToolbarItem(placement: .navigation) {
-                coverControl {
+                clearControl {
                     Button("Notes", systemImage: "sidebar.left", action: notes)
                         .accessibilityIdentifier("showNotes")
                 }
             }
-            .axisBehavior(usesClearCoverControls ? .verticalPreferred : .automatic)
-            .sharedBackgroundVisibility(usesClearCoverControls ? .hidden : .automatic)
+            .axisBehavior(verticalToolbar ? .verticalPreferred : .automatic)
+            .sharedBackgroundVisibility(.hidden)
         }
-        if showsSettings && !settingsInDrawingBar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Settings", systemImage: "ellipsis", action: settings).accessibilityIdentifier("openSettings")
-            }
+        if showsSettings && !verticalToolbar {
+            ToolbarItem(placement: .primaryAction) { settingsButton }
+                .sharedBackgroundVisibility(.hidden)
         }
         if showsPageProgress {
             ToolbarItem(placement: .bottomBar) { pageProgress() }
@@ -123,59 +124,50 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
                 .visibilityPriority(.high)
             ToolbarSpacer(.fixed, placement: .bottomBar)
         }
-        if showsSettings && settingsInDrawingBar {
+        if showsSettings && verticalToolbar {
             ToolbarItem(placement: .bottomBar) {
-                coverControl {
-                    Button("Settings", systemImage: "ellipsis", action: settings)
-                        .accessibilityIdentifier("openSettings")
-                }
-                .popover(isPresented: Binding(
-                    get: { settingsPopoverEnabled && settingsPresented },
-                    set: { settingsPresented = $0 }
-                ), attachmentAnchor: .rect(.bounds), arrowEdge: .trailing) {
-                    settingsContent()
-                        .presentationCompactAdaptation(.popover)
-                        .onDisappear(perform: settingsDismissed)
-                }
+                // The semantic item supplies the popover's live anchor as the rail moves.
+                Button("Settings", systemImage: "ellipsis", action: settings)
+                    .accessibilityIdentifier("openSettings")
+                    .popover(isPresented: $settingsPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .trailing) {
+                        settingsContent()
+                            .presentationCompactAdaptation(.popover)
+                            .onDisappear(perform: settingsDismissed)
+                    }
             }
             .axisBehavior(.verticalPreferred)
-            .sharedBackgroundVisibility(usesClearCoverControls ? .hidden : .automatic)
             .visibilityPriority(.high)
             ToolbarSpacer(.fixed, placement: .bottomBar)
         }
         if showsDrawingTools {
-            if usesClearCoverControls {
-                ToolbarItem(placement: .bottomBar) {
-                    VStack(spacing: 0) {
-                        drawingButtons
-                        sourceAndHistoryButtons
-                    }
-                    .buttonStyle(CoverToolButtonStyle())
-                    .glassEffect(.clear, in: .capsule)
+            ToolbarItem(placement: .bottomBar) {
+                let layout = verticalToolbar ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+                layout {
+                    drawingButtons
+                    sourceAndHistoryButtons
                 }
-                .axisBehavior(.verticalPreferred)
-                .sharedBackgroundVisibility(.hidden)
-            } else {
-                ToolbarItemGroup(placement: .bottomBar) { drawingButtons }
-                ToolbarItemGroup(placement: .bottomBar) { sourceAndHistoryButtons }
+                .fixedSize()
+                .buttonStyle(NotebookToolButtonStyle())
+                .glassEffect(.clear, in: .capsule)
+                .environment(\.colorScheme, (verticalToolbar ? session.pagePull.rightOverBlack : session.pagePull.bottomOverBlack) ? .dark : colorScheme)
             }
-        }
-        if let switchPane {
-            ToolbarItem(placement: .topBarPinnedTrailing) {
-                Button("Switch pane", systemImage: "rectangle.on.rectangle", action: switchPane)
-                    .accessibilityIdentifier("switchWorkspacePane")
-            }
+            .axisBehavior(verticalToolbar ? .verticalPreferred : .automatic)
+            .sharedBackgroundVisibility(.hidden)
         }
     }
 
-    @ViewBuilder private func coverControl<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        if usesClearCoverControls {
-            content()
-                .buttonStyle(CoverToolButtonStyle())
-                .glassEffect(.clear.interactive(), in: .circle)
-        } else {
-            content()
+    private var settingsButton: some View {
+        clearControl {
+            Button("Settings", systemImage: "ellipsis", action: settings)
+                .accessibilityIdentifier("openSettings")
         }
+    }
+
+    private func clearControl<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .buttonStyle(NotebookToolButtonStyle())
+            .glassEffect(.clear.interactive(), in: .circle)
+            .environment(\.colorScheme, (verticalToolbar ? session.pagePull.rightOverBlack : session.pagePull.topOverBlack) ? .dark : colorScheme)
     }
 
     @ViewBuilder private var drawingButtons: some View {
@@ -204,7 +196,9 @@ struct NotebookToolbar<PageProgress: View, SettingsContent: View>: ToolbarConten
     }
 }
 
-private struct CoverToolButtonStyle: ButtonStyle {
+private struct NotebookToolButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .labelStyle(.iconOnly)
@@ -212,7 +206,7 @@ private struct CoverToolButtonStyle: ButtonStyle {
             .foregroundStyle(.tint)
             .frame(width: 44, height: 44)
             .contentShape(.rect)
-            .opacity(configuration.isPressed ? 0.55 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.55 : 1) : 0.35)
     }
 }
 
